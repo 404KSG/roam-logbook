@@ -19,6 +19,12 @@ crash, or another device all converge on the same answer. Every mutation writes 
 the graph and then re-reads it (`clock.refresh()`), which costs one query per action
 and removes a whole class of desync bugs.
 
+Writes are atomic: clocking looks only at the block being clocked (after resolving
+a bare `((reference))` to its original) and never at its parents. All hierarchy is
+resolved at *read* time in `stats.js`, so re-indenting or moving a task cannot
+invalidate history that is already on disk. Keep it that way — the moment structure
+leaks into what gets written, every later structural edit makes old entries lie.
+
 Layering, innermost first:
 
 - `time.js`, `org.js`, `stats.js` — pure. Timestamp/duration math, the org LOGBOOK
@@ -39,6 +45,11 @@ teach the stub about it or it will throw.
 
 `test/lifecycle.test.js` drives the real onload → interact → onunload path under
 jsdom. It is the only thing that catches mount-path errors, so keep it passing.
+
+Nothing here validates datalog — the stub answers by query *shape*, so a query that
+is well-formed to the stub can still be wrong against Roam. `readHierarchy` leans on
+`:block/refs`, the least certain attribute in use; it degrades to structure-only
+roll-up when the query fails. Verify that one against a real graph.
 
 Test uids must be at least 6 characters: the block-reference regex ignores shorter
 ones, and real Roam uids are 9.

@@ -285,6 +285,30 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+.rlb-tree__cell {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.rlb-tree__branch {
+    opacity: 0.35;
+    flex: 0 0 auto;
+}
+
+.rlb-tree__badge {
+    flex: 0 0 auto;
+    font-size: 10px;
+}
+
+.rlb-tree__total {
+    font-weight: 600;
+}
+
+.rlb-tree__note {
+    margin-top: 8px;
+}
+
 .rlb-task-link {
     padding: 0;
     text-align: left;

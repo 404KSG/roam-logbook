@@ -44,6 +44,23 @@ export function installGraph(blocks = []) {
             }
             return rows;
         }
+        if (datalog.includes(':find ?uid ?parent-uid')) {
+            const wanted = new Set(args[0]);
+            return [...store.values()]
+                .filter(block => wanted.has(block.uid) && block.parent && store.has(block.parent))
+                .map(block => [block.uid, block.parent, store.get(block.parent).string]);
+        }
+        if (datalog.includes(':find ?target-uid ?mirror-uid')) {
+            // Stands in for `:block/refs`: any block whose text mentions ((uid)).
+            const wanted = new Set(args[0]);
+            const rows = [];
+            for (const block of store.values()) {
+                for (const [, refUid] of block.string.matchAll(/\(\(([a-zA-Z0-9_-]+)\)\)/g)) {
+                    if (wanted.has(refUid)) rows.push([refUid, block.uid, block.string]);
+                }
+            }
+            return rows;
+        }
         if (datalog.includes(':find ?title')) {
             const block = store.get(args[0]);
             return block ? [[block.page]] : [];

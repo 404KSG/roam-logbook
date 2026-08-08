@@ -274,6 +274,53 @@ function readAllEntries() {
   entries.sort((a, b) => b.start.getTime() - a.start.getTime());
   return entries;
 }
+var MAX_ANCESTOR_DEPTH = 24;
+var PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
+  :in $ [?uid ...]
+  :where
+  [?b :block/uid ?uid]
+  [?p :block/children ?b]
+  [?p :block/uid ?parent-uid]
+  [?p :block/string ?parent-string]]`;
+var MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
+  :in $ [?target-uid ...]
+  :where
+  [?t :block/uid ?target-uid]
+  [?m :block/refs ?t]
+  [?m :block/uid ?mirror-uid]
+  [?m :block/string ?mirror-string]]`;
+function readHierarchy(taskUids) {
+  const parentOf = {};
+  const stringOf = {};
+  const mirrorsOf = {};
+  const seeds = new Set(taskUids);
+  if (seeds.size === 0)
+    return { parentOf, stringOf, mirrorsOf };
+  try {
+    for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...taskUids])) {
+      if (referencedBlockUid(mirrorString) !== targetUid)
+        continue;
+      (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
+      stringOf[mirrorUid] = mirrorString;
+      seeds.add(mirrorUid);
+    }
+  } catch (error) {
+    console.warn("[roam-logbook] block references unavailable for roll-up", error);
+  }
+  let frontier = [...seeds];
+  for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
+    const next = [];
+    for (const [uid, parentUid, parentString] of query(PARENTS_QUERY, frontier)) {
+      parentOf[uid] = parentUid;
+      if (parentUid in stringOf)
+        continue;
+      stringOf[parentUid] = parentString;
+      next.push(parentUid);
+    }
+    frontier = next;
+  }
+  return { parentOf, stringOf, mirrorsOf };
+}
 
 // src/settings.js
 var SETTING_TOPBAR = "showTopbarWidget";
@@ -462,6 +509,7 @@ function removeStyles(id) {
 }
 
 // src/stats.js
+var EMPTY_HIERARCHY = { parentOf: {}, stringOf: {}, mirrorsOf: {} };
 var RANGES = [
   { id: "today", label: "Today", days: 1 },
   { id: "week", label: "Last 7 days", days: 7 },
@@ -525,15 +573,112 @@ function summariseByDay(entries, now, days) {
   }
   return series;
 }
-function buildDashboard(entries, { now, rangeId }) {
+var MAX_WALK = 50;
+function nearestTaskAncestor(uid, { parentOf, stringOf }) {
+  let current = parentOf[uid];
+  for (let steps = 0; current && steps < MAX_WALK; steps += 1) {
+    if (isTaskBlock(stringOf[current]))
+      return current;
+    current = parentOf[current];
+  }
+  return null;
+}
+function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
+  const nodes = /* @__PURE__ */ new Map();
+  for (const row of taskRows) {
+    nodes.set(row.taskUid, { ...row, own: row.minutes, children: [], parents: /* @__PURE__ */ new Set() });
+  }
+  const pending = [...nodes.keys()];
+  while (pending.length > 0) {
+    const uid = pending.shift();
+    const parents = /* @__PURE__ */ new Set();
+    const structural = nearestTaskAncestor(uid, hierarchy);
+    if (structural)
+      parents.add(structural);
+    for (const mirrorUid of hierarchy.mirrorsOf[uid] || []) {
+      const viaReference = nearestTaskAncestor(mirrorUid, hierarchy);
+      if (viaReference)
+        parents.add(viaReference);
+    }
+    for (const parentUid of parents) {
+      if (parentUid === uid)
+        continue;
+      if (!nodes.has(parentUid)) {
+        nodes.set(parentUid, {
+          taskUid: parentUid,
+          title: taskTitle(hierarchy.stringOf[parentUid]),
+          pageTitle: null,
+          minutes: 0,
+          own: 0,
+          sessions: 0,
+          running: false,
+          children: [],
+          parents: /* @__PURE__ */ new Set()
+        });
+        pending.push(parentUid);
+      }
+      nodes.get(uid).parents.add(parentUid);
+      const siblings = nodes.get(parentUid).children;
+      if (!siblings.includes(uid))
+        siblings.push(uid);
+    }
+  }
+  const expand = (uid, path) => {
+    const node = nodes.get(uid);
+    const base = {
+      taskUid: node.taskUid,
+      title: node.title,
+      pageTitle: node.pageTitle,
+      own: node.own,
+      sessions: node.sessions,
+      running: node.running,
+      occurrences: node.parents.size
+    };
+    if (path.has(uid))
+      return { ...base, total: node.own, children: [], truncated: true };
+    const nextPath = new Set(path).add(uid);
+    const children = node.children.map((childUid) => expand(childUid, nextPath)).sort((a, b) => b.total - a.total);
+    return {
+      ...base,
+      total: node.own + children.reduce((sum, child) => sum + child.total, 0),
+      children,
+      truncated: false
+    };
+  };
+  const forest = [];
+  const covered = /* @__PURE__ */ new Set();
+  const addRoot = (uid) => {
+    const tree = expand(uid, /* @__PURE__ */ new Set());
+    forest.push(tree);
+    (function cover(node) {
+      covered.add(node.taskUid);
+      node.children.forEach(cover);
+    })(tree);
+  };
+  for (const [uid, node] of nodes)
+    if (node.parents.size === 0)
+      addRoot(uid);
+  for (const uid of nodes.keys())
+    if (!covered.has(uid))
+      addRoot(uid);
+  return forest.sort((a, b) => b.total - a.total);
+}
+function flattenForest(forest, depth = 0) {
+  return forest.flatMap((node) => [{ ...node, depth }, ...flattenForest(node.children, depth + 1)]);
+}
+function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) {
   const inRange = filterByRange(entries, rangeId, now);
+  const tasks = summariseByTask(inRange, now);
   return {
     rangeId,
     entries: inRange,
+    // Summed from entries, so this stays the honest figure even when the tree
+    // shows the same task under more than one parent.
     totalMinutes: totalMinutes(inRange, now),
     todayMinutes: totalMinutes(filterByRange(entries, "today", now), now),
     weekMinutes: totalMinutes(filterByRange(entries, "week", now), now),
-    tasks: summariseByTask(inRange, now),
+    tasks,
+    tree: buildTaskForest(tasks, hierarchy),
     days: summariseByDay(inRange, now, getRange(rangeId).days ?? 30),
     running: entries.filter((entry) => entry.running)
   };
@@ -554,7 +699,9 @@ function createDashboard() {
     if (!bodyNode)
       return;
     const now = /* @__PURE__ */ new Date();
-    const model = buildDashboard(readAllEntries(), { now, rangeId });
+    const entries = readAllEntries();
+    const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
+    const model = buildDashboard(entries, { now, rangeId, hierarchy });
     bodyNode.replaceChildren();
     bodyNode.appendChild(
       statsRow([
@@ -574,7 +721,7 @@ function createDashboard() {
       return;
     }
     bodyNode.appendChild(daysSection(model.days));
-    bodyNode.appendChild(tasksSection(model.tasks));
+    bodyNode.appendChild(tasksSection(model.tree));
   };
   const statsRow = (pairs) => {
     const wrapper = el("div", "rlb-stats");
@@ -651,26 +798,49 @@ function createDashboard() {
     );
     return section;
   };
-  const tasksSection = (tasks) => {
+  const tasksSection = (tree) => {
+    const rows = flattenForest(tree);
+    const nested = rows.some((node) => node.depth > 0);
     const section = el("section", "rlb-section");
     section.appendChild(el("h3", "rlb-section__title", "By task"));
     const table = el("table", "rlb-table");
-    table.appendChild(headerRow(["Task", "Page", "Sessions", "Total"]));
+    table.appendChild(headerRow(["Task", "Sessions", "Own", "Total"]));
     const tbody = el("tbody");
-    for (const task of tasks) {
+    for (const node of rows) {
       const row = el("tr");
-      const name = el("td");
-      name.appendChild(taskLink(task.title, task.taskUid));
+      const name = el("td", "rlb-tree__cell");
+      name.style.paddingLeft = `${8 + node.depth * 18}px`;
+      if (node.depth > 0)
+        name.appendChild(el("span", "rlb-tree__branch", "\u2514"));
+      name.appendChild(taskLink(node.title, node.taskUid));
+      if (node.occurrences > 1) {
+        const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
+        badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
+        name.appendChild(badge);
+      }
+      if (node.truncated) {
+        name.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
+      }
+      const own = node.own > 0 ? formatMinutesHuman(node.own) : "";
       row.append(
         name,
-        el("td", "rlb-muted", task.pageTitle || ""),
-        el("td", "rlb-table__num", String(task.sessions)),
-        el("td", "rlb-table__num", formatMinutesHuman(task.minutes))
+        el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
+        el("td", "rlb-table__num rlb-muted", own),
+        el("td", "rlb-table__num rlb-tree__total", formatMinutesHuman(node.total))
       );
       tbody.appendChild(row);
     }
     table.appendChild(tbody);
     section.appendChild(table);
+    if (nested) {
+      section.appendChild(
+        el(
+          "div",
+          "rlb-muted bp3-text-small rlb-tree__note",
+          "Total includes sub-tasks, so rows overlap \u2014 the figures above are counted once each."
+        )
+      );
+    }
     return section;
   };
   const headerRow = (labels) => {
@@ -1057,6 +1227,30 @@ var STYLES = `
 .rlb-table__num {
     text-align: right;
     white-space: nowrap;
+}
+
+.rlb-tree__cell {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.rlb-tree__branch {
+    opacity: 0.35;
+    flex: 0 0 auto;
+}
+
+.rlb-tree__badge {
+    flex: 0 0 auto;
+    font-size: 10px;
+}
+
+.rlb-tree__total {
+    font-weight: 600;
+}
+
+.rlb-tree__note {
+    margin-top: 8px;
 }
 
 .rlb-task-link {

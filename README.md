@@ -16,7 +16,31 @@ Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer und
 
 **Topbar** — a live counter shows the running session. Click it for the list of open clocks, where each one can be stopped, thrown away, or jumped to.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. Totals for today and the last 7 days, a per-day bar row, and a per-task breakdown over the range you pick.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. Totals for today and the last 7 days, a per-day bar row, and a per-task tree over the range you pick.
+
+### Sub-tasks
+
+Clocking only ever looks at the block you clocked — the drawer goes on that block and nowhere else. Structure is a *reporting* concern, resolved when the dashboard is drawn, so moving a sub-task or re-indenting it never invalidates the history already recorded.
+
+The **By task** tree nests sub-tasks under their parent and shows two figures:
+
+```
+                Sessions   Own     Total
+发布 v1             1      1h 00m  4h 00m
+  └ 写文档          1      2h 00m  2h 00m
+  └ 打包发布  ×2    1      1h 00m  1h 00m
+冲刺周报                           1h 00m
+  └ 打包发布  ×2    1      1h 00m  1h 00m
+```
+
+- **Own** is time clocked directly on that block, **Total** includes everything below it. A parent with no sessions of its own still appears, carrying its children's time.
+- Plain blocks between two tasks are not levels — a note or a heading under a TODO is context, not a unit of work.
+- A task nested under a parent by a bare `((reference))` rolls up there too, which is how a task on its own page gets counted toward a project that merely links it. A block that just *mentions* the task in a sentence does not adopt it.
+- That makes several parents possible, so a task can appear more than once, tagged `×N`. Those rows overlap by design — the headline figures at the top are summed from sessions and count each one exactly once, so they always stay the honest total.
+
+### Multiple clocks and double counting
+
+Nothing stops you clocking a parent and one of its sub-tasks at the same time; both are real sessions and both are counted. Avoiding it is left to you.
 
 ### Block references
 

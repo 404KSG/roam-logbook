@@ -7,9 +7,9 @@
 
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
-import { readAllEntries } from './entries.js';
+import { readAllEntries, readHierarchy } from './entries.js';
 import { openBlock } from './roam.js';
-import { buildDashboard, findStaleClocks, getRange, RANGES } from './stats.js';
+import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
 import { staleHours } from './settings.js';
 import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
 
@@ -24,7 +24,9 @@ export function createDashboard() {
     const render = () => {
         if (!bodyNode) return;
         const now = new Date();
-        const model = buildDashboard(readAllEntries(), { now, rangeId });
+        const entries = readAllEntries();
+        const hierarchy = readHierarchy([...new Set(entries.map(entry => entry.taskUid))]);
+        const model = buildDashboard(entries, { now, rangeId, hierarchy });
         bodyNode.replaceChildren();
 
         bodyNode.appendChild(
@@ -48,7 +50,7 @@ export function createDashboard() {
         }
 
         bodyNode.appendChild(daysSection(model.days));
-        bodyNode.appendChild(tasksSection(model.tasks));
+        bodyNode.appendChild(tasksSection(model.tree));
     };
 
     const statsRow = pairs => {
@@ -134,26 +136,54 @@ export function createDashboard() {
         return section;
     };
 
-    const tasksSection = tasks => {
+    const tasksSection = tree => {
+        const rows = flattenForest(tree);
+        const nested = rows.some(node => node.depth > 0);
+
         const section = el('section', 'rlb-section');
         section.appendChild(el('h3', 'rlb-section__title', 'By task'));
         const table = el('table', 'rlb-table');
-        table.appendChild(headerRow(['Task', 'Page', 'Sessions', 'Total']));
+        table.appendChild(headerRow(['Task', 'Sessions', 'Own', 'Total']));
+
         const tbody = el('tbody');
-        for (const task of tasks) {
+        for (const node of rows) {
             const row = el('tr');
-            const name = el('td');
-            name.appendChild(taskLink(task.title, task.taskUid));
+            const name = el('td', 'rlb-tree__cell');
+            name.style.paddingLeft = `${8 + node.depth * 18}px`;
+            if (node.depth > 0) name.appendChild(el('span', 'rlb-tree__branch', '└'));
+            name.appendChild(taskLink(node.title, node.taskUid));
+            // A task reachable from more than one parent is counted under each of
+            // them; say so on the row rather than let the columns look wrong.
+            if (node.occurrences > 1) {
+                const badge = el('span', 'bp3-tag bp3-minimal rlb-tree__badge', `×${node.occurrences}`);
+                badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
+                name.appendChild(badge);
+            }
+            if (node.truncated) {
+                name.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
+            }
+
+            const own = node.own > 0 ? formatMinutesHuman(node.own) : '';
             row.append(
                 name,
-                el('td', 'rlb-muted', task.pageTitle || ''),
-                el('td', 'rlb-table__num', String(task.sessions)),
-                el('td', 'rlb-table__num', formatMinutesHuman(task.minutes))
+                el('td', 'rlb-table__num rlb-muted', node.sessions ? String(node.sessions) : ''),
+                el('td', 'rlb-table__num rlb-muted', own),
+                el('td', 'rlb-table__num rlb-tree__total', formatMinutesHuman(node.total))
             );
             tbody.appendChild(row);
         }
         table.appendChild(tbody);
         section.appendChild(table);
+
+        if (nested) {
+            section.appendChild(
+                el(
+                    'div',
+                    'rlb-muted bp3-text-small rlb-tree__note',
+                    'Total includes sub-tasks, so rows overlap — the figures above are counted once each.'
+                )
+            );
+        }
         return section;
     };
 
