@@ -291,9 +291,37 @@ export const STYLES = `
     gap: 4px;
 }
 
-.rlb-tree__branch {
-    opacity: 0.35;
+.rlb-section__heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.rlb-section__heading .rlb-section__title {
+    margin: 0;
+}
+
+.rlb-tree__toggle {
     flex: 0 0 auto;
+    width: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0;
+    opacity: 0.6;
+}
+
+.rlb-tree__toggle:hover {
+    opacity: 1;
+}
+
+.rlb-tree__toggle--empty {
+    display: inline-block;
+}
+
+.rlb-tree__hidden {
+    flex: 0 0 auto;
+    font-size: 11px;
 }
 
 .rlb-tree__badge {

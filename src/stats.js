@@ -207,9 +207,19 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     return forest.sort((a, b) => b.total - a.total);
 }
 
-/** Depth-first flattening, for rendering the tree as indented table rows. */
-export function flattenForest(forest, depth = 0) {
-    return forest.flatMap(node => [{ ...node, depth }, ...flattenForest(node.children, depth + 1)]);
+/**
+ * Depth-first flattening, for rendering the tree as indented table rows.
+ *
+ * @param {object} [options]
+ * @param {(node: object) => boolean} [options.isCollapsed] hides a node's
+ *   descendants without hiding the node itself
+ */
+export function flattenForest(forest, options = {}, depth = 0) {
+    return forest.flatMap(node => {
+        const collapsed = node.children.length > 0 && Boolean(options.isCollapsed?.(node));
+        const row = { ...node, depth, collapsed, hasChildren: node.children.length > 0 };
+        return collapsed ? [row] : [row, ...flattenForest(node.children, options, depth + 1)];
+    });
 }
 
 /** Everything the dashboard renders, computed in one pass. */

@@ -114,6 +114,68 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
 });
 
+test('the task tree collapses and expands from the caret', () => {
+    // Give the tracked task a sub-task with time of its own.
+    graph.store.set('steps00001', {
+        uid: 'steps00001',
+        string: 'Steps::',
+        parent: 'taskone01',
+        order: 5,
+        page: 'Test Page',
+    });
+    graph.store.set('subtask001', {
+        uid: 'subtask001',
+        string: '{{[[TODO]]}} a sub task',
+        parent: 'steps00001',
+        order: 0,
+        page: 'Test Page',
+    });
+    graph.store.set('drawer0001', {
+        uid: 'drawer0001',
+        string: 'LOGBOOK::',
+        parent: 'subtask001',
+        order: 0,
+        page: 'Test Page',
+    });
+    graph.store.set('clock00001', {
+        uid: 'clock00001',
+        string: 'CLOCK:: [2026-08-08 Sat 09:00]--[2026-08-08 Sat 10:00] => 1:00',
+        parent: 'drawer0001',
+        order: 0,
+        page: 'Test Page',
+    });
+
+    paletteCommands.get('Logbook: Open dashboard')();
+
+    const taskRows = () => [...dialog().querySelectorAll('.rlb-tree__cell')].map(cell => cell.textContent);
+    assert.equal(taskRows().length, 2, 'parent and sub-task both listed');
+
+    const caret = dialog().querySelector('.rlb-tree__toggle');
+    assert.equal(caret.getAttribute('aria-expanded'), 'true');
+    caret.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+
+    assert.equal(taskRows().length, 1, 'the sub-task row is hidden');
+    assert.match(taskRows()[0], /\+1 sub-task/);
+    assert.equal(dialog().querySelector('.rlb-tree__toggle').getAttribute('aria-expanded'), 'false');
+
+    dialog().querySelector('.rlb-tree__toggle').dispatchEvent(
+        new dom.window.MouseEvent('click', { bubbles: true })
+    );
+    assert.equal(taskRows().length, 2, 'expanding brings it back');
+});
+
+test('collapsed state survives a re-render', () => {
+    dialog().querySelector('.rlb-tree__toggle').dispatchEvent(
+        new dom.window.MouseEvent('click', { bubbles: true })
+    );
+    // Changing the range rebuilds the body from scratch.
+    const select = dialog().querySelector('select');
+    select.value = 'all';
+    select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+
+    assert.equal(dialog().querySelectorAll('.rlb-tree__cell').length, 1, 'still collapsed');
+});
+
 test('Escape closes the dashboard', () => {
     document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     assert.ok(!dialog().classList.contains('rlb-root--open'));

@@ -667,8 +667,12 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
       addRoot(uid);
   return forest.sort((a, b) => b.total - a.total);
 }
-function flattenForest(forest, depth = 0) {
-  return forest.flatMap((node) => [{ ...node, depth }, ...flattenForest(node.children, depth + 1)]);
+function flattenForest(forest, options = {}, depth = 0) {
+  return forest.flatMap((node) => {
+    const collapsed = node.children.length > 0 && Boolean(options.isCollapsed?.(node));
+    const row = { ...node, depth, collapsed, hasChildren: node.children.length > 0 };
+    return collapsed ? [row] : [row, ...flattenForest(node.children, options, depth + 1)];
+  });
 }
 function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) {
   const inRange = filterByRange(entries, rangeId, now);
@@ -699,6 +703,7 @@ function createDashboard() {
   let bodyNode = null;
   let rangeId = "week";
   let returnFocusTo = null;
+  const collapsed = /* @__PURE__ */ new Set();
   const render = () => {
     if (!bodyNode)
       return;
@@ -805,39 +810,82 @@ function createDashboard() {
     return section;
   };
   const tasksSection = (tree) => {
-    const rows = flattenForest(tree);
-    const nested = rows.some((node) => node.depth > 0);
+    const everyRow = flattenForest(tree);
+    const parentUids = everyRow.filter((node) => node.hasChildren).map((node) => node.taskUid);
+    const nested = everyRow.some((node) => node.depth > 0);
     const section = el("section", "rlb-section");
-    section.appendChild(el("h3", "rlb-section__title", "By task"));
-    const table = el("table", "rlb-table");
-    table.appendChild(headerRow(["Task", "Sessions", "Own", "Total"]));
-    const tbody = el("tbody");
-    for (const node of rows) {
-      const row = el("tr");
-      const name = el("td", "rlb-tree__cell");
-      name.style.paddingLeft = `${8 + node.depth * 18}px`;
-      if (node.depth > 0)
-        name.appendChild(el("span", "rlb-tree__branch", "\u2514"));
-      name.appendChild(taskLink(node.title, node.taskUid));
-      if (node.occurrences > 1) {
-        const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
-        badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-        name.appendChild(badge);
+    const heading = el("div", "rlb-section__heading");
+    heading.appendChild(el("h3", "rlb-section__title", "By task"));
+    const toggleAll = button("bp3-button bp3-minimal bp3-small", "", () => {
+      const anyExpanded = parentUids.some((uid) => !collapsed.has(uid));
+      if (anyExpanded)
+        for (const uid of parentUids)
+          collapsed.add(uid);
+      else
+        collapsed.clear();
+      paint();
+    });
+    if (parentUids.length > 0)
+      heading.appendChild(toggleAll);
+    section.appendChild(heading);
+    const tableHost = el("div");
+    section.appendChild(tableHost);
+    function paint() {
+      const rows = flattenForest(tree, { isCollapsed: (node) => collapsed.has(node.taskUid) });
+      const anyExpanded = parentUids.some((uid) => !collapsed.has(uid));
+      toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
+      const table = el("table", "rlb-table");
+      table.appendChild(headerRow(["Task", "Sessions", "Own", "Total"]));
+      const tbody = el("tbody");
+      for (const node of rows) {
+        const row = el("tr");
+        const name = el("td", "rlb-tree__cell");
+        name.style.paddingLeft = `${8 + node.depth * 20}px`;
+        if (node.hasChildren) {
+          const caret = button(
+            `bp3-button bp3-minimal bp3-small rlb-tree__toggle bp3-icon-chevron-${node.collapsed ? "right" : "down"}`,
+            "",
+            () => {
+              if (collapsed.has(node.taskUid))
+                collapsed.delete(node.taskUid);
+              else
+                collapsed.add(node.taskUid);
+              paint();
+            },
+            { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
+          );
+          caret.setAttribute("aria-expanded", String(!node.collapsed));
+          name.appendChild(caret);
+        } else {
+          name.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
+        }
+        name.appendChild(taskLink(node.title, node.taskUid));
+        if (node.occurrences > 1) {
+          const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
+          badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
+          name.appendChild(badge);
+        }
+        if (node.truncated) {
+          name.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
+        }
+        if (node.collapsed) {
+          const hidden = countDescendants(node);
+          name.appendChild(
+            el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
+          );
+        }
+        row.append(
+          name,
+          el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
+          el("td", "rlb-table__num rlb-muted", node.own > 0 ? formatMinutesHuman(node.own) : ""),
+          el("td", "rlb-table__num rlb-tree__total", formatMinutesHuman(node.total))
+        );
+        tbody.appendChild(row);
       }
-      if (node.truncated) {
-        name.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
-      }
-      const own = node.own > 0 ? formatMinutesHuman(node.own) : "";
-      row.append(
-        name,
-        el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
-        el("td", "rlb-table__num rlb-muted", own),
-        el("td", "rlb-table__num rlb-tree__total", formatMinutesHuman(node.total))
-      );
-      tbody.appendChild(row);
+      table.appendChild(tbody);
+      tableHost.replaceChildren(table);
     }
-    table.appendChild(tbody);
-    section.appendChild(table);
+    paint();
     if (nested) {
       section.appendChild(
         el(
@@ -849,6 +897,7 @@ function createDashboard() {
     }
     return section;
   };
+  const countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
   const headerRow = (labels) => {
     const thead = el("thead");
     const row = el("tr");
@@ -1241,9 +1290,37 @@ var STYLES = `
     gap: 4px;
 }
 
-.rlb-tree__branch {
-    opacity: 0.35;
+.rlb-section__heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.rlb-section__heading .rlb-section__title {
+    margin: 0;
+}
+
+.rlb-tree__toggle {
     flex: 0 0 auto;
+    width: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0;
+    opacity: 0.6;
+}
+
+.rlb-tree__toggle:hover {
+    opacity: 1;
+}
+
+.rlb-tree__toggle--empty {
+    display: inline-block;
+}
+
+.rlb-tree__hidden {
+    flex: 0 0 auto;
+    font-size: 11px;
 }
 
 .rlb-tree__badge {

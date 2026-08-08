@@ -20,6 +20,9 @@ export function createDashboard() {
     let bodyNode = null;
     let rangeId = 'week';
     let returnFocusTo = null;
+    // Kept across re-renders and reopens, keyed by task: changing the range or
+    // clocking out should not throw away how the user arranged the tree.
+    const collapsed = new Set();
 
     const render = () => {
         if (!bodyNode) return;
@@ -141,43 +144,92 @@ export function createDashboard() {
     };
 
     const tasksSection = tree => {
-        const rows = flattenForest(tree);
-        const nested = rows.some(node => node.depth > 0);
+        const everyRow = flattenForest(tree);
+        const parentUids = everyRow.filter(node => node.hasChildren).map(node => node.taskUid);
+        const nested = everyRow.some(node => node.depth > 0);
 
         const section = el('section', 'rlb-section');
-        section.appendChild(el('h3', 'rlb-section__title', 'By task'));
-        const table = el('table', 'rlb-table');
-        table.appendChild(headerRow(['Task', 'Sessions', 'Own', 'Total']));
+        const heading = el('div', 'rlb-section__heading');
+        heading.appendChild(el('h3', 'rlb-section__title', 'By task'));
 
-        const tbody = el('tbody');
-        for (const node of rows) {
-            const row = el('tr');
-            const name = el('td', 'rlb-tree__cell');
-            name.style.paddingLeft = `${8 + node.depth * 18}px`;
-            if (node.depth > 0) name.appendChild(el('span', 'rlb-tree__branch', '└'));
-            name.appendChild(taskLink(node.title, node.taskUid));
-            // A task reachable from more than one parent is counted under each of
-            // them; say so on the row rather than let the columns look wrong.
-            if (node.occurrences > 1) {
-                const badge = el('span', 'bp3-tag bp3-minimal rlb-tree__badge', `×${node.occurrences}`);
-                badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-                name.appendChild(badge);
-            }
-            if (node.truncated) {
-                name.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
+        const toggleAll = button('bp3-button bp3-minimal bp3-small', '', () => {
+            const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
+            if (anyExpanded) for (const uid of parentUids) collapsed.add(uid);
+            else collapsed.clear();
+            paint();
+        });
+        if (parentUids.length > 0) heading.appendChild(toggleAll);
+        section.appendChild(heading);
+
+        const tableHost = el('div');
+        section.appendChild(tableHost);
+
+        function paint() {
+            const rows = flattenForest(tree, { isCollapsed: node => collapsed.has(node.taskUid) });
+            const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
+            toggleAll.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
+
+            const table = el('table', 'rlb-table');
+            table.appendChild(headerRow(['Task', 'Sessions', 'Own', 'Total']));
+            const tbody = el('tbody');
+
+            for (const node of rows) {
+                const row = el('tr');
+                const name = el('td', 'rlb-tree__cell');
+                name.style.paddingLeft = `${8 + node.depth * 20}px`;
+
+                if (node.hasChildren) {
+                    const caret = button(
+                        `bp3-button bp3-minimal bp3-small rlb-tree__toggle bp3-icon-chevron-${
+                            node.collapsed ? 'right' : 'down'
+                        }`,
+                        '',
+                        () => {
+                            if (collapsed.has(node.taskUid)) collapsed.delete(node.taskUid);
+                            else collapsed.add(node.taskUid);
+                            paint();
+                        },
+                        { title: node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks' }
+                    );
+                    caret.setAttribute('aria-expanded', String(!node.collapsed));
+                    name.appendChild(caret);
+                } else {
+                    // Keeps every title on the same left edge, caret or not.
+                    name.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
+                }
+
+                name.appendChild(taskLink(node.title, node.taskUid));
+                // A task reachable from more than one parent is counted under each
+                // of them; say so on the row rather than let the columns look wrong.
+                if (node.occurrences > 1) {
+                    const badge = el('span', 'bp3-tag bp3-minimal rlb-tree__badge', `×${node.occurrences}`);
+                    badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
+                    name.appendChild(badge);
+                }
+                if (node.truncated) {
+                    name.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
+                }
+                if (node.collapsed) {
+                    const hidden = countDescendants(node);
+                    name.appendChild(
+                        el('span', 'rlb-muted rlb-tree__hidden', `+${hidden} sub-task${hidden > 1 ? 's' : ''}`)
+                    );
+                }
+
+                row.append(
+                    name,
+                    el('td', 'rlb-table__num rlb-muted', node.sessions ? String(node.sessions) : ''),
+                    el('td', 'rlb-table__num rlb-muted', node.own > 0 ? formatMinutesHuman(node.own) : ''),
+                    el('td', 'rlb-table__num rlb-tree__total', formatMinutesHuman(node.total))
+                );
+                tbody.appendChild(row);
             }
 
-            const own = node.own > 0 ? formatMinutesHuman(node.own) : '';
-            row.append(
-                name,
-                el('td', 'rlb-table__num rlb-muted', node.sessions ? String(node.sessions) : ''),
-                el('td', 'rlb-table__num rlb-muted', own),
-                el('td', 'rlb-table__num rlb-tree__total', formatMinutesHuman(node.total))
-            );
-            tbody.appendChild(row);
+            table.appendChild(tbody);
+            tableHost.replaceChildren(table);
         }
-        table.appendChild(tbody);
-        section.appendChild(table);
+
+        paint();
 
         if (nested) {
             section.appendChild(
@@ -190,6 +242,9 @@ export function createDashboard() {
         }
         return section;
     };
+
+    const countDescendants = node =>
+        node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 
     const headerRow = labels => {
         const thead = el('thead');

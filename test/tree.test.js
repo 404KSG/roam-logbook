@@ -172,3 +172,35 @@ test('children are ordered by total, not by own time', () => {
 
     assert.deepEqual(forest[0].children.map(node => node.title), ['heavy', 'light']);
 });
+
+test('flattening hides the descendants of a collapsed node', () => {
+    const forest = buildTaskForest(
+        [row('parent', 'p', 0), row('childA', 'a', 10), row('grandkid', 'g', 5)],
+        hierarchy([
+            ['parent', null, TODO('p')],
+            ['childA', 'parent', TODO('a')],
+            ['grandkid', 'childA', TODO('g')],
+        ])
+    );
+
+    const all = flattenForest(forest);
+    assert.deepEqual(all.map(node => node.title), ['p', 'a', 'g']);
+    assert.deepEqual(all.map(node => node.hasChildren), [true, true, false]);
+
+    // Collapsing the root hides the whole branch but keeps the root itself.
+    const collapsedRoot = flattenForest(forest, { isCollapsed: node => node.taskUid === 'parent' });
+    assert.deepEqual(collapsedRoot.map(node => node.title), ['p']);
+    assert.equal(collapsedRoot[0].collapsed, true);
+    assert.equal(collapsedRoot[0].total, 15, 'a collapsed row still reports the rolled-up total');
+
+    // Collapsing mid-tree keeps everything above it visible.
+    const collapsedMid = flattenForest(forest, { isCollapsed: node => node.taskUid === 'childA' });
+    assert.deepEqual(collapsedMid.map(node => node.title), ['p', 'a']);
+});
+
+test('a leaf is never reported as collapsed', () => {
+    const forest = buildTaskForest([row('solo', 'solo', 10)]);
+    const [node] = flattenForest(forest, { isCollapsed: () => true });
+    assert.equal(node.collapsed, false);
+    assert.equal(node.hasChildren, false);
+});
