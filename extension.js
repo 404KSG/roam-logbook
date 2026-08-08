@@ -1011,24 +1011,47 @@ var STYLES = `
     display: flex;
     align-items: center;
     position: relative;
+    min-width: 0;
 }
 
 .rlb-topbar__button {
     display: flex;
     align-items: center;
     gap: 6px;
-    max-width: 260px;
+    /* A long task name must never widen the widget into Roam's own controls.
+       Scales down with the window so a narrow graph view stays usable. */
+    max-width: min(280px, 30vw);
+    overflow: hidden;
     font-variant-numeric: tabular-nums;
 }
 
+.rlb-topbar__button > .bp3-icon,
+.rlb-topbar__button > .rlb-dot {
+    flex: 0 0 auto;
+}
+
+.rlb-topbar__labels {
+    display: flex;
+    align-items: center;
+    /* Without this the labels box refuses to shrink below its text, the button
+       blows past max-width, and the ellipsis below never gets a chance to apply. */
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* The counter is the point of the widget, so it is the one thing that never shrinks. */
+.rlb-topbar__time {
+    flex: 0 0 auto;
+    font-weight: 600;
+}
+
+/* The title is what gives way, down to an ellipsis. */
 .rlb-topbar__label {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.rlb-topbar__time {
-    font-weight: 600;
 }
 
 .rlb-topbar__button--running {
@@ -1068,7 +1091,7 @@ var STYLES = `
 .rlb-popover {
     position: fixed;
     z-index: 30;
-    width: 340px;
+    width: min(340px, calc(100vw - 16px));
     max-height: 70vh;
     overflow-y: auto;
     padding: 8px;
@@ -1121,6 +1144,7 @@ var STYLES = `
 
 .rlb-run__title {
     display: block;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1288,6 +1312,7 @@ var STYLES = `
     display: flex;
     align-items: baseline;
     gap: 4px;
+    min-width: 0;
 }
 
 .rlb-section__heading {
@@ -1340,6 +1365,14 @@ var STYLES = `
     padding: 0;
     text-align: left;
     min-height: 0;
+    /* Same shrink-to-ellipsis contract as the topbar; a long task name must not
+       push the numeric columns off the dialog. */
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rlb-muted {
@@ -1356,9 +1389,12 @@ var STYLES = `
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var TOPBAR_SELECTOR = ".rm-topbar";
+var TOPBAR_TITLE_LENGTH = 32;
 function createTopbar({ onOpenDashboard }) {
   let container = null;
   let labelNode = null;
+  let timeNode = null;
+  let titleNode = null;
   let iconNode = null;
   let buttonNode = null;
   let popover = null;
@@ -1510,17 +1546,13 @@ function createTopbar({ onOpenDashboard }) {
     buttonNode.classList.toggle("rlb-topbar__button--running", running2);
     iconNode.className = running2 ? `rlb-dot${findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-time";
     if (!running2) {
-      labelNode.replaceChildren(el("span", "rlb-topbar__label", "Logbook"));
+      timeNode.textContent = "";
+      titleNode.textContent = "Logbook";
       buttonNode.title = "Logbook \u2014 no clock running";
     } else {
       const [first] = entries;
-      const time = el(
-        "span",
-        "rlb-topbar__time",
-        formatElapsed(Date.now() - first.start.getTime())
-      );
-      const suffix = entries.length > 1 ? `${entries.length} clocks` : first.title;
-      labelNode.replaceChildren(time, el("span", "rlb-topbar__label", ` \xB7 ${suffix}`));
+      timeNode.textContent = formatElapsed(Date.now() - first.start.getTime());
+      titleNode.textContent = entries.length > 1 ? ` \xB7 ${entries.length} clocks` : ` \xB7 ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
       buttonNode.title = `Clocked in: ${first.title}`;
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
@@ -1542,7 +1574,10 @@ function createTopbar({ onOpenDashboard }) {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
     iconNode = el("span", "bp3-icon bp3-icon-time");
+    timeNode = el("span", "rlb-topbar__time");
+    titleNode = el("span", "rlb-topbar__label");
     labelNode = el("span", "rlb-topbar__labels");
+    labelNode.append(timeNode, titleNode);
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
     buttonNode.append(iconNode, labelNode);
     container.appendChild(buttonNode);

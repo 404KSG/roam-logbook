@@ -47,6 +47,7 @@ const extensionAPI = {
 };
 
 const extension = (await import('../src/extension.js')).default;
+const clock = await import('../src/clock.js');
 
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 const dialog = () => document.getElementById('roam-logbook-dashboard');
@@ -83,6 +84,22 @@ test('clocking in through the context menu writes the drawer and lights the widg
         topbarWidget().querySelector('.rlb-topbar__button--running'),
         'widget should show the running state'
     );
+});
+
+test('a long task name is truncated in the widget but kept in the tooltip', () => {
+    const longName = '把这个非常非常长的任务名字放进标题栏里看看会不会把整个顶栏撑坏掉真的很长';
+    graph.store.get('taskone01').string = `{{[[TODO]]}} ${longName}`;
+    clock.refresh();
+
+    const label = topbarWidget().querySelector('.rlb-topbar__label').textContent;
+    // CSS ellipsis does the real work; this only keeps the DOM sane.
+    assert.ok(label.length < longName.length, 'the visible label is shortened');
+    assert.ok(label.endsWith('…'));
+    // Nothing is lost — the full name is one hover away.
+    assert.match(topbarWidget().querySelector('button').title, new RegExp(longName.slice(0, 20)));
+
+    graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
+    clock.refresh();
 });
 
 test('clock in is hidden and clock out offered while the clock runs', () => {

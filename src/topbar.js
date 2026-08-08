@@ -7,6 +7,7 @@
 
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
+import { taskTitle } from './org.js';
 import { formatElapsed, formatStamp } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
@@ -15,9 +16,18 @@ import { openBlock } from './roam.js';
 const WIDGET_ID = 'roam-logbook-topbar';
 const TOPBAR_SELECTOR = '.rm-topbar';
 
+/**
+ * A backstop, not the layout. CSS ellipsis does the real work — this only keeps a
+ * pathological title out of the DOM, and stays short because CJK titles are twice
+ * as wide per character as the Latin ones this budget was eyeballed against.
+ */
+const TOPBAR_TITLE_LENGTH = 32;
+
 export function createTopbar({ onOpenDashboard }) {
     let container = null;
     let labelNode = null;
+    let timeNode = null;
+    let titleNode = null;
     let iconNode = null;
     let buttonNode = null;
     let popover = null;
@@ -193,17 +203,17 @@ export function createTopbar({ onOpenDashboard }) {
             : 'bp3-icon bp3-icon-time';
 
         if (!running) {
-            labelNode.replaceChildren(el('span', 'rlb-topbar__label', 'Logbook'));
+            timeNode.textContent = '';
+            titleNode.textContent = 'Logbook';
             buttonNode.title = 'Logbook — no clock running';
         } else {
             const [first] = entries;
-            const time = el(
-                'span',
-                'rlb-topbar__time',
-                formatElapsed(Date.now() - first.start.getTime())
-            );
-            const suffix = entries.length > 1 ? `${entries.length} clocks` : first.title;
-            labelNode.replaceChildren(time, el('span', 'rlb-topbar__label', ` · ${suffix}`));
+            timeNode.textContent = formatElapsed(Date.now() - first.start.getTime());
+            titleNode.textContent =
+                entries.length > 1
+                    ? ` · ${entries.length} clocks`
+                    : ` · ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
+            // The tooltip carries the untruncated name the button cannot show.
             buttonNode.title = `Clocked in: ${first.title}`;
         }
         buttonNode.setAttribute('aria-label', buttonNode.title);
@@ -226,7 +236,13 @@ export function createTopbar({ onOpenDashboard }) {
         container.id = WIDGET_ID;
 
         iconNode = el('span', 'bp3-icon bp3-icon-time');
+        // Built once and updated in place: the counter re-renders every second,
+        // and rebuilding the nodes made a long title reflow on every tick.
+        timeNode = el('span', 'rlb-topbar__time');
+        titleNode = el('span', 'rlb-topbar__label');
         labelNode = el('span', 'rlb-topbar__labels');
+        labelNode.append(timeNode, titleNode);
+
         buttonNode = button('bp3-button bp3-minimal rlb-topbar__button', '', togglePopover);
         buttonNode.append(iconNode, labelNode);
         container.appendChild(buttonNode);
