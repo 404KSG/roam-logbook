@@ -7,12 +7,13 @@
  */
 
 import { readAllEntries } from './entries.js';
-import { DRAWER_LABEL, formatClockLine, isDrawerBlock, parseClockLine, referencedBlockUid } from './org.js';
+import { DRAWER_LABEL, formatClockLine, isDrawerBlock, parseClockLine } from './org.js';
 import {
     createBlock,
     deleteBlock,
     getBlockString,
     getChildren,
+    resolveReferencedUid,
     updateBlock,
 } from './roam.js';
 import { allowMultipleClocks } from './settings.js';
@@ -60,16 +61,7 @@ export function reset() {
  * on the original block, not on the mirror they happen to be looking at.
  */
 export function resolveTaskUid(uid) {
-    const seen = new Set();
-    let current = uid;
-    while (current && !seen.has(current)) {
-        seen.add(current);
-        const string = getBlockString(current);
-        const referenced = referencedBlockUid(string);
-        if (!referenced) return current;
-        current = referenced;
-    }
-    return current || uid;
+    return resolveReferencedUid(uid);
 }
 
 /** The task's LOGBOOK drawer, created directly under the task if missing. */

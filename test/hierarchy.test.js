@@ -82,6 +82,29 @@ test('a sub-task that is only a block reference rolls up to its parent', async (
     ]);
 });
 
+test('sub-tasks written under a reference belong to the referenced task', async () => {
+    // The shape Roam users actually produce: pull a task into a daily note as
+    // ((ref)) and work beneath it. The sub-tasks' real ancestor is the reference,
+    // not the task, so the walk has to see through it.
+    installGraph([
+        { uid: 'taskorig01', string: TODO('思考一下插件系统'), parent: null },
+        { uid: 'dailymit01', string: '[[Daily MIT]]', parent: null },
+        { uid: 'mirror0001', string: '((taskorig01))', parent: 'dailymit01' },
+        { uid: 'steps00001', string: 'Steps::', parent: 'mirror0001' },
+        { uid: 'subtask001', string: TODO('和 agent 讨论一下上面的方案'), parent: 'steps00001' },
+    ]);
+    clock.refresh();
+
+    await logSession('taskorig01', 9, 10);
+    await logSession('subtask001', 10, 11);
+
+    const { rows } = treeOf();
+    assert.deepEqual(rows, [
+        ['思考一下插件系统', 0, 60, 120],
+        ['和 agent 讨论一下上面的方案', 1, 60, 60],
+    ]);
+});
+
 test('a block that merely mentions a task does not adopt it', async () => {
     installGraph([
         { uid: 'project001', string: TODO('发布 v1'), parent: null },

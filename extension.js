@@ -168,6 +168,18 @@ function getBlockString(uid) {
   );
   return rows[0]?.[0] ?? null;
 }
+function resolveReferencedUid(uid) {
+  const seen = /* @__PURE__ */ new Set();
+  let current = uid;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const referenced = referencedBlockUid(getBlockString(current));
+    if (!referenced)
+      return current;
+    current = referenced;
+  }
+  return current || uid;
+}
 function getChildren(uid) {
   if (!uid)
     return [];
@@ -275,17 +287,17 @@ function readAllEntries() {
   return entries;
 }
 var MAX_ANCESTOR_DEPTH = 24;
-var PARENT_QUERY = `[:find ?parent-uid ?parent-string
-  :in $ ?uid
+var PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
+  :in $ [?uid ...]
   :where
   [?b :block/uid ?uid]
   [?p :block/children ?b]
   [?p :block/uid ?parent-uid]
   [?p :block/string ?parent-string]]`;
-var MIRRORS_QUERY = `[:find ?mirror-uid ?mirror-string
-  :in $ ?uid
+var MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
+  :in $ [?target-uid ...]
   :where
-  [?t :block/uid ?uid]
+  [?t :block/uid ?target-uid]
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
@@ -296,28 +308,23 @@ function readHierarchy(taskUids) {
   const seeds = new Set(taskUids);
   if (seeds.size === 0)
     return { parentOf, stringOf, mirrorsOf };
-  for (const taskUid of seeds) {
-    let rows;
-    try {
-      rows = queryOrThrow(MIRRORS_QUERY, taskUid);
-    } catch (error) {
-      console.warn("[roam-logbook] block references unavailable for roll-up", error);
-      break;
-    }
-    for (const [mirrorUid, mirrorString] of rows) {
-      if (referencedBlockUid(mirrorString) !== taskUid)
+  try {
+    for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...seeds])) {
+      if (referencedBlockUid(mirrorString) !== targetUid)
         continue;
-      (mirrorsOf[taskUid] || (mirrorsOf[taskUid] = [])).push(mirrorUid);
+      (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
       stringOf[mirrorUid] = mirrorString;
     }
+  } catch (error) {
+    console.warn("[roam-logbook] block references unavailable for roll-up", error);
   }
   let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
     const next = [];
-    for (const uid of frontier) {
-      const [parentUid, parentString] = query(PARENT_QUERY, uid)[0] || [];
-      if (!parentUid)
-        continue;
+    for (const [uid, rawParentUid, rawParentString] of query(PARENTS_QUERY, frontier)) {
+      const referenced = referencedBlockUid(rawParentString);
+      const parentUid = referenced ? resolveReferencedUid(rawParentUid) : rawParentUid;
+      const parentString = referenced ? getBlockString(parentUid) : rawParentString;
       parentOf[uid] = parentUid;
       if (parentUid in stringOf)
         continue;
@@ -398,17 +405,7 @@ function reset() {
   listeners.clear();
 }
 function resolveTaskUid(uid) {
-  const seen = /* @__PURE__ */ new Set();
-  let current = uid;
-  while (current && !seen.has(current)) {
-    seen.add(current);
-    const string = getBlockString(current);
-    const referenced = referencedBlockUid(string);
-    if (!referenced)
-      return current;
-    current = referenced;
-  }
-  return current || uid;
+  return resolveReferencedUid(uid);
 }
 async function ensureDrawer(taskUid) {
   const children = getChildren(taskUid);

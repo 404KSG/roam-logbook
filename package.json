@@ -8,6 +8,7 @@
     "build": "node build.js",
     "watch": "node build.js --watch",
     "test": "node --test test/*.test.js",
+    "verify:live": "node scripts/verify-live.mjs",
     "lint": "eslint .",
     "check": "npm run lint && npm test && npm run build"
   },

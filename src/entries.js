@@ -7,7 +7,7 @@
  */
 
 import { isDrawerBlock, parseClockLine, referencedBlockUid, taskTitle } from './org.js';
-import { query, queryOrThrow } from './roam.js';
+import { getBlockString, query, queryOrThrow, resolveReferencedUid } from './roam.js';
 
 // Filter on the drawer rather than on `CLOCK:` so that hand-written entries with
 // odd spacing still come back; the JS parser is the real gate.
@@ -92,24 +92,20 @@ export function readRunningEntries() {
 /** Ancestor chains are walked a level at a time; a guard against a pathological graph. */
 const MAX_ANCESTOR_DEPTH = 24;
 
-// Both of these bind a single uid, the same shape as `getChildren` — a collection
-// binding (`:in $ [?uid ...]`) came back empty against a real graph, and this is
-// not the place to be the only code relying on an unproven query form.
-//
 // Requiring `:block/string` on the parent stops the walk at the page, which has
 // a `:node/title` instead — exactly where a task tree should end.
-const PARENT_QUERY = `[:find ?parent-uid ?parent-string
-  :in $ ?uid
+const PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
+  :in $ [?uid ...]
   :where
   [?b :block/uid ?uid]
   [?p :block/children ?b]
   [?p :block/uid ?parent-uid]
   [?p :block/string ?parent-string]]`;
 
-const MIRRORS_QUERY = `[:find ?mirror-uid ?mirror-string
-  :in $ ?uid
+const MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
+  :in $ [?target-uid ...]
   :where
-  [?t :block/uid ?uid]
+  [?t :block/uid ?target-uid]
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
@@ -136,30 +132,31 @@ export function readHierarchy(taskUids) {
 
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf };
 
-    for (const taskUid of seeds) {
-        let rows;
-        try {
-            rows = queryOrThrow(MIRRORS_QUERY, taskUid);
-        } catch (error) {
-            // Roll-up degrades to real block structure only, rather than going blank.
-            console.warn('[roam-logbook] block references unavailable for roll-up', error);
-            break;
-        }
-        for (const [mirrorUid, mirrorString] of rows) {
+    try {
+        for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...seeds])) {
             // `:block/refs` also fires for a block that merely mentions the task
             // in passing; only a block that is *nothing but* the reference counts.
-            if (referencedBlockUid(mirrorString) !== taskUid) continue;
-            (mirrorsOf[taskUid] ||= []).push(mirrorUid);
+            if (referencedBlockUid(mirrorString) !== targetUid) continue;
+            (mirrorsOf[targetUid] ||= []).push(mirrorUid);
             stringOf[mirrorUid] = mirrorString;
         }
+    } catch (error) {
+        // Roll-up degrades to real block structure only, rather than going blank.
+        console.warn('[roam-logbook] block references unavailable for roll-up', error);
     }
 
     let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
     for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
         const next = [];
-        for (const uid of frontier) {
-            const [parentUid, parentString] = query(PARENT_QUERY, uid)[0] || [];
-            if (!parentUid) continue;
+        for (const [uid, rawParentUid, rawParentString] of query(PARENTS_QUERY, frontier)) {
+            // Sub-tasks are routinely written under a `((reference))` to a task
+            // rather than under the task itself — pulling a task into a daily note
+            // and working beneath it. The reference stands for what it points at,
+            // so the walk continues from the original block.
+            const referenced = referencedBlockUid(rawParentString);
+            const parentUid = referenced ? resolveReferencedUid(rawParentUid) : rawParentUid;
+            const parentString = referenced ? getBlockString(parentUid) : rawParentString;
+
             parentOf[uid] = parentUid;
             if (parentUid in stringOf) continue;
             stringOf[parentUid] = parentString;

@@ -6,6 +6,8 @@
  * a plain Node test process.
  */
 
+import { referencedBlockUid } from './org.js';
+
 export function getApi() {
     return (typeof window !== 'undefined' && window.roamAlphaAPI) || null;
 }
@@ -59,6 +61,28 @@ export function getBlockString(uid) {
         uid
     );
     return rows[0]?.[0] ?? null;
+}
+
+/**
+ * Follow a block that is nothing but a `((reference))` through to what it points at.
+ *
+ * A bare reference is transparent everywhere in this extension: clocking one logs
+ * against the original, and walking past one in the ancestor chain lands on the
+ * original — which is what makes sub-tasks written under a reference belong to the
+ * task it mirrors.
+ *
+ * @returns {string} the underlying uid, or `uid` itself when it is not a reference
+ */
+export function resolveReferencedUid(uid) {
+    const seen = new Set();
+    let current = uid;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const referenced = referencedBlockUid(getBlockString(current));
+        if (!referenced) return current;
+        current = referenced;
+    }
+    return current || uid;
 }
 
 /** Direct children of a block, in sibling order. */
