@@ -1,0 +1,303 @@
+/**
+ * Styles for the topbar widget and dashboard.
+ *
+ * Layout and spacing only — colour comes from Blueprint's own variables so the
+ * extension follows Roam's light/dark theme without a second set of rules.
+ */
+
+export const STYLE_ID = 'roam-logbook-styles';
+
+export const STYLES = `
+.rlb-topbar {
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.rlb-topbar__button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 260px;
+    font-variant-numeric: tabular-nums;
+}
+
+.rlb-topbar__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-topbar__time {
+    font-weight: 600;
+}
+
+.rlb-topbar__button--running {
+    color: #0f9960;
+}
+
+.bp3-dark .rlb-topbar__button--running {
+    color: #3dcc91;
+}
+
+.rlb-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #0f9960;
+    flex: 0 0 auto;
+    animation: rlb-pulse 2s ease-in-out infinite;
+}
+
+.rlb-dot--stale {
+    background: #d9822b;
+    animation: none;
+}
+
+@keyframes rlb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rlb-dot { animation: none; }
+}
+
+/* ---- popover ---- */
+
+/* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
+.rlb-popover {
+    position: fixed;
+    z-index: 30;
+    width: 340px;
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 8px;
+    text-align: left;
+    cursor: default;
+}
+
+.rlb-popover__title {
+    padding: 4px 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    opacity: 0.6;
+}
+
+.rlb-popover__empty {
+    padding: 6px 6px 12px;
+    opacity: 0.7;
+}
+
+.rlb-popover__footer {
+    display: flex;
+    gap: 6px;
+    padding-top: 8px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(16, 22, 26, 0.15);
+}
+
+.bp3-dark .rlb-popover__footer {
+    border-top-color: rgba(255, 255, 255, 0.15);
+}
+
+.rlb-run {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px;
+    border-radius: 3px;
+}
+
+.rlb-run:hover {
+    background: rgba(167, 182, 194, 0.2);
+}
+
+.rlb-run__body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.rlb-run__title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    padding: 0;
+}
+
+.rlb-run__meta {
+    font-size: 11px;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+}
+
+.rlb-run__actions {
+    display: flex;
+    gap: 2px;
+    flex: 0 0 auto;
+}
+
+/* ---- dashboard ---- */
+
+.rlb-root {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh 16px 16px;
+    background: rgba(16, 22, 26, 0.7);
+}
+
+.rlb-root--open {
+    display: flex;
+}
+
+.rlb-dialog {
+    width: min(920px, 100%);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding-bottom: 0;
+}
+
+.rlb-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.rlb-header__title {
+    flex: 1 1 auto;
+    margin: 0;
+}
+
+.rlb-body {
+    padding: 16px 20px 20px;
+    overflow-y: auto;
+}
+
+.rlb-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.rlb-stat {
+    padding: 10px 12px;
+    border-radius: 3px;
+    background: rgba(167, 182, 194, 0.2);
+}
+
+.rlb-stat__value {
+    display: block;
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.rlb-stat__label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.65;
+}
+
+.rlb-section {
+    margin-bottom: 20px;
+}
+
+.rlb-section__title {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    opacity: 0.65;
+}
+
+.rlb-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 96px;
+    padding: 4px 0;
+}
+
+.rlb-bar {
+    flex: 1 1 0;
+    min-width: 4px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    height: 100%;
+}
+
+.rlb-bar__fill {
+    background: #2d72d2;
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+}
+
+.rlb-bar--empty .rlb-bar__fill {
+    background: rgba(167, 182, 194, 0.35);
+}
+
+.rlb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+.rlb-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.6;
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(16, 22, 26, 0.15);
+}
+
+.rlb-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(16, 22, 26, 0.08);
+    vertical-align: top;
+}
+
+.bp3-dark .rlb-table th {
+    border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.bp3-dark .rlb-table td {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.rlb-table__num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.rlb-task-link {
+    padding: 0;
+    text-align: left;
+    min-height: 0;
+}
+
+.rlb-muted {
+    opacity: 0.6;
+}
+
+.rlb-empty {
+    padding: 24px;
+    text-align: center;
+    opacity: 0.65;
+}
+`;

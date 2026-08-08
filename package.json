@@ -1,0 +1,28 @@
+{
+  "name": "roam-logbook",
+  "version": "0.1.0",
+  "description": "org-mode style clock tracking (LOGBOOK / CLOCK) for Roam Research TODOs",
+  "type": "module",
+  "main": "extension.js",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "test": "node --test test/*.test.js",
+    "lint": "eslint .",
+    "check": "npm run lint && npm test && npm run build"
+  },
+  "keywords": [
+    "roam-research",
+    "roam-depot",
+    "org-mode",
+    "logbook",
+    "time-tracking"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
+    "jsdom": "^29.1.1"
+  }
+}
