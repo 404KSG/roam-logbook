@@ -29,11 +29,15 @@ export function createDashboard() {
         const model = buildDashboard(entries, { now, rangeId, hierarchy });
         bodyNode.replaceChildren();
 
+        // Today and the last week are always shown; a third card for the selected
+        // range would just repeat one of them unless the range is wider.
+        const rangeLabel = getRange(rangeId).label;
+        const duplicatesFixedCard = rangeId === 'today' || rangeId === 'week';
         bodyNode.appendChild(
             statsRow([
                 ['Today', formatMinutesHuman(model.todayMinutes)],
                 ['Last 7 days', formatMinutesHuman(model.weekMinutes)],
-                [getRange(rangeId).label, formatMinutesHuman(model.totalMinutes)],
+                ...(duplicatesFixedCard ? [] : [[rangeLabel, formatMinutesHuman(model.totalMinutes)]]),
                 ['Tasks tracked', String(model.tasks.length)],
             ])
         );

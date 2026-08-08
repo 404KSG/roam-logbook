@@ -275,17 +275,17 @@ function readAllEntries() {
   return entries;
 }
 var MAX_ANCESTOR_DEPTH = 24;
-var PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
-  :in $ [?uid ...]
+var PARENT_QUERY = `[:find ?parent-uid ?parent-string
+  :in $ ?uid
   :where
   [?b :block/uid ?uid]
   [?p :block/children ?b]
   [?p :block/uid ?parent-uid]
   [?p :block/string ?parent-string]]`;
-var MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
-  :in $ [?target-uid ...]
+var MIRRORS_QUERY = `[:find ?mirror-uid ?mirror-string
+  :in $ ?uid
   :where
-  [?t :block/uid ?target-uid]
+  [?t :block/uid ?uid]
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
@@ -296,21 +296,28 @@ function readHierarchy(taskUids) {
   const seeds = new Set(taskUids);
   if (seeds.size === 0)
     return { parentOf, stringOf, mirrorsOf };
-  try {
-    for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...taskUids])) {
-      if (referencedBlockUid(mirrorString) !== targetUid)
-        continue;
-      (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
-      stringOf[mirrorUid] = mirrorString;
-      seeds.add(mirrorUid);
+  for (const taskUid of seeds) {
+    let rows;
+    try {
+      rows = queryOrThrow(MIRRORS_QUERY, taskUid);
+    } catch (error) {
+      console.warn("[roam-logbook] block references unavailable for roll-up", error);
+      break;
     }
-  } catch (error) {
-    console.warn("[roam-logbook] block references unavailable for roll-up", error);
+    for (const [mirrorUid, mirrorString] of rows) {
+      if (referencedBlockUid(mirrorString) !== taskUid)
+        continue;
+      (mirrorsOf[taskUid] || (mirrorsOf[taskUid] = [])).push(mirrorUid);
+      stringOf[mirrorUid] = mirrorString;
+    }
   }
-  let frontier = [...seeds];
+  let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
     const next = [];
-    for (const [uid, parentUid, parentString] of query(PARENTS_QUERY, frontier)) {
+    for (const uid of frontier) {
+      const [parentUid, parentString] = query(PARENT_QUERY, uid)[0] || [];
+      if (!parentUid)
+        continue;
       parentOf[uid] = parentUid;
       if (parentUid in stringOf)
         continue;
@@ -703,11 +710,13 @@ function createDashboard() {
     const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
     const model = buildDashboard(entries, { now, rangeId, hierarchy });
     bodyNode.replaceChildren();
+    const rangeLabel = getRange(rangeId).label;
+    const duplicatesFixedCard = rangeId === "today" || rangeId === "week";
     bodyNode.appendChild(
       statsRow([
         ["Today", formatMinutesHuman(model.todayMinutes)],
         ["Last 7 days", formatMinutesHuman(model.weekMinutes)],
-        [getRange(rangeId).label, formatMinutesHuman(model.totalMinutes)],
+        ...duplicatesFixedCard ? [] : [[rangeLabel, formatMinutesHuman(model.totalMinutes)]],
         ["Tasks tracked", String(model.tasks.length)]
       ])
     );

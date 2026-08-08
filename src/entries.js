@@ -92,20 +92,24 @@ export function readRunningEntries() {
 /** Ancestor chains are walked a level at a time; a guard against a pathological graph. */
 const MAX_ANCESTOR_DEPTH = 24;
 
+// Both of these bind a single uid, the same shape as `getChildren` — a collection
+// binding (`:in $ [?uid ...]`) came back empty against a real graph, and this is
+// not the place to be the only code relying on an unproven query form.
+//
 // Requiring `:block/string` on the parent stops the walk at the page, which has
 // a `:node/title` instead — exactly where a task tree should end.
-const PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
-  :in $ [?uid ...]
+const PARENT_QUERY = `[:find ?parent-uid ?parent-string
+  :in $ ?uid
   :where
   [?b :block/uid ?uid]
   [?p :block/children ?b]
   [?p :block/uid ?parent-uid]
   [?p :block/string ?parent-string]]`;
 
-const MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
-  :in $ [?target-uid ...]
+const MIRRORS_QUERY = `[:find ?mirror-uid ?mirror-string
+  :in $ ?uid
   :where
-  [?t :block/uid ?target-uid]
+  [?t :block/uid ?uid]
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
@@ -132,24 +136,30 @@ export function readHierarchy(taskUids) {
 
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf };
 
-    try {
-        for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...taskUids])) {
+    for (const taskUid of seeds) {
+        let rows;
+        try {
+            rows = queryOrThrow(MIRRORS_QUERY, taskUid);
+        } catch (error) {
+            // Roll-up degrades to real block structure only, rather than going blank.
+            console.warn('[roam-logbook] block references unavailable for roll-up', error);
+            break;
+        }
+        for (const [mirrorUid, mirrorString] of rows) {
             // `:block/refs` also fires for a block that merely mentions the task
             // in passing; only a block that is *nothing but* the reference counts.
-            if (referencedBlockUid(mirrorString) !== targetUid) continue;
-            (mirrorsOf[targetUid] ||= []).push(mirrorUid);
+            if (referencedBlockUid(mirrorString) !== taskUid) continue;
+            (mirrorsOf[taskUid] ||= []).push(mirrorUid);
             stringOf[mirrorUid] = mirrorString;
-            seeds.add(mirrorUid);
         }
-    } catch (error) {
-        // Roll-up degrades to real block structure only, rather than going blank.
-        console.warn('[roam-logbook] block references unavailable for roll-up', error);
     }
 
-    let frontier = [...seeds];
+    let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
     for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
         const next = [];
-        for (const [uid, parentUid, parentString] of query(PARENTS_QUERY, frontier)) {
+        for (const uid of frontier) {
+            const [parentUid, parentString] = query(PARENT_QUERY, uid)[0] || [];
+            if (!parentUid) continue;
             parentOf[uid] = parentUid;
             if (parentUid in stringOf) continue;
             stringOf[parentUid] = parentString;
