@@ -63,8 +63,9 @@ console.log('\nBy task');
 for (const node of flattenForest(model.tree)) {
     const indent = '  '.repeat(node.depth) + (node.depth > 0 ? '└ ' : '');
     const badge = node.occurrences > 1 ? ` ×${node.occurrences}` : '';
+    const box = node.status === 'DONE' ? '[x]' : node.status === 'TODO' ? '[ ]' : '   ';
     console.log(
-        `  ${indent}${node.title}${badge}` +
+        `  ${indent}${box} ${node.title}${badge}` +
             `   own ${formatMinutesHuman(node.own)} / total ${formatMinutesHuman(node.total)}`
     );
 }

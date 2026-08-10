@@ -8,6 +8,7 @@ import {
     isTaskBlock,
     parseClockLine,
     referencedBlockUid,
+    taskStatus,
     taskTitle,
 } from '../src/org.js';
 
@@ -104,4 +105,14 @@ test('truncates long titles', () => {
     const title = taskTitle(`{{[[TODO]]}} ${'x'.repeat(200)}`, { maxLength: 10 });
     assert.equal(title.length, 10);
     assert.ok(title.endsWith('…'));
+});
+
+test('reads the checkbox state off a task block', () => {
+    assert.equal(taskStatus('{{[[TODO]]}} open work'), 'TODO');
+    assert.equal(taskStatus('{{[[DONE]]}} finished'), 'DONE');
+    assert.equal(taskStatus('{{TODO}} plain braces'), 'TODO');
+    // taskTitle throws the marker away, so status has to be read separately.
+    assert.equal(taskTitle('{{[[DONE]]}} finished'), 'finished');
+    assert.equal(taskStatus('just a note'), null);
+    assert.equal(taskStatus(undefined), null);
 });

@@ -309,6 +309,13 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+/* Beats the .rlb-table th left-align above, which otherwise parks a numeric
+   column's label against the opposite edge from its figures. */
+.rlb-table th.rlb-table__num {
+    text-align: right;
+}
+
+.rlb-cell,
 .rlb-tree__cell {
     display: flex;
     align-items: baseline;
@@ -327,21 +334,63 @@ export const STYLES = `
     margin: 0;
 }
 
-.rlb-tree__toggle {
+/* Scoped to the cell so it outranks .bp3-button.bp3-small, whose own min-width
+   would otherwise make the caret wider than the spacer on childless rows and put
+   the two sets of titles on different left edges. */
+.rlb-tree__cell > .rlb-tree__toggle {
     flex: 0 0 auto;
     width: 20px;
     min-width: 20px;
+    height: 20px;
     min-height: 20px;
     padding: 0;
+    margin: 0;
     opacity: 0.6;
+    align-self: center;
 }
 
-.rlb-tree__toggle:hover {
+.rlb-tree__cell > .rlb-tree__toggle:hover {
     opacity: 1;
 }
 
 .rlb-tree__toggle--empty {
-    display: inline-block;
+    display: block;
+}
+
+/* Task status, drawn in CSS rather than Blueprint's icon font so it cannot
+   silently render as a blank box if an icon name is wrong. */
+.rlb-status {
+    flex: 0 0 auto;
+    align-self: center;
+    box-sizing: border-box;
+    width: 13px;
+    height: 13px;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    opacity: 0.4;
+    position: relative;
+}
+
+.rlb-status--done {
+    background: #0f9960;
+    border-color: #0f9960;
+    opacity: 1;
+}
+
+.rlb-status--done::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 3px;
+    height: 6px;
+    border: solid #ffffff;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+
+.rlb-row--done .rlb-task-link {
+    opacity: 0.65;
 }
 
 .rlb-tree__hidden {

@@ -84,6 +84,14 @@ function isDrawerBlock(string) {
 function isTaskBlock(string) {
   return typeof string === "string" && TODO_RE.test(string);
 }
+function taskStatus(string) {
+  if (typeof string !== "string")
+    return null;
+  const match = TODO_RE.exec(string);
+  if (!match)
+    return null;
+  return (match[1] || match[2]).toUpperCase();
+}
 function parseClockLine(string) {
   if (typeof string !== "string")
     return null;
@@ -276,6 +284,7 @@ function readAllEntries() {
       taskUid,
       taskString,
       title: taskTitle(taskString),
+      status: taskStatus(taskString),
       pageTitle: pageTitle ?? null,
       start: parsed.start,
       end: parsed.end,
@@ -546,6 +555,7 @@ function summariseByTask(entries, now) {
       row = {
         taskUid: entry.taskUid,
         title: entry.title,
+        status: entry.status ?? null,
         pageTitle: entry.pageTitle,
         minutes: 0,
         sessions: 0,
@@ -611,6 +621,7 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
         nodes.set(parentUid, {
           taskUid: parentUid,
           title: taskTitle(hierarchy.stringOf[parentUid]),
+          status: taskStatus(hierarchy.stringOf[parentUid]),
           pageTitle: null,
           minutes: 0,
           own: 0,
@@ -632,6 +643,7 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     const base = {
       taskUid: node.taskUid,
       title: node.title,
+      status: node.status ?? null,
       pageTitle: node.pageTitle,
       own: node.own,
       sessions: node.sessions,
@@ -754,11 +766,16 @@ function createDashboard() {
       )
     );
     const table = el("table", "rlb-table");
-    table.appendChild(headerRow(["Task", "Started", "Elapsed", ""]));
+    table.appendChild(
+      headerRow(["Task", "Started", { label: "Elapsed", numeric: true }, ""])
+    );
     const tbody = el("tbody");
     for (const entry of running2) {
       const row = el("tr");
-      const task = el("td");
+      const task = el("td", "rlb-cell");
+      const mark = statusMark(entry.status);
+      if (mark)
+        task.appendChild(mark);
       task.appendChild(taskLink(entry.title, entry.taskUid));
       if (stale.has(entry.clockUid)) {
         task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
@@ -835,7 +852,14 @@ function createDashboard() {
       const anyExpanded = parentUids.some((uid) => !collapsed.has(uid));
       toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
       const table = el("table", "rlb-table");
-      table.appendChild(headerRow(["Task", "Sessions", "Own", "Total"]));
+      table.appendChild(
+        headerRow([
+          "Task",
+          { label: "Sessions", numeric: true },
+          { label: "Own", numeric: true },
+          { label: "Total", numeric: true }
+        ])
+      );
       const tbody = el("tbody");
       for (const node of rows) {
         const row = el("tr");
@@ -859,6 +883,11 @@ function createDashboard() {
         } else {
           name.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
         }
+        const mark = statusMark(node.status);
+        if (mark)
+          name.appendChild(mark);
+        if (node.status === "DONE")
+          row.classList.add("rlb-row--done");
         name.appendChild(taskLink(node.title, node.taskUid));
         if (node.occurrences > 1) {
           const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
@@ -898,13 +927,25 @@ function createDashboard() {
     return section;
   };
   const countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
-  const headerRow = (labels) => {
+  const headerRow = (columns) => {
     const thead = el("thead");
     const row = el("tr");
-    for (const label of labels)
-      row.appendChild(el("th", "", label));
+    for (const column of columns) {
+      const numeric = typeof column === "object" && column.numeric;
+      row.appendChild(el("th", numeric ? "rlb-table__num" : "", column.label ?? column));
+    }
     thead.appendChild(row);
     return thead;
+  };
+  const statusMark = (status) => {
+    if (!status)
+      return null;
+    const done = status === "DONE";
+    const mark = el("span", `rlb-status rlb-status--${done ? "done" : "todo"}`);
+    mark.title = done ? "DONE" : "TODO";
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", done ? "Done" : "To do");
+    return mark;
   };
   const taskLink = (title, taskUid) => button("bp3-button bp3-minimal bp3-small rlb-task-link", title, () => {
     close();
@@ -1308,6 +1349,13 @@ var STYLES = `
     white-space: nowrap;
 }
 
+/* Beats the .rlb-table th left-align above, which otherwise parks a numeric
+   column's label against the opposite edge from its figures. */
+.rlb-table th.rlb-table__num {
+    text-align: right;
+}
+
+.rlb-cell,
 .rlb-tree__cell {
     display: flex;
     align-items: baseline;
@@ -1326,21 +1374,63 @@ var STYLES = `
     margin: 0;
 }
 
-.rlb-tree__toggle {
+/* Scoped to the cell so it outranks .bp3-button.bp3-small, whose own min-width
+   would otherwise make the caret wider than the spacer on childless rows and put
+   the two sets of titles on different left edges. */
+.rlb-tree__cell > .rlb-tree__toggle {
     flex: 0 0 auto;
     width: 20px;
     min-width: 20px;
+    height: 20px;
     min-height: 20px;
     padding: 0;
+    margin: 0;
     opacity: 0.6;
+    align-self: center;
 }
 
-.rlb-tree__toggle:hover {
+.rlb-tree__cell > .rlb-tree__toggle:hover {
     opacity: 1;
 }
 
 .rlb-tree__toggle--empty {
-    display: inline-block;
+    display: block;
+}
+
+/* Task status, drawn in CSS rather than Blueprint's icon font so it cannot
+   silently render as a blank box if an icon name is wrong. */
+.rlb-status {
+    flex: 0 0 auto;
+    align-self: center;
+    box-sizing: border-box;
+    width: 13px;
+    height: 13px;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    opacity: 0.4;
+    position: relative;
+}
+
+.rlb-status--done {
+    background: #0f9960;
+    border-color: #0f9960;
+    opacity: 1;
+}
+
+.rlb-status--done::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 3px;
+    height: 6px;
+    border: solid #ffffff;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+
+.rlb-row--done .rlb-task-link {
+    opacity: 0.65;
 }
 
 .rlb-tree__hidden {

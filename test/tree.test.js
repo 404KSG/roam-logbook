@@ -204,3 +204,17 @@ test('a leaf is never reported as collapsed', () => {
     assert.equal(node.collapsed, false);
     assert.equal(node.hasChildren, false);
 });
+
+test('an ancestor with no sessions still reports its checkbox state', () => {
+    const forest = buildTaskForest(
+        [{ ...row('childA', 'sub', 30), status: 'DONE' }],
+        hierarchy([
+            ['parent', null, '{{[[DONE]]}} shipped'],
+            ['childA', 'parent', TODO('sub')],
+        ])
+    );
+
+    // The parent is known only from the hierarchy strings, never from an entry.
+    assert.equal(forest[0].status, 'DONE');
+    assert.equal(forest[0].children[0].status, 'DONE');
+});

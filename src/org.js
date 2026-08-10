@@ -46,6 +46,21 @@ export function isTaskBlock(string) {
 }
 
 /**
+ * A task's checkbox state.
+ *
+ * `taskTitle` strips the marker so the text reads cleanly, which loses the one
+ * thing a time report most needs alongside a total: whether the work is finished.
+ *
+ * @returns {'TODO'|'DONE'|null} null when the block is not a task at all
+ */
+export function taskStatus(string) {
+    if (typeof string !== 'string') return null;
+    const match = TODO_RE.exec(string);
+    if (!match) return null;
+    return (match[1] || match[2]).toUpperCase();
+}
+
+/**
  * Parse one `CLOCK::` block.
  *
  * The stored `=> H:MM` is authoritative when present — a hand-edited summary is

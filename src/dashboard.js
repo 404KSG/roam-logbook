@@ -84,11 +84,15 @@ export function createDashboard() {
         );
 
         const table = el('table', 'rlb-table');
-        table.appendChild(headerRow(['Task', 'Started', 'Elapsed', '']));
+        table.appendChild(
+            headerRow(['Task', 'Started', { label: 'Elapsed', numeric: true }, ''])
+        );
         const tbody = el('tbody');
         for (const entry of running) {
             const row = el('tr');
-            const task = el('td');
+            const task = el('td', 'rlb-cell');
+            const mark = statusMark(entry.status);
+            if (mark) task.appendChild(mark);
             task.appendChild(taskLink(entry.title, entry.taskUid));
             if (stale.has(entry.clockUid)) {
                 task.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'stale'));
@@ -170,7 +174,14 @@ export function createDashboard() {
             toggleAll.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
 
             const table = el('table', 'rlb-table');
-            table.appendChild(headerRow(['Task', 'Sessions', 'Own', 'Total']));
+            table.appendChild(
+                headerRow([
+                    'Task',
+                    { label: 'Sessions', numeric: true },
+                    { label: 'Own', numeric: true },
+                    { label: 'Total', numeric: true },
+                ])
+            );
             const tbody = el('tbody');
 
             for (const node of rows) {
@@ -198,6 +209,9 @@ export function createDashboard() {
                     name.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
                 }
 
+                const mark = statusMark(node.status);
+                if (mark) name.appendChild(mark);
+                if (node.status === 'DONE') row.classList.add('rlb-row--done');
                 name.appendChild(taskLink(node.title, node.taskUid));
                 // A task reachable from more than one parent is counted under each
                 // of them; say so on the row rather than let the columns look wrong.
@@ -246,12 +260,28 @@ export function createDashboard() {
     const countDescendants = node =>
         node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 
-    const headerRow = labels => {
+    // Numeric headers have to be right-aligned like their cells, or the column
+    // label and the figures under it sit against opposite edges.
+    const headerRow = columns => {
         const thead = el('thead');
         const row = el('tr');
-        for (const label of labels) row.appendChild(el('th', '', label));
+        for (const column of columns) {
+            const numeric = typeof column === 'object' && column.numeric;
+            row.appendChild(el('th', numeric ? 'rlb-table__num' : '', column.label ?? column));
+        }
         thead.appendChild(row);
         return thead;
+    };
+
+    /** A checkbox drawn in CSS, so it does not depend on Blueprint's icon font. */
+    const statusMark = status => {
+        if (!status) return null;
+        const done = status === 'DONE';
+        const mark = el('span', `rlb-status rlb-status--${done ? 'done' : 'todo'}`);
+        mark.title = done ? 'DONE' : 'TODO';
+        mark.setAttribute('role', 'img');
+        mark.setAttribute('aria-label', done ? 'Done' : 'To do');
+        return mark;
     };
 
     const taskLink = (title, taskUid) =>

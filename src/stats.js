@@ -6,7 +6,7 @@
  * read and keeps a session an indivisible thing.
  */
 
-import { isTaskBlock, taskTitle } from './org.js';
+import { isTaskBlock, taskStatus, taskTitle } from './org.js';
 import { dateKey, startOfDay, startOfDaysAgo } from './time.js';
 
 export const EMPTY_HIERARCHY = { parentOf: {}, stringOf: {}, mirrorsOf: {} };
@@ -50,6 +50,7 @@ export function summariseByTask(entries, now) {
             row = {
                 taskUid: entry.taskUid,
                 title: entry.title,
+                status: entry.status ?? null,
                 pageTitle: entry.pageTitle,
                 minutes: 0,
                 sessions: 0,
@@ -144,6 +145,7 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
                 nodes.set(parentUid, {
                     taskUid: parentUid,
                     title: taskTitle(hierarchy.stringOf[parentUid]),
+                    status: taskStatus(hierarchy.stringOf[parentUid]),
                     pageTitle: null,
                     minutes: 0,
                     own: 0,
@@ -167,6 +169,7 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
         const base = {
             taskUid: node.taskUid,
             title: node.title,
+            status: node.status ?? null,
             pageTitle: node.pageTitle,
             own: node.own,
             sessions: node.sessions,

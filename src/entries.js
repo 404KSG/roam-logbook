@@ -6,7 +6,7 @@
  * another device, because it is just a `CLOCK::` block with no end stamp.
  */
 
-import { isDrawerBlock, parseClockLine, referencedBlockUid, taskTitle } from './org.js';
+import { isDrawerBlock, parseClockLine, referencedBlockUid, taskStatus, taskTitle } from './org.js';
 import { getBlockString, query, queryOrThrow, resolveReferencedUid } from './roam.js';
 
 // Filter on the drawer rather than on `CLOCK:` so that hand-written entries with
@@ -49,6 +49,7 @@ function queryEntryRows() {
  * @property {string} taskUid     uid of the task the drawer hangs under
  * @property {string} taskString  raw task block text
  * @property {string} title       display title for the task
+ * @property {'TODO'|'DONE'|null} status
  * @property {string|null} pageTitle
  * @property {Date} start
  * @property {Date|null} end      null while the clock is running
@@ -70,6 +71,7 @@ export function readAllEntries() {
             taskUid,
             taskString,
             title: taskTitle(taskString),
+            status: taskStatus(taskString),
             pageTitle: pageTitle ?? null,
             start: parsed.start,
             end: parsed.end,

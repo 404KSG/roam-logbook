@@ -181,6 +181,17 @@ test('the task tree collapses and expands from the caret', () => {
     assert.equal(taskRows().length, 2, 'expanding brings it back');
 });
 
+test('each task row shows its checkbox state', () => {
+    graph.store.get('subtask001').string = '{{[[DONE]]}} a sub task';
+    paletteCommands.get('Logbook: Open dashboard')();
+
+    const marks = [...dialog().querySelectorAll('.rlb-tree__cell .rlb-status')];
+    assert.equal(marks.length, 2, 'one per task row');
+    assert.deepEqual(marks.map(mark => mark.getAttribute('aria-label')), ['To do', 'Done']);
+    // The finished row is dimmed rather than hidden.
+    assert.equal(dialog().querySelectorAll('tr.rlb-row--done').length, 1);
+});
+
 test('collapsed state survives a re-render', () => {
     dialog().querySelector('.rlb-tree__toggle').dispatchEvent(
         new dom.window.MouseEvent('click', { bubbles: true })
