@@ -1131,7 +1131,14 @@ function isOverrun(entry, now = Date.now()) {
   return overrunMs(entry, now) > 0;
 }
 function attach() {
-  return subscribe((running2) => prune(running2.map((entry) => entry.clockUid)));
+  let sawInitialReplay = false;
+  return subscribe((running2) => {
+    if (!sawInitialReplay) {
+      sawInitialReplay = true;
+      return;
+    }
+    prune(running2.map((entry) => entry.clockUid));
+  });
 }
 function reset2() {
   targets = /* @__PURE__ */ new Map();

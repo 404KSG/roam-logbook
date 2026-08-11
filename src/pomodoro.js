@@ -99,9 +99,24 @@ export function isOverrun(entry, now = Date.now()) {
     return overrunMs(entry, now) > 0;
 }
 
-/** Keep the stored targets in step with what is actually running. */
+/**
+ * Keep the stored targets in step with what is actually running.
+ *
+ * `clock.subscribe` replays the current list the moment a listener registers,
+ * and at startup that list is empty — the graph has not been read yet. Pruning
+ * against it would delete every target `load()` had just restored, and persist
+ * the loss. So the replay is skipped; the first real prune arrives with the
+ * refresh that follows.
+ */
 export function attach() {
-    return clock.subscribe(running => prune(running.map(entry => entry.clockUid)));
+    let sawInitialReplay = false;
+    return clock.subscribe(running => {
+        if (!sawInitialReplay) {
+            sawInitialReplay = true;
+            return;
+        }
+        prune(running.map(entry => entry.clockUid));
+    });
 }
 
 export function reset() {

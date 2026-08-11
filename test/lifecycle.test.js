@@ -269,6 +269,23 @@ test('clocking out through the palette closes the entry', async () => {
     assert.match(topbarWidget().querySelector('button').title, /no clock running/);
 });
 
+test('a pomodoro survives unload and reload', async () => {
+    await contextCommands.get('Logbook: Start pomodoro').callback({ 'block-uid': 'taskone01' });
+    const before = clock.getRunning()[0];
+    assert.ok(before, 'a clock should be running');
+    assert.equal(pomodoro.isActive(before.clockUid), true);
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, '30:00');
+
+    // A real reload: the module keeps no memory, only what reached settings.
+    extension.onunload();
+    extension.onload({ extensionAPI });
+
+    const after = clock.getRunning()[0];
+    assert.equal(after.clockUid, before.clockUid, 'the open clock comes back from the graph');
+    assert.equal(pomodoro.isActive(after.clockUid), true, 'and so does its pomodoro');
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, '30:00');
+});
+
 test('onunload removes every trace of the extension', () => {
     extension.onunload();
 

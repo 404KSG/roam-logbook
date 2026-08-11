@@ -119,3 +119,23 @@ test('clocking out prunes the target through the clock subscription', async () =
     assert.equal(pomodoro.isActive(clockUid), false, 'no target should outlive its session');
     detach();
 });
+
+test('attaching does not wipe targets before the first graph read', () => {
+    const store = useSettings();
+    pomodoro.start('c1', 30);
+
+    // A reload: settings survive, memory does not.
+    pomodoro.reset();
+    clock.reset();
+    setExtensionAPI({ settings: { get: k => store.get(k), set: (k, v) => store.set(k, v) } });
+    pomodoro.load();
+    assert.equal(pomodoro.targetMinutes('c1'), 30, 'load reads it back');
+
+    // subscribe() replays the current running list on registration, and at this
+    // point the graph has not been read yet, so that list is empty. Pruning
+    // against it would delete every target the reload just restored.
+    const detach = pomodoro.attach();
+
+    assert.equal(pomodoro.targetMinutes('c1'), 30, 'attach must not prune against a pre-read list');
+    detach();
+});
