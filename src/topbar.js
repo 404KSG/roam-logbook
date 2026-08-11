@@ -372,9 +372,23 @@ export function createTopbar({ onOpenDashboard }) {
         return anchor ? anchor.nextSibling : null;
     };
 
+    /**
+     * Whether a topbar child belongs to the navigation cluster.
+     *
+     * A named Blueprint icon is the strongest signal, but Roam's back/forward
+     * arrows are not named that way, so the general test is what these controls
+     * have in common: a glyph, no text of its own, and nothing to type into.
+     * The search box is the thing that ends the cluster, and it is excluded by
+     * the form-field check even though it too holds an icon.
+     */
     const isNavigationControl = element => {
-        const carriesNavIcon = node => NAV_ICON_PATTERN.test(node.getAttribute?.('class') || '');
-        return carriesNavIcon(element) || [...element.querySelectorAll('[class]')].some(carriesNavIcon);
+        const classOf = node => node.getAttribute?.('class') || '';
+        const named = node => NAV_ICON_PATTERN.test(classOf(node));
+        if (named(element) || [...element.querySelectorAll('[class]')].some(named)) return true;
+
+        if (element.querySelector('input, textarea, select')) return false;
+        if ((element.textContent || '').trim().length > 0) return false;
+        return Boolean(element.querySelector('svg') || /icon/i.test(classOf(element)));
     };
 
     const remove = () => {

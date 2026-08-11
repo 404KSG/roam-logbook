@@ -1145,15 +1145,22 @@ var STYLES = `
     align-items: center;
     position: relative;
     min-width: 0;
+    /* Roam's controls carry no margin of their own, so the widget has to keep
+       its own distance rather than butt up against the one beside it. */
+    margin: 0 6px;
 }
 
 .rlb-topbar__button {
     display: flex;
     align-items: center;
     gap: 6px;
+    /* Blueprint centres button content. Combined with overflow: hidden that
+       clips an over-wide widget at BOTH ends, which ate the leading digits of
+       the counter as well as the ellipsis off the end of the title. */
+    justify-content: flex-start;
     /* A long task name must never widen the widget into Roam's own controls.
        Scales down with the window so a narrow graph view stays usable. */
-    max-width: min(280px, 30vw);
+    max-width: min(260px, 26vw);
     overflow: hidden;
     font-variant-numeric: tabular-nums;
 }
@@ -1218,15 +1225,28 @@ var STYLES = `
     opacity: 0.7;
 }
 
-/* The title is what gives way, down to an ellipsis. */
+/* The title is what gives way, down to an ellipsis.
+   The max-width is what makes the ellipsis reliable: it gives the element a
+   definite size to overflow, instead of depending on shrinkage propagating
+   correctly down a nested flex chain. */
 .rlb-topbar__label {
     flex: 0 1 auto;
     min-width: 0;
+    max-width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.92em;
     opacity: 0.8;
+}
+
+/* On a narrow window the title is dropped outright rather than squeezed to a
+   few characters \u2014 the counter and the totals are what earn the space, and the
+   task name is still one hover or one click away. */
+@media (max-width: 1080px) {
+    .rlb-topbar__label {
+        display: none;
+    }
 }
 
 .rlb-topbar__button--running {
@@ -1915,8 +1935,15 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
     return anchor ? anchor.nextSibling : null;
   };
   const isNavigationControl = (element) => {
-    const carriesNavIcon = (node) => NAV_ICON_PATTERN.test(node.getAttribute?.("class") || "");
-    return carriesNavIcon(element) || [...element.querySelectorAll("[class]")].some(carriesNavIcon);
+    const classOf = (node) => node.getAttribute?.("class") || "";
+    const named = (node) => NAV_ICON_PATTERN.test(classOf(node));
+    if (named(element) || [...element.querySelectorAll("[class]")].some(named))
+      return true;
+    if (element.querySelector("input, textarea, select"))
+      return false;
+    if ((element.textContent || "").trim().length > 0)
+      return false;
+    return Boolean(element.querySelector("svg") || /icon/i.test(classOf(element)));
   };
   const remove = () => {
     closePopover();

@@ -72,6 +72,30 @@ test('finds the anchor even when the arrow is wrapped in other elements', async 
     assert.deepEqual(order, ['menu', 'back', 'forward', 'WIDGET', 'search']);
 });
 
+test('clears arrows that carry no Blueprint icon name', async () => {
+    // Roam's own back/forward are not `bp3-icon-arrow-*`; they are icon-only
+    // controls with an svg inside and no text, which is the general test.
+    const order = await mountInto(
+        named('menu', 'bp3-button bp3-icon-menu') +
+            `<button data-name="back"><svg></svg></button>` +
+            `<button data-name="forward"><svg></svg></button>` +
+            `<div data-name="search" class="rm-find-or-create-wrapper"><svg></svg><input /></div>` +
+            named('right')
+    );
+
+    assert.deepEqual(order, ['menu', 'back', 'forward', 'WIDGET', 'search', 'right']);
+});
+
+test('a control with a label of its own ends the cluster', async () => {
+    const order = await mountInto(
+        named('menu', 'bp3-button bp3-icon-menu') +
+            `<button data-name="labelled"><svg></svg>All Pages</button>` +
+            named('other')
+    );
+
+    assert.deepEqual(order, ['menu', 'WIDGET', 'labelled', 'other']);
+});
+
 test('falls back to the menu toggle when there are no arrows', async () => {
     const order = await mountInto(
         named('menu', 'bp3-button bp3-icon-menu') + named('search')
