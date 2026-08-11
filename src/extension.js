@@ -11,11 +11,13 @@ import { createDashboard } from './dashboard.js';
 import { injectStyles, removeStyles } from './dom.js';
 import { getBlockString, getFocusedBlockUid } from './roam.js';
 import { isTaskBlock } from './org.js';
+import * as pomodoro from './pomodoro.js';
 import {
     normalizeChecked,
     normalizeSelected,
     setExtensionAPI,
     SETTING_MULTIPLE,
+    SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
     SETTING_TODO_ONLY,
     SETTING_TOPBAR,
@@ -26,9 +28,11 @@ import { createTopbar } from './topbar.js';
 
 const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
 const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
+const CONTEXT_POMODORO = 'Logbook: Start pomodoro';
 
 const PALETTE_COMMANDS = [
     'Logbook: Clock in current block',
+    'Logbook: Start pomodoro on current block',
     'Logbook: Clock out current block',
     'Logbook: Clock out all running clocks',
     'Logbook: Open dashboard',
@@ -39,6 +43,7 @@ function createController({ extensionAPI }) {
     const dashboard = createDashboard();
     const topbar = createTopbar({ onOpenDashboard: () => dashboard.open() });
     let destroyed = false;
+    let detachPomodoro = null;
 
     /** Task text of the block a menu entry was opened on, following references. */
     const targetString = context => {
@@ -68,6 +73,28 @@ function createController({ extensionAPI }) {
                 return;
             }
             await clock.clockIn(uid);
+        });
+
+    /** The open clock on this block, if any. */
+    const runningOn = blockUid => {
+        const taskUid = clock.resolveTaskUid(blockUid);
+        return clock.getRunning().find(entry => entry.taskUid === taskUid) ?? null;
+    };
+
+    /**
+     * Attach a pomodoro to this block's session, clocking in first if needed, so
+     * one command covers both "start working, timed" and "time what I'm on".
+     */
+    const startPomodoro = blockUid =>
+        guard(async () => {
+            if (!blockUid) {
+                console.warn('[roam-logbook] no block to start a pomodoro on');
+                return;
+            }
+            const existing = runningOn(blockUid);
+            const clockUid = existing ? existing.clockUid : (await clock.clockIn(blockUid)).clockUid;
+            pomodoro.start(clockUid);
+            clock.refresh();
         });
 
     const registerSettings = () => {
@@ -111,6 +138,21 @@ function createController({ extensionAPI }) {
                     },
                 },
                 {
+                    id: SETTING_POMODORO_MINUTES,
+                    name: 'Pomodoro length',
+                    description:
+                        'Running past it turns the topbar entry red; the clock keeps going until you stop it.',
+                    action: {
+                        type: 'select',
+                        items: ['15', '20', '25', '30', '45', '60', '90'],
+                        defaultValue: '30',
+                        onChange: event => {
+                            extensionAPI.settings.set(SETTING_POMODORO_MINUTES, normalizeSelected(event));
+                            topbar.refresh();
+                        },
+                    },
+                },
+                {
                     id: SETTING_STALE_HOURS,
                     name: 'Flag unfinished clocks after',
                     description: 'How long a clock may run before it is called out as forgotten.',
@@ -133,16 +175,17 @@ function createController({ extensionAPI }) {
             extensionAPI.ui.commandPalette.addCommand({ label, callback });
 
         add(PALETTE_COMMANDS[0], clockInFocused);
-        add(PALETTE_COMMANDS[1], () =>
+        add(PALETTE_COMMANDS[1], () => startPomodoro(getFocusedBlockUid()));
+        add(PALETTE_COMMANDS[2], () =>
             guard(async () => {
                 const uid = getFocusedBlockUid();
                 if (uid) await clock.clockOutBlock(uid);
                 else await clock.clockOutAll();
             })
         );
-        add(PALETTE_COMMANDS[2], () => guard(() => clock.clockOutAll()));
-        add(PALETTE_COMMANDS[3], () => dashboard.open());
-        add(PALETTE_COMMANDS[4], () => {
+        add(PALETTE_COMMANDS[3], () => guard(() => clock.clockOutAll()));
+        add(PALETTE_COMMANDS[4], () => dashboard.open());
+        add(PALETTE_COMMANDS[5], () => {
             clock.refresh();
             dashboard.open();
         });
@@ -151,6 +194,18 @@ function createController({ extensionAPI }) {
             label: CONTEXT_CLOCK_IN,
             'display-conditional': canClockIn,
             callback: context => guard(() => clock.clockIn(context['block-uid'])),
+        });
+        window.roamAlphaAPI.ui.blockContextMenu.addCommand({
+            label: CONTEXT_POMODORO,
+            // Offered both on a task with no clock and on one already running
+            // without a pomodoro; pointless once a target is already set.
+            'display-conditional': context => {
+                const uid = context?.['block-uid'];
+                if (!uid) return false;
+                const entry = runningOn(uid);
+                return entry ? !pomodoro.isActive(entry.clockUid) : canClockIn(context);
+            },
+            callback: context => startPomodoro(context['block-uid']),
         });
         window.roamAlphaAPI.ui.blockContextMenu.addCommand({
             label: CONTEXT_CLOCK_OUT,
@@ -165,6 +220,8 @@ function createController({ extensionAPI }) {
             injectStyles(STYLE_ID, STYLES);
             registerSettings();
             registerCommands();
+            pomodoro.load();
+            detachPomodoro = pomodoro.attach();
             topbar.mount();
             // The graph is the source of truth, so a reload picks any clock left
             // running — including one abandoned days ago — straight back up.
@@ -173,11 +230,14 @@ function createController({ extensionAPI }) {
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            detachPomodoro?.();
+            detachPomodoro = null;
+            pomodoro.reset();
             topbar.unmount();
             dashboard.destroy();
             clock.reset();
             removeStyles(STYLE_ID);
-            for (const label of [CONTEXT_CLOCK_IN, CONTEXT_CLOCK_OUT]) {
+            for (const label of [CONTEXT_CLOCK_IN, CONTEXT_POMODORO, CONTEXT_CLOCK_OUT]) {
                 try {
                     window.roamAlphaAPI.ui.blockContextMenu.removeCommand({ label });
                 } catch (error) {

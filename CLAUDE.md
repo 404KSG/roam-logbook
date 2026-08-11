@@ -32,6 +32,12 @@ Layering, innermost first:
 - `roam.js` — the only module that touches `window.roamAlphaAPI`. Degrades to
   `null`/`[]` when a namespace is missing so it stays importable under Node.
 - `entries.js`, `clock.js` — read entries out of the graph; clock in/out/discard.
+  `refresh()` also tags each open clock with `priorMinutes`, so the topbar can show
+  a running task total every second without touching the query path.
+- `pomodoro.js` — targets layered over running clocks. Deliberately *not* in the
+  graph: a pomodoro is an intention, not a record, and the LOGBOOK drawer stays a
+  faithful org clock log. Lives in extension settings, keyed by clock uid, and is
+  pruned when its session ends. Overrunning never stops a clock.
 - `topbar.js`, `dashboard.js`, `styles.js` — plain DOM with Blueprint (`bp3-*`)
   classes. No React, no colour values that Blueprint already defines, so Roam's
   light/dark themes come for free.

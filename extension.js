@@ -65,9 +65,9 @@ function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 function startOfDaysAgo(date, days) {
-  const start = startOfDay(date);
-  start.setDate(start.getDate() - days);
-  return start;
+  const start2 = startOfDay(date);
+  start2.setDate(start2.getDate() - days);
+  return start2;
 }
 
 // src/org.js
@@ -98,23 +98,23 @@ function parseClockLine(string) {
   const match = CLOCK_RE.exec(string);
   if (!match)
     return null;
-  const start = parseTimestamp(match[1]);
-  if (!start)
+  const start2 = parseTimestamp(match[1]);
+  if (!start2)
     return null;
   const end = match[2] ? parseTimestamp(match[2]) : null;
   if (match[2] && !end)
     return null;
-  if (end && end.getTime() < start.getTime())
+  if (end && end.getTime() < start2.getTime())
     return null;
   const stated = match[3] ? parseDurationMinutes(match[3]) : null;
-  const minutes = end ? stated ?? durationMinutes(start.getTime(), end.getTime()) : null;
-  return { start, end, minutes, running: !end };
+  const minutes = end ? stated ?? durationMinutes(start2.getTime(), end.getTime()) : null;
+  return { start: start2, end, minutes, running: !end };
 }
-function formatClockLine(start, end) {
+function formatClockLine(start2, end) {
   if (!end)
-    return `${CLOCK_LABEL} ${formatStamp(start)}`;
-  const minutes = durationMinutes(start.getTime(), end.getTime());
-  return `${CLOCK_LABEL} ${formatStamp(start)}--${formatStamp(end)} => ${formatDurationMinutes(minutes)}`;
+    return `${CLOCK_LABEL} ${formatStamp(start2)}`;
+  const minutes = durationMinutes(start2.getTime(), end.getTime());
+  return `${CLOCK_LABEL} ${formatStamp(start2)}--${formatStamp(end)} => ${formatDurationMinutes(minutes)}`;
 }
 function referencedBlockUid(string) {
   if (typeof string !== "string")
@@ -350,11 +350,14 @@ var SETTING_TOPBAR = "showTopbarWidget";
 var SETTING_MULTIPLE = "allowMultipleClocks";
 var SETTING_TODO_ONLY = "todoBlocksOnly";
 var SETTING_STALE_HOURS = "staleHours";
+var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
+var SETTING_POMODORO_STATE = "pomodoroTargets";
 var DEFAULTS = {
   [SETTING_TOPBAR]: true,
   [SETTING_MULTIPLE]: false,
   [SETTING_TODO_ONLY]: true,
-  [SETTING_STALE_HOURS]: "8"
+  [SETTING_STALE_HOURS]: "8",
+  [SETTING_POMODORO_MINUTES]: "30"
 };
 var extensionAPI = null;
 function setExtensionAPI(api) {
@@ -376,6 +379,16 @@ function todoBlocksOnly() {
 function staleHours() {
   const parsed = Number(read(SETTING_STALE_HOURS));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+}
+function pomodoroMinutes() {
+  const parsed = Number(read(SETTING_POMODORO_MINUTES));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+}
+function readSetting(key) {
+  return extensionAPI?.settings?.get(key) ?? null;
+}
+function writeSetting(key, value) {
+  extensionAPI?.settings?.set(key, value);
 }
 function normalizeChecked(event) {
   return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
@@ -405,7 +418,14 @@ function notify() {
   }
 }
 function refresh() {
-  running = readAllEntries().filter((entry) => entry.running);
+  const all = readAllEntries();
+  const bankedByTask = /* @__PURE__ */ new Map();
+  for (const entry of all) {
+    if (entry.running)
+      continue;
+    bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
+  }
+  running = all.filter((entry) => entry.running).map((entry) => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
   notify();
   return running;
 }
@@ -1045,6 +1065,78 @@ function createDashboard() {
   };
 }
 
+// src/pomodoro.js
+var targets = /* @__PURE__ */ new Map();
+function load() {
+  targets = /* @__PURE__ */ new Map();
+  const raw = readSetting(SETTING_POMODORO_STATE);
+  if (!raw)
+    return;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    for (const [clockUid, minutes] of Object.entries(parsed || {})) {
+      const value = Number(minutes);
+      if (Number.isFinite(value) && value > 0)
+        targets.set(clockUid, value);
+    }
+  } catch (error) {
+    console.warn("[roam-logbook] could not read pomodoro state", error);
+  }
+}
+function persist() {
+  writeSetting(SETTING_POMODORO_STATE, JSON.stringify(Object.fromEntries(targets)));
+}
+function targetMinutes(clockUid) {
+  return targets.get(clockUid) ?? null;
+}
+function isActive(clockUid) {
+  return targets.has(clockUid);
+}
+function start(clockUid, minutes = pomodoroMinutes()) {
+  if (!clockUid || !(minutes > 0))
+    return false;
+  targets.set(clockUid, minutes);
+  persist();
+  return true;
+}
+function cancel(clockUid) {
+  if (!targets.delete(clockUid))
+    return false;
+  persist();
+  return true;
+}
+function toggle(clockUid, minutes = pomodoroMinutes()) {
+  return isActive(clockUid) ? !cancel(clockUid) : start(clockUid, minutes);
+}
+function prune(runningClockUids) {
+  const live = new Set(runningClockUids);
+  let changed = false;
+  for (const clockUid of [...targets.keys()]) {
+    if (!live.has(clockUid)) {
+      targets.delete(clockUid);
+      changed = true;
+    }
+  }
+  if (changed)
+    persist();
+  return changed;
+}
+function overrunMs(entry, now = Date.now()) {
+  const minutes = entry && targets.get(entry.clockUid);
+  if (!minutes)
+    return 0;
+  return Math.max(0, now - entry.start.getTime() - minutes * 6e4);
+}
+function isOverrun(entry, now = Date.now()) {
+  return overrunMs(entry, now) > 0;
+}
+function attach() {
+  return subscribe((running2) => prune(running2.map((entry) => entry.clockUid)));
+}
+function reset2() {
+  targets = /* @__PURE__ */ new Map();
+}
+
 // src/styles.js
 var STYLE_ID = "roam-logbook-styles";
 var STYLES = `
@@ -1103,6 +1195,28 @@ var STYLES = `
     color: #3dcc91;
 }
 
+/* Past the pomodoro target. Deliberately a soft red: the clock is still running
+   and nothing is wrong, it is a nudge to decide, not an error. */
+.rlb-topbar__button--overrun {
+    color: #cd4246;
+    background: rgba(205, 66, 70, 0.12);
+}
+
+.bp3-dark .rlb-topbar__button--overrun {
+    color: #ff7373;
+    background: rgba(255, 115, 115, 0.15);
+}
+
+.rlb-topbar__target {
+    flex: 0 0 auto;
+    opacity: 0.75;
+}
+
+.rlb-topbar__total {
+    flex: 0 0 auto;
+    opacity: 0.6;
+}
+
 .rlb-dot {
     width: 7px;
     height: 7px;
@@ -1115,6 +1229,10 @@ var STYLES = `
 .rlb-dot--stale {
     background: #d9822b;
     animation: none;
+}
+
+.rlb-dot--overrun {
+    background: #cd4246;
 }
 
 @keyframes rlb-pulse {
@@ -1176,6 +1294,19 @@ var STYLES = `
 
 .rlb-run:hover {
     background: rgba(167, 182, 194, 0.2);
+}
+
+.rlb-run--overrun .rlb-run__meta {
+    color: #cd4246;
+    opacity: 1;
+}
+
+.bp3-dark .rlb-run--overrun .rlb-run__meta {
+    color: #ff7373;
+}
+
+.rlb-run__pomodoro--on {
+    color: #cd4246;
 }
 
 .rlb-run__body {
@@ -1479,11 +1610,14 @@ var STYLES = `
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var TOPBAR_SELECTOR = ".rm-topbar";
+var LEFT_GROUP_SELECTOR = ".bp3-navbar-group.bp3-align-left";
 var TOPBAR_TITLE_LENGTH = 32;
 function createTopbar({ onOpenDashboard }) {
   let container = null;
   let labelNode = null;
   let timeNode = null;
+  let targetNode = null;
+  let totalNode = null;
   let titleNode = null;
   let iconNode = null;
   let buttonNode = null;
@@ -1511,12 +1645,23 @@ function createTopbar({ onOpenDashboard }) {
     if (!anchor || !popover)
       return;
     const width = popover.offsetWidth || 340;
+    const viewport = window.innerWidth || width + 16;
     popover.style.top = `${anchor.bottom + 6}px`;
-    popover.style.left = `${Math.max(8, anchor.right - width)}px`;
+    popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
+  };
+  const rowFigures = (entry, now) => {
+    const target = targetMinutes(entry.clockUid);
+    const elapsed = now - entry.start.getTime();
+    const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
+    return formatElapsed(elapsed) + (target ? ` / ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
   };
   const runningRow = (entry) => {
-    const row = el("div", "rlb-run");
-    row.appendChild(el("span", `rlb-dot${isStale(entry) ? " rlb-dot--stale" : ""}`));
+    const now = Date.now();
+    const overrun = isOverrun(entry, now);
+    const row = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
+    row.appendChild(
+      el("span", `rlb-dot${overrun ? " rlb-dot--overrun" : isStale(entry) ? " rlb-dot--stale" : ""}`)
+    );
     const body = el("div", "rlb-run__body");
     const title = button(
       "bp3-button bp3-minimal rlb-run__title",
@@ -1527,16 +1672,26 @@ function createTopbar({ onOpenDashboard }) {
       },
       { title: "Open this block" }
     );
-    const meta = el(
-      "div",
-      "rlb-run__meta",
-      `${formatElapsed(Date.now() - entry.start.getTime())} \xB7 since ${formatStamp(entry.start)}` + (entry.pageTitle ? ` \xB7 ${entry.pageTitle}` : "")
-    );
-    meta.dataset.startMs = String(entry.start.getTime());
-    meta.dataset.suffix = ` \xB7 since ${formatStamp(entry.start)}` + (entry.pageTitle ? ` \xB7 ${entry.pageTitle}` : "");
+    const suffix = ` \xB7 since ${formatStamp(entry.start)}` + (entry.pageTitle ? ` \xB7 ${entry.pageTitle}` : "");
+    const meta = el("div", "rlb-run__meta", rowFigures(entry, now) + suffix);
+    meta.dataset.clockUid = entry.clockUid;
+    meta.dataset.suffix = suffix;
     body.append(title, meta);
+    const target = targetMinutes(entry.clockUid);
     const actions = el("div", "rlb-run__actions");
     actions.append(
+      button(
+        `bp3-button bp3-minimal bp3-small bp3-icon-stopwatch${target ? " rlb-run__pomodoro--on" : ""}`,
+        "",
+        () => {
+          toggle(entry.clockUid);
+          renderButton();
+          renderPopover();
+        },
+        {
+          title: target ? `Pomodoro ${target}m \u2014 click to cancel` : `Start a ${pomodoroMinutes()}m pomodoro on this session`
+        }
+      ),
       button(
         "bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success",
         "",
@@ -1633,17 +1788,38 @@ function createTopbar({ onOpenDashboard }) {
       return;
     const entries = getRunning();
     const running2 = entries.length > 0;
-    buttonNode.classList.toggle("rlb-topbar__button--running", running2);
-    iconNode.className = running2 ? `rlb-dot${findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-time";
+    const now = Date.now();
+    const overrun = entries.some((entry) => isOverrun(entry, now));
+    const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
+    buttonNode.classList.toggle("rlb-topbar__button--running", running2 && !overrun);
+    buttonNode.classList.toggle("rlb-topbar__button--overrun", overrun);
+    iconNode.className = running2 ? `rlb-dot${overrun ? " rlb-dot--overrun" : stale ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-time";
     if (!running2) {
       timeNode.textContent = "";
+      targetNode.textContent = "";
+      totalNode.textContent = "";
       titleNode.textContent = "Logbook";
       buttonNode.title = "Logbook \u2014 no clock running";
+      buttonNode.setAttribute("aria-label", buttonNode.title);
+      return;
+    }
+    const [first] = entries;
+    const elapsed = now - first.start.getTime();
+    timeNode.textContent = formatElapsed(elapsed);
+    if (entries.length > 1) {
+      targetNode.textContent = "";
+      totalNode.textContent = "";
+      titleNode.textContent = ` \xB7 ${entries.length} clocks`;
+      buttonNode.title = `${entries.length} clocks running`;
     } else {
-      const [first] = entries;
-      timeNode.textContent = formatElapsed(Date.now() - first.start.getTime());
-      titleNode.textContent = entries.length > 1 ? ` \xB7 ${entries.length} clocks` : ` \xB7 ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
-      buttonNode.title = `Clocked in: ${first.title}`;
+      const target = targetMinutes(first.clockUid);
+      targetNode.textContent = target ? ` / ${formatElapsed(target * 6e4)}` : "";
+      const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
+      totalNode.textContent = ` \xB7 ${formatMinutesHuman(totalMinutes2)}`;
+      titleNode.textContent = ` \xB7 ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
+      buttonNode.title = `Clocked in: ${first.title}
+This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
+Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "");
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
   };
@@ -1652,11 +1828,17 @@ function createTopbar({ onOpenDashboard }) {
       return;
     renderButton();
     if (popover) {
+      const now = Date.now();
+      const byUid = new Map(getRunning().map((entry) => [entry.clockUid, entry]));
       for (const meta of popover.querySelectorAll(".rlb-run__meta")) {
-        const startMs = Number(meta.dataset.startMs);
-        if (!Number.isFinite(startMs))
+        const entry = byUid.get(meta.dataset.clockUid);
+        if (!entry)
           continue;
-        meta.textContent = formatElapsed(Date.now() - startMs) + (meta.dataset.suffix || "");
+        meta.textContent = rowFigures(entry, now) + (meta.dataset.suffix || "");
+        const row = meta.closest(".rlb-run");
+        if (row) {
+          row.classList.toggle("rlb-run--overrun", isOverrun(entry, now));
+        }
       }
     }
   };
@@ -1665,15 +1847,17 @@ function createTopbar({ onOpenDashboard }) {
     container.id = WIDGET_ID;
     iconNode = el("span", "bp3-icon bp3-icon-time");
     timeNode = el("span", "rlb-topbar__time");
+    targetNode = el("span", "rlb-topbar__target");
+    totalNode = el("span", "rlb-topbar__total");
     titleNode = el("span", "rlb-topbar__label");
     labelNode = el("span", "rlb-topbar__labels");
-    labelNode.append(timeNode, titleNode);
+    labelNode.append(timeNode, targetNode, totalNode, titleNode);
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
     buttonNode.append(iconNode, labelNode);
     container.appendChild(buttonNode);
     renderButton();
   };
-  const attach = () => {
+  const attach2 = () => {
     if (destroyed)
       return;
     if (!showTopbarWidget()) {
@@ -1687,7 +1871,11 @@ function createTopbar({ onOpenDashboard }) {
       return;
     if (!container)
       build();
-    topbar.appendChild(container);
+    const leftGroup = topbar.querySelector(LEFT_GROUP_SELECTOR);
+    if (leftGroup)
+      leftGroup.appendChild(container);
+    else
+      topbar.insertBefore(container, topbar.firstChild);
   };
   const remove = () => {
     closePopover();
@@ -1701,11 +1889,11 @@ function createTopbar({ onOpenDashboard }) {
           renderPopover();
       });
       ticker = setInterval(tick, 1e3);
-      observer = new MutationObserver(attach);
+      observer = new MutationObserver(attach2);
       observer.observe(document.body, { childList: true, subtree: true });
-      attach();
+      attach2();
     },
-    refresh: attach,
+    refresh: attach2,
     unmount() {
       destroyed = true;
       unsubscribe?.();
@@ -1724,8 +1912,10 @@ function createTopbar({ onOpenDashboard }) {
 // src/extension.js
 var CONTEXT_CLOCK_IN = "Logbook: Clock in";
 var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
+var CONTEXT_POMODORO = "Logbook: Start pomodoro";
 var PALETTE_COMMANDS = [
   "Logbook: Clock in current block",
+  "Logbook: Start pomodoro on current block",
   "Logbook: Clock out current block",
   "Logbook: Clock out all running clocks",
   "Logbook: Open dashboard",
@@ -1735,6 +1925,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
   const dashboard = createDashboard();
   const topbar = createTopbar({ onOpenDashboard: () => dashboard.open() });
   let destroyed = false;
+  let detachPomodoro = null;
   const targetString = (context) => {
     const uid = resolveTaskUid(context?.["block-uid"]);
     return getBlockString(uid) ?? context?.["block-string"] ?? "";
@@ -1759,6 +1950,20 @@ function createController({ extensionAPI: extensionAPI2 }) {
       return;
     }
     await clockIn(uid);
+  });
+  const runningOn = (blockUid) => {
+    const taskUid = resolveTaskUid(blockUid);
+    return getRunning().find((entry) => entry.taskUid === taskUid) ?? null;
+  };
+  const startPomodoro = (blockUid) => guard(async () => {
+    if (!blockUid) {
+      console.warn("[roam-logbook] no block to start a pomodoro on");
+      return;
+    }
+    const existing = runningOn(blockUid);
+    const clockUid = existing ? existing.clockUid : (await clockIn(blockUid)).clockUid;
+    start(clockUid);
+    refresh();
   });
   const registerSettings = () => {
     extensionAPI2.settings.panel.create({
@@ -1798,6 +2003,20 @@ function createController({ extensionAPI: extensionAPI2 }) {
           }
         },
         {
+          id: SETTING_POMODORO_MINUTES,
+          name: "Pomodoro length",
+          description: "Running past it turns the topbar entry red; the clock keeps going until you stop it.",
+          action: {
+            type: "select",
+            items: ["15", "20", "25", "30", "45", "60", "90"],
+            defaultValue: "30",
+            onChange: (event) => {
+              extensionAPI2.settings.set(SETTING_POMODORO_MINUTES, normalizeSelected(event));
+              topbar.refresh();
+            }
+          }
+        },
+        {
           id: SETTING_STALE_HOURS,
           name: "Flag unfinished clocks after",
           description: "How long a clock may run before it is called out as forgotten.",
@@ -1817,8 +2036,9 @@ function createController({ extensionAPI: extensionAPI2 }) {
   const registerCommands = () => {
     const add = (label, callback) => extensionAPI2.ui.commandPalette.addCommand({ label, callback });
     add(PALETTE_COMMANDS[0], clockInFocused);
+    add(PALETTE_COMMANDS[1], () => startPomodoro(getFocusedBlockUid()));
     add(
-      PALETTE_COMMANDS[1],
+      PALETTE_COMMANDS[2],
       () => guard(async () => {
         const uid = getFocusedBlockUid();
         if (uid)
@@ -1827,9 +2047,9 @@ function createController({ extensionAPI: extensionAPI2 }) {
           await clockOutAll();
       })
     );
-    add(PALETTE_COMMANDS[2], () => guard(() => clockOutAll()));
-    add(PALETTE_COMMANDS[3], () => dashboard.open());
-    add(PALETTE_COMMANDS[4], () => {
+    add(PALETTE_COMMANDS[3], () => guard(() => clockOutAll()));
+    add(PALETTE_COMMANDS[4], () => dashboard.open());
+    add(PALETTE_COMMANDS[5], () => {
       refresh();
       dashboard.open();
     });
@@ -1837,6 +2057,19 @@ function createController({ extensionAPI: extensionAPI2 }) {
       label: CONTEXT_CLOCK_IN,
       "display-conditional": canClockIn,
       callback: (context) => guard(() => clockIn(context["block-uid"]))
+    });
+    window.roamAlphaAPI.ui.blockContextMenu.addCommand({
+      label: CONTEXT_POMODORO,
+      // Offered both on a task with no clock and on one already running
+      // without a pomodoro; pointless once a target is already set.
+      "display-conditional": (context) => {
+        const uid = context?.["block-uid"];
+        if (!uid)
+          return false;
+        const entry = runningOn(uid);
+        return entry ? !isActive(entry.clockUid) : canClockIn(context);
+      },
+      callback: (context) => startPomodoro(context["block-uid"])
     });
     window.roamAlphaAPI.ui.blockContextMenu.addCommand({
       label: CONTEXT_CLOCK_OUT,
@@ -1850,6 +2083,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
       injectStyles(STYLE_ID, STYLES);
       registerSettings();
       registerCommands();
+      load();
+      detachPomodoro = attach();
       topbar.mount();
       refresh();
     },
@@ -1857,11 +2092,14 @@ function createController({ extensionAPI: extensionAPI2 }) {
       if (destroyed)
         return;
       destroyed = true;
+      detachPomodoro?.();
+      detachPomodoro = null;
+      reset2();
       topbar.unmount();
       dashboard.destroy();
       reset();
       removeStyles(STYLE_ID);
-      for (const label of [CONTEXT_CLOCK_IN, CONTEXT_CLOCK_OUT]) {
+      for (const label of [CONTEXT_CLOCK_IN, CONTEXT_POMODORO, CONTEXT_CLOCK_OUT]) {
         try {
           window.roamAlphaAPI.ui.blockContextMenu.removeCommand({ label });
         } catch (error) {

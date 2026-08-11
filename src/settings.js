@@ -9,12 +9,16 @@ export const SETTING_TOPBAR = 'showTopbarWidget';
 export const SETTING_MULTIPLE = 'allowMultipleClocks';
 export const SETTING_TODO_ONLY = 'todoBlocksOnly';
 export const SETTING_STALE_HOURS = 'staleHours';
+export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
+/** Internal, not shown in the panel: which running clocks have a pomodoro. */
+export const SETTING_POMODORO_STATE = 'pomodoroTargets';
 
 const DEFAULTS = {
     [SETTING_TOPBAR]: true,
     [SETTING_MULTIPLE]: false,
     [SETTING_TODO_ONLY]: true,
     [SETTING_STALE_HOURS]: '8',
+    [SETTING_POMODORO_MINUTES]: '30',
 };
 
 let extensionAPI = null;
@@ -43,6 +47,20 @@ export function todoBlocksOnly() {
 export function staleHours() {
     const parsed = Number(read(SETTING_STALE_HOURS));
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+}
+
+export function pomodoroMinutes() {
+    const parsed = Number(read(SETTING_POMODORO_MINUTES));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+}
+
+/** Raw access, for state the extension persists rather than the user edits. */
+export function readSetting(key) {
+    return extensionAPI?.settings?.get(key) ?? null;
+}
+
+export function writeSetting(key, value) {
+    extensionAPI?.settings?.set(key, value);
 }
 
 /** Blueprint switches call `onChange` with an event, the docs suggest a boolean. */

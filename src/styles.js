@@ -63,6 +63,28 @@ export const STYLES = `
     color: #3dcc91;
 }
 
+/* Past the pomodoro target. Deliberately a soft red: the clock is still running
+   and nothing is wrong, it is a nudge to decide, not an error. */
+.rlb-topbar__button--overrun {
+    color: #cd4246;
+    background: rgba(205, 66, 70, 0.12);
+}
+
+.bp3-dark .rlb-topbar__button--overrun {
+    color: #ff7373;
+    background: rgba(255, 115, 115, 0.15);
+}
+
+.rlb-topbar__target {
+    flex: 0 0 auto;
+    opacity: 0.75;
+}
+
+.rlb-topbar__total {
+    flex: 0 0 auto;
+    opacity: 0.6;
+}
+
 .rlb-dot {
     width: 7px;
     height: 7px;
@@ -75,6 +97,10 @@ export const STYLES = `
 .rlb-dot--stale {
     background: #d9822b;
     animation: none;
+}
+
+.rlb-dot--overrun {
+    background: #cd4246;
 }
 
 @keyframes rlb-pulse {
@@ -136,6 +162,19 @@ export const STYLES = `
 
 .rlb-run:hover {
     background: rgba(167, 182, 194, 0.2);
+}
+
+.rlb-run--overrun .rlb-run__meta {
+    color: #cd4246;
+    opacity: 1;
+}
+
+.bp3-dark .rlb-run--overrun .rlb-run__meta {
+    color: #ff7373;
+}
+
+.rlb-run__pomodoro--on {
+    color: #cd4246;
 }
 
 .rlb-run__body {

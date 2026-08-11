@@ -42,9 +42,26 @@ function notify() {
     }
 }
 
-/** Re-read the graph and publish the current set of open clocks. */
+/**
+ * Re-read the graph and publish the current set of open clocks.
+ *
+ * Each open clock is tagged with `priorMinutes`, the time already banked against
+ * the same task. The topbar needs a running total every second, and deriving it
+ * here — from a read we were making anyway — keeps that off the query path.
+ */
 export function refresh() {
-    running = readAllEntries().filter(entry => entry.running);
+    const all = readAllEntries();
+
+    const bankedByTask = new Map();
+    for (const entry of all) {
+        if (entry.running) continue;
+        bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
+    }
+
+    running = all
+        .filter(entry => entry.running)
+        .map(entry => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
+
     notify();
     return running;
 }

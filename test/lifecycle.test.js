@@ -48,6 +48,8 @@ const extensionAPI = {
 
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
+const pomodoro = await import('../src/pomodoro.js');
+const { formatStamp } = await import('../src/time.js');
 
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 const dialog = () => document.getElementById('roam-logbook-dashboard');
@@ -59,8 +61,11 @@ test.after(() => extension.onunload());
 test('onload mounts the topbar widget and registers every command', () => {
     assert.ok(topbarWidget(), 'widget should be attached to .rm-topbar');
     assert.equal(settingsPanel.tabTitle, 'Logbook');
-    assert.equal(paletteCommands.size, 5);
-    assert.deepEqual([...contextCommands.keys()], ['Logbook: Clock in', 'Logbook: Clock out']);
+    assert.equal(paletteCommands.size, 6);
+    assert.deepEqual(
+        [...contextCommands.keys()],
+        ['Logbook: Clock in', 'Logbook: Start pomodoro', 'Logbook: Clock out']
+    );
 });
 
 test('the context menu offers clock in on a TODO block only', () => {
@@ -84,6 +89,46 @@ test('clocking in through the context menu writes the drawer and lights the widg
         topbarWidget().querySelector('.rlb-topbar__button--running'),
         'widget should show the running state'
     );
+});
+
+test('the widget shows the task total alongside the running session', () => {
+    // A closed session already banked against the same task.
+    graph.store.set('drawerOld1', { uid: 'drawerOld1', string: 'LOGBOOK::', parent: 'taskone01', order: 0 });
+    graph.store.set('clockOld01', {
+        uid: 'clockOld01',
+        string: 'CLOCK:: [2026-08-08 Sat 09:00]--[2026-08-08 Sat 11:00] => 2:00',
+        parent: 'drawerOld1',
+        order: 0,
+    });
+    clock.refresh();
+
+    const [entry] = clock.getRunning();
+    assert.equal(entry.priorMinutes, 120, 'banked time is derived on refresh, not queried per tick');
+    // Total is prior sessions plus this one, so it exceeds the session counter.
+    assert.match(topbarWidget().querySelector('.rlb-topbar__total').textContent, /2h 0\dm/);
+});
+
+test('a pomodoro shows its target and goes red only once passed', () => {
+    const [entry] = clock.getRunning();
+    pomodoro.start(entry.clockUid, 30);
+    clock.refresh();
+
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, ' / 30:00');
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__button--overrun'), null);
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__button--running'));
+
+    // Backdate the CLOCK block itself — refresh re-reads from the graph, so
+    // mutating the in-memory entry would simply be overwritten.
+    graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 31 * 60_000))}`;
+    clock.refresh();
+
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__button--overrun'), 'entry turns red');
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__button--running'), null);
+    assert.match(topbarWidget().querySelector('button').title, /over by/);
+
+    pomodoro.cancel(entry.clockUid);
+    clock.refresh();
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, '');
 });
 
 test('a long task name is truncated in the widget but kept in the tooltip', () => {

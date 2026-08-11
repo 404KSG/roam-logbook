@@ -14,7 +14,9 @@ Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer und
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — a live counter shows the running session. Click it for the list of open clocks, where each one can be stopped, thrown away, or jumped to.
+**Topbar** — sits at the left of Roam's topbar, beside the navigation, so it never grows over the buttons on the right. It reads `12:34 · 2h 05m · task name`: the session so far, then everything banked against that task including this session. Click it for the list of open clocks, where each can be stopped, thrown away, given a pomodoro, or jumped to.
+
+**Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The counter becomes `12:34 / 30:00`. Past the target the entry turns a soft red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 
 **Dashboard** — `Logbook: Open dashboard`, or the button in the popover. Totals for today and the last 7 days, a per-day bar row, and a per-task tree over the range you pick.
 
@@ -61,6 +63,7 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Show topbar widget | on | The live counter and its clock list |
+| Pomodoro length | 30m | Target for a pomodoro session; running past it only changes the colour |
 | Only offer clock in on TODO blocks | on | Off lets any block be clocked |
 | Allow multiple clocks at once | off | On runs several clocks in parallel |
 | Flag unfinished clocks after | 8h | When a running clock is called out as forgotten |
