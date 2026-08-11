@@ -41,6 +41,16 @@ Layering, innermost first:
 - `topbar.js`, `dashboard.js`, `styles.js` — plain DOM with Blueprint (`bp3-*`)
   classes. No React, no colour values that Blueprint already defines, so Roam's
   light/dark themes come for free.
+
+  Two traps here, both of which have already cost a release:
+
+  - The topbar's markup is not a public contract. Do not anchor on a class name;
+    `afterNavigation` walks the *leading run* of topbar children and stops at the
+    first that carries no navigation icon. Whole-topbar searches let the right
+    sidebar's own arrow win. `test/placement.test.js` pins every shape.
+  - `.rlb-topbar__labels` is a flex row, and flex strips leading whitespace from
+    an item — `" · 44m"` renders as `"· 44m"`. Separators are `::before`
+    pseudo-elements and spacing is `gap`; never put them in the text.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 ## Testing

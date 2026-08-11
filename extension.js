@@ -1165,17 +1165,57 @@ var STYLES = `
 
 .rlb-topbar__labels {
     display: flex;
-    align-items: center;
+    align-items: baseline;
+    /* Flex strips leading whitespace from an item, so spacing between segments
+       has to come from gap; writing " . 44m" into the text silently loses the
+       space and renders as "19:50. 44m". */
+    gap: 5px;
     /* Without this the labels box refuses to shrink below its text, the button
        blows past max-width, and the ellipsis below never gets a chance to apply. */
     min-width: 0;
     overflow: hidden;
 }
 
+/* An empty segment would still earn a gap on both sides, so it is removed from
+   layout entirely rather than left as a zero-width item. */
+.rlb-topbar__labels > :empty {
+    display: none;
+}
+
+.rlb-topbar__target::before,
+.rlb-topbar__total::before,
+.rlb-topbar__label::before {
+    margin-right: 5px;
+    opacity: 0.45;
+}
+
+.rlb-topbar__target::before {
+    content: '/';
+}
+
+.rlb-topbar__total::before,
+.rlb-topbar__label::before {
+    content: '\xB7';
+}
+
 /* The counter is the point of the widget, so it is the one thing that never shrinks. */
 .rlb-topbar__time {
     flex: 0 0 auto;
     font-weight: 600;
+}
+
+/* Target and total are context for the counter, so they read quieter than it
+   and louder than the title, which the popover and tooltip both repeat. */
+.rlb-topbar__target {
+    flex: 0 0 auto;
+    font-weight: 600;
+    opacity: 0.55;
+}
+
+.rlb-topbar__total {
+    flex: 0 0 auto;
+    font-size: 0.92em;
+    opacity: 0.7;
 }
 
 /* The title is what gives way, down to an ellipsis. */
@@ -1185,6 +1225,8 @@ var STYLES = `
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.92em;
+    opacity: 0.8;
 }
 
 .rlb-topbar__button--running {
@@ -1205,16 +1247,6 @@ var STYLES = `
 .bp3-dark .rlb-topbar__button--overrun {
     color: #ff7373;
     background: rgba(255, 115, 115, 0.15);
-}
-
-.rlb-topbar__target {
-    flex: 0 0 auto;
-    opacity: 0.75;
-}
-
-.rlb-topbar__total {
-    flex: 0 0 auto;
-    opacity: 0.6;
 }
 
 .rlb-dot {
@@ -1610,7 +1642,7 @@ var STYLES = `
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var TOPBAR_SELECTOR = ".rm-topbar";
-var LEFT_GROUP_SELECTOR = ".bp3-navbar-group.bp3-align-left";
+var NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
 var TOPBAR_TITLE_LENGTH = 32;
 function createTopbar({ onOpenDashboard }) {
   let container = null;
@@ -1798,8 +1830,8 @@ function createTopbar({ onOpenDashboard }) {
       timeNode.textContent = "";
       targetNode.textContent = "";
       totalNode.textContent = "";
-      titleNode.textContent = "Logbook";
-      buttonNode.title = "Logbook \u2014 no clock running";
+      titleNode.textContent = "";
+      buttonNode.title = "Logbook \u2014 no clock running. Click for the dashboard.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -1809,14 +1841,14 @@ function createTopbar({ onOpenDashboard }) {
     if (entries.length > 1) {
       targetNode.textContent = "";
       totalNode.textContent = "";
-      titleNode.textContent = ` \xB7 ${entries.length} clocks`;
+      titleNode.textContent = `${entries.length} clocks`;
       buttonNode.title = `${entries.length} clocks running`;
     } else {
       const target = targetMinutes(first.clockUid);
-      targetNode.textContent = target ? ` / ${formatElapsed(target * 6e4)}` : "";
+      targetNode.textContent = target ? formatElapsed(target * 6e4) : "";
       const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
-      totalNode.textContent = ` \xB7 ${formatMinutesHuman(totalMinutes2)}`;
-      titleNode.textContent = ` \xB7 ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
+      totalNode.textContent = formatMinutesHuman(totalMinutes2);
+      titleNode.textContent = taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH });
       buttonNode.title = `Clocked in: ${first.title}
 This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
 Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "");
@@ -1871,11 +1903,20 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
       return;
     if (!container)
       build();
-    const leftGroup = topbar.querySelector(LEFT_GROUP_SELECTOR);
-    if (leftGroup)
-      leftGroup.appendChild(container);
-    else
-      topbar.insertBefore(container, topbar.firstChild);
+    topbar.insertBefore(container, afterNavigation(topbar));
+  };
+  const afterNavigation = (topbar) => {
+    let anchor = null;
+    for (const child of topbar.children) {
+      if (child === container || !isNavigationControl(child))
+        break;
+      anchor = child;
+    }
+    return anchor ? anchor.nextSibling : null;
+  };
+  const isNavigationControl = (element) => {
+    const carriesNavIcon = (node) => NAV_ICON_PATTERN.test(node.getAttribute?.("class") || "");
+    return carriesNavIcon(element) || [...element.querySelectorAll("[class]")].some(carriesNavIcon);
   };
   const remove = () => {
     closePopover();

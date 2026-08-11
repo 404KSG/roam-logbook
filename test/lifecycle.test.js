@@ -113,7 +113,9 @@ test('a pomodoro shows its target and goes red only once passed', () => {
     pomodoro.start(entry.clockUid, 30);
     clock.refresh();
 
-    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, ' / 30:00');
+    // The "/" separator is a CSS pseudo-element: flex eats leading spaces in
+    // text, so separators cannot live in the string.
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__target').textContent, '30:00');
     assert.equal(topbarWidget().querySelector('.rlb-topbar__button--overrun'), null);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__button--running'));
 
@@ -260,7 +262,11 @@ test('clocking out through the palette closes the entry', async () => {
     const drawer = graph.childrenOf('taskone01')[0];
     assert.match(graph.childrenOf(drawer.uid)[0].string, /\]--\[.*\] => \d+:\d\d$/);
     assert.ok(!topbarWidget().querySelector('.rlb-topbar__button--running'));
-    assert.match(topbarWidget().textContent, /Logbook/);
+    // Idle is icon-only — it earns no words in Roam's topbar — so the state
+    // shows up in the icon and the tooltip rather than in the text.
+    assert.equal(topbarWidget().textContent, '');
+    assert.ok(topbarWidget().querySelector('.bp3-icon-time'));
+    assert.match(topbarWidget().querySelector('button').title, /no clock running/);
 });
 
 test('onunload removes every trace of the extension', () => {

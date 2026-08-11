@@ -16,8 +16,16 @@ import { openBlock } from './roam.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
 const TOPBAR_SELECTOR = '.rm-topbar';
-/** Roam's left-hand navbar group; absent in some versions, hence the fallback. */
-const LEFT_GROUP_SELECTOR = '.bp3-navbar-group.bp3-align-left';
+
+/**
+ * Where Roam's own left-hand navigation ends.
+ *
+ * Nothing about the topbar's markup is a public contract, and a guessed class
+ * name already put this widget in front of the hamburger once. So the anchor is
+ * found by what the controls *are* — the forward arrow, else the menu toggle —
+ * matching on a class substring so a renamed variant still lands.
+ */
+const NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
 
 /**
  * A backstop, not the layout. CSS ellipsis does the real work — this only keeps a
@@ -247,11 +255,13 @@ export function createTopbar({ onOpenDashboard }) {
             : 'bp3-icon bp3-icon-time';
 
         if (!running) {
+            // Idle is icon-only. The topbar is Roam's space, and a label that
+            // says nothing beyond what the icon already says is rent unpaid.
             timeNode.textContent = '';
             targetNode.textContent = '';
             totalNode.textContent = '';
-            titleNode.textContent = 'Logbook';
-            buttonNode.title = 'Logbook — no clock running';
+            titleNode.textContent = '';
+            buttonNode.title = 'Logbook — no clock running. Click for the dashboard.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
         }
@@ -265,16 +275,16 @@ export function createTopbar({ onOpenDashboard }) {
             // neither is shown; the popover breaks the sessions out individually.
             targetNode.textContent = '';
             totalNode.textContent = '';
-            titleNode.textContent = ` · ${entries.length} clocks`;
+            titleNode.textContent = `${entries.length} clocks`;
             buttonNode.title = `${entries.length} clocks running`;
         } else {
             const target = pomodoro.targetMinutes(first.clockUid);
-            targetNode.textContent = target ? ` / ${formatElapsed(target * 60_000)}` : '';
+            targetNode.textContent = target ? formatElapsed(target * 60_000) : '';
 
             const totalMinutes = first.priorMinutes + Math.floor(elapsed / 60_000);
-            totalNode.textContent = ` · ${formatMinutesHuman(totalMinutes)}`;
+            totalNode.textContent = formatMinutesHuman(totalMinutes);
 
-            titleNode.textContent = ` · ${taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH })}`;
+            titleNode.textContent = taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH });
             // The tooltip spells out what the truncated button cannot.
             buttonNode.title =
                 `Clocked in: ${first.title}\n` +
@@ -340,11 +350,31 @@ export function createTopbar({ onOpenDashboard }) {
         if (!topbar) return;
         if (!container) build();
 
-        // Sit on the left, beside Roam's own navigation, rather than at the far
-        // right where the widget grows leftwards over the buttons already there.
-        const leftGroup = topbar.querySelector(LEFT_GROUP_SELECTOR);
-        if (leftGroup) leftGroup.appendChild(container);
-        else topbar.insertBefore(container, topbar.firstChild);
+        topbar.insertBefore(container, afterNavigation(topbar));
+    };
+
+    /**
+     * The node to insert before, so the widget lands just past the navigation.
+     *
+     * @returns {Node|null} null appends to the end — the safe default, since
+     *   guessing wrong on the left displaces controls the user needs, whereas on
+     *   the right the widget is merely in a less convenient spot.
+     */
+    const afterNavigation = topbar => {
+        let anchor = null;
+        // Walk the leading run only, and stop at the first child that is not a
+        // navigation control. Searching the whole topbar instead would let the
+        // right sidebar's own arrow win and drag the widget across to it.
+        for (const child of topbar.children) {
+            if (child === container || !isNavigationControl(child)) break;
+            anchor = child;
+        }
+        return anchor ? anchor.nextSibling : null;
+    };
+
+    const isNavigationControl = element => {
+        const carriesNavIcon = node => NAV_ICON_PATTERN.test(node.getAttribute?.('class') || '');
+        return carriesNavIcon(element) || [...element.querySelectorAll('[class]')].some(carriesNavIcon);
     };
 
     const remove = () => {

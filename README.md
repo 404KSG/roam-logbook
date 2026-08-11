@@ -14,7 +14,13 @@ Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer und
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — sits at the left of Roam's topbar, beside the navigation, so it never grows over the buttons on the right. It reads `12:34 · 2h 05m · task name`: the session so far, then everything banked against that task including this session. Click it for the list of open clocks, where each can be stopped, thrown away, given a pomodoro, or jumped to.
+**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single clock icon; running it reads
+
+```
+● 12:34 / 30:00 · 2h 05m · task name
+```
+
+the session so far, the pomodoro target when one is set, everything banked against that task, then the task itself. Weight and opacity fall off left to right, so the eye lands on the counter; the title is the first thing to ellipsize when space runs short and is repeated in full in the tooltip. Click for the list of open clocks, where each can be stopped, thrown away, given a pomodoro, or jumped to.
 
 **Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The counter becomes `12:34 / 30:00`. Past the target the entry turns a soft red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 

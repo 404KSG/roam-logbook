@@ -33,17 +33,57 @@ export const STYLES = `
 
 .rlb-topbar__labels {
     display: flex;
-    align-items: center;
+    align-items: baseline;
+    /* Flex strips leading whitespace from an item, so spacing between segments
+       has to come from gap; writing " . 44m" into the text silently loses the
+       space and renders as "19:50. 44m". */
+    gap: 5px;
     /* Without this the labels box refuses to shrink below its text, the button
        blows past max-width, and the ellipsis below never gets a chance to apply. */
     min-width: 0;
     overflow: hidden;
 }
 
+/* An empty segment would still earn a gap on both sides, so it is removed from
+   layout entirely rather than left as a zero-width item. */
+.rlb-topbar__labels > :empty {
+    display: none;
+}
+
+.rlb-topbar__target::before,
+.rlb-topbar__total::before,
+.rlb-topbar__label::before {
+    margin-right: 5px;
+    opacity: 0.45;
+}
+
+.rlb-topbar__target::before {
+    content: '/';
+}
+
+.rlb-topbar__total::before,
+.rlb-topbar__label::before {
+    content: '·';
+}
+
 /* The counter is the point of the widget, so it is the one thing that never shrinks. */
 .rlb-topbar__time {
     flex: 0 0 auto;
     font-weight: 600;
+}
+
+/* Target and total are context for the counter, so they read quieter than it
+   and louder than the title, which the popover and tooltip both repeat. */
+.rlb-topbar__target {
+    flex: 0 0 auto;
+    font-weight: 600;
+    opacity: 0.55;
+}
+
+.rlb-topbar__total {
+    flex: 0 0 auto;
+    font-size: 0.92em;
+    opacity: 0.7;
 }
 
 /* The title is what gives way, down to an ellipsis. */
@@ -53,6 +93,8 @@ export const STYLES = `
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.92em;
+    opacity: 0.8;
 }
 
 .rlb-topbar__button--running {
@@ -73,16 +115,6 @@ export const STYLES = `
 .bp3-dark .rlb-topbar__button--overrun {
     color: #ff7373;
     background: rgba(255, 115, 115, 0.15);
-}
-
-.rlb-topbar__target {
-    flex: 0 0 auto;
-    opacity: 0.75;
-}
-
-.rlb-topbar__total {
-    flex: 0 0 auto;
-    opacity: 0.6;
 }
 
 .rlb-dot {
