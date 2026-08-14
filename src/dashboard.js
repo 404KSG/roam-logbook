@@ -177,7 +177,17 @@ export function createDashboard() {
             const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
             toggleAll.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
 
-            const table = el('table', 'rlb-table');
+            const table = el('table', 'rlb-table rlb-task-table');
+            const columns = el('colgroup');
+            for (const className of [
+                'rlb-task-table__task',
+                'rlb-task-table__sessions',
+                'rlb-task-table__own',
+                'rlb-task-table__total',
+            ]) {
+                columns.appendChild(el('col', className));
+            }
+            table.appendChild(columns);
             table.appendChild(
                 headerRow([
                     'Task',

@@ -352,6 +352,7 @@ var SETTING_TODO_ONLY = "todoBlocksOnly";
 var SETTING_STALE_HOURS = "staleHours";
 var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
 var SETTING_POMODORO_STATE = "pomodoroTargets";
+var SETTING_PAUSED_BATCH = "pausedBatch";
 var DEFAULTS = {
   [SETTING_TOPBAR]: true,
   [SETTING_MULTIPLE]: false,
@@ -875,7 +876,17 @@ function createDashboard() {
       const rows = flattenForest(tree, { isCollapsed: (node) => collapsed.has(node.taskUid) });
       const anyExpanded = parentUids.some((uid) => !collapsed.has(uid));
       toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
-      const table = el("table", "rlb-table");
+      const table = el("table", "rlb-table rlb-task-table");
+      const columns = el("colgroup");
+      for (const className of [
+        "rlb-task-table__task",
+        "rlb-task-table__sessions",
+        "rlb-task-table__own",
+        "rlb-task-table__total"
+      ]) {
+        columns.appendChild(el("col", className));
+      }
+      table.appendChild(columns);
       table.appendChild(
         headerRow([
           "Task",
@@ -1104,6 +1115,10 @@ function persist() {
 function targetMinutes(clockUid) {
   return targets.get(clockUid) ?? null;
 }
+function targetDurationMs(clockUid) {
+  const minutes = targetMinutes(clockUid);
+  return minutes === null ? null : minutes * 6e4;
+}
 function isActive(clockUid) {
   return targets.has(clockUid);
 }
@@ -1113,6 +1128,11 @@ function start(clockUid, minutes = pomodoroMinutes()) {
   targets.set(clockUid, minutes);
   persist();
   return true;
+}
+function startDurationMs(clockUid, durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0)
+    return false;
+  return start(clockUid, durationMs / 6e4);
 }
 function cancel(clockUid) {
   if (!targets.delete(clockUid))
@@ -1159,6 +1179,225 @@ function reset2() {
   targets = /* @__PURE__ */ new Map();
 }
 
+// src/paused.js
+var VERSION = 1;
+var items = [];
+var notice = "";
+var listeners2 = /* @__PURE__ */ new Set();
+var cleanRecord = (value) => {
+  if (!value || typeof value !== "object")
+    return null;
+  const taskUid = typeof value.taskUid === "string" ? value.taskUid.trim() : "";
+  const title = typeof value.title === "string" ? value.title : "";
+  const pausedAtMs = Number(value.pausedAtMs);
+  const remaining = value.pomodoroRemainingMs;
+  const pomodoroRemainingMs = remaining === null || remaining === void 0 ? null : Number(remaining);
+  if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
+    return null;
+  if (pomodoroRemainingMs !== null && (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)) {
+    return null;
+  }
+  return { taskUid, title, pausedAtMs, pomodoroRemainingMs };
+};
+var serialized = () => JSON.stringify({ version: VERSION, items });
+function persist2() {
+  writeSetting(SETTING_PAUSED_BATCH, serialized());
+}
+function notify2() {
+  for (const listener of listeners2) {
+    try {
+      listener(getPaused());
+    } catch (error) {
+      console.error("[roam-logbook] paused-batch listener failed", error);
+    }
+  }
+}
+function subscribe2(listener) {
+  listeners2.add(listener);
+  listener(getPaused());
+  return () => listeners2.delete(listener);
+}
+function getPaused() {
+  return items.map((item) => ({ ...item }));
+}
+function getNotice() {
+  return notice;
+}
+function load2() {
+  items = [];
+  notice = "";
+  const raw = readSetting(SETTING_PAUSED_BATCH);
+  if (!raw)
+    return items;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!parsed || parsed.version !== VERSION || !Array.isArray(parsed.items)) {
+      throw new Error("unsupported paused-batch shape");
+    }
+    const byTask = /* @__PURE__ */ new Map();
+    for (const value of parsed.items) {
+      const record = cleanRecord(value);
+      if (!record)
+        throw new Error("invalid paused task record");
+      byTask.set(record.taskUid, record);
+    }
+    items = [...byTask.values()];
+  } catch (error) {
+    notice = "Saved paused-task state was invalid and has been discarded.";
+    console.warn("[roam-logbook] could not read paused task state", error);
+    persist2();
+  }
+  return getPaused();
+}
+var exactRemainder = (entry, nowMs) => {
+  const targetMs = targetDurationMs(entry.clockUid);
+  if (targetMs === null)
+    return null;
+  const remaining = targetMs - Math.max(0, nowMs - entry.start.getTime());
+  return remaining > 0 ? remaining : null;
+};
+async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
+  const running2 = getRunning().slice();
+  if (running2.length === 0)
+    return { paused: 0, failed: 0 };
+  notice = "";
+  const previous = new Map(
+    items.map((item) => {
+      const taskUid = resolveTaskUid(item.taskUid) || item.taskUid;
+      return [taskUid, { ...item, taskUid }];
+    })
+  );
+  const merged = new Map(previous);
+  const snapshots = running2.map((entry) => ({
+    taskUid: entry.taskUid,
+    title: entry.title,
+    pausedAtMs: now.getTime(),
+    pomodoroRemainingMs: exactRemainder(entry, now.getTime()),
+    clockUid: entry.clockUid
+  }));
+  for (const { clockUid: _clockUid, ...record } of snapshots) {
+    merged.set(record.taskUid, record);
+  }
+  items = [...merged.values()];
+  persist2();
+  let paused = 0;
+  let failed = 0;
+  for (const snapshot of snapshots) {
+    try {
+      if (await clockOut(snapshot.clockUid, { now })) {
+        paused += 1;
+      } else {
+        failed += 1;
+        if (previous.has(snapshot.taskUid))
+          merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
+        else
+          merged.delete(snapshot.taskUid);
+      }
+    } catch (error) {
+      failed += 1;
+      if (previous.has(snapshot.taskUid))
+        merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
+      else
+        merged.delete(snapshot.taskUid);
+      console.error("[roam-logbook] could not pause task", snapshot.taskUid, error);
+    }
+  }
+  items = [...merged.values()];
+  if (failed > 0)
+    notice = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
+  persist2();
+  notify2();
+  return { paused, failed };
+}
+var existingTask = (record) => {
+  const taskUid = resolveTaskUid(record.taskUid);
+  const string = getBlockString(taskUid);
+  return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
+};
+function resumeBlockReason() {
+  if (allowMultipleClocks())
+    return "";
+  const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
+  const valid = new Set(
+    items.map(existingTask).filter(Boolean).map((item) => item.taskUid).filter((uid) => !runningTasks.has(uid))
+  );
+  if (valid.size > 1 || valid.size > 0 && runningTasks.size > 0) {
+    return "Enable \u201CAllow multiple clocks at once\u201D in Logbook settings to resume this batch.";
+  }
+  return "";
+}
+async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
+  notice = "";
+  const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
+  const retained = [];
+  const ready = [];
+  const plannedTasks = /* @__PURE__ */ new Set();
+  let pruned = 0;
+  let satisfied = 0;
+  for (const record of items) {
+    const valid = existingTask(record);
+    if (!valid) {
+      pruned += 1;
+      continue;
+    }
+    if (runningTasks.has(valid.taskUid) || plannedTasks.has(valid.taskUid)) {
+      satisfied += 1;
+      continue;
+    }
+    plannedTasks.add(valid.taskUid);
+    ready.push(valid);
+  }
+  if (!allowMultipleClocks() && (ready.length > 1 || ready.length > 0 && runningTasks.size > 0)) {
+    notice = "Enable \u201CAllow multiple clocks at once\u201D in Logbook settings to resume this batch.";
+    if (pruned > 0)
+      notice += ` ${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`;
+    items = [...ready];
+    persist2();
+    notify2();
+    return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+  }
+  let resumed = 0;
+  let failed = 0;
+  for (const record of ready) {
+    try {
+      const result = await clockIn(record.taskUid, { now });
+      if (record.pomodoroRemainingMs) {
+        startDurationMs(result.clockUid, record.pomodoroRemainingMs);
+      }
+      resumed += 1;
+    } catch (error) {
+      failed += 1;
+      retained.push(record);
+      console.error("[roam-logbook] could not resume task", record.taskUid, error);
+    }
+  }
+  items = retained;
+  const messages = [];
+  if (pruned > 0)
+    messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
+  if (failed > 0)
+    messages.push(`${failed} Task${failed === 1 ? "" : "s"} could not be resumed.`);
+  notice = messages.join(" ");
+  persist2();
+  notify2();
+  return { resumed, failed, pruned, satisfied, blocked: false };
+}
+function clear() {
+  items = [];
+  notice = "";
+  persist2();
+  notify2();
+}
+async function clockOutAll2({ now = /* @__PURE__ */ new Date() } = {}) {
+  clear();
+  return clockOutAll({ now });
+}
+function reset3() {
+  items = [];
+  notice = "";
+  listeners2.clear();
+}
+
 // src/styles.js
 var STYLE_ID = "roam-logbook-styles";
 var STYLES = `
@@ -1169,7 +1408,7 @@ var STYLES = `
     min-width: 0;
     /* Roam's controls carry no margin of their own, so the widget has to keep
        its own distance rather than butt up against the one beside it. */
-    margin: 0 6px;
+    margin: 0 3px;
 }
 
 .rlb-topbar__button {
@@ -1179,7 +1418,7 @@ var STYLES = `
     min-width: 30px;
     height: 30px;
     min-height: 30px;
-    padding: 0 7px;
+    padding: 0 4px;
     overflow: visible;
     background: transparent;
     font-variant-numeric: tabular-nums;
@@ -1200,7 +1439,11 @@ var STYLES = `
     font-size: 14px;
     font-weight: 500;
     line-height: 1;
-    white-space: pre;
+    white-space: nowrap;
+}
+
+.rlb-topbar__separator {
+    margin: 0 4px;
 }
 
 .bp3-dark .rlb-topbar__parallel,
@@ -1300,8 +1543,35 @@ var STYLES = `
     opacity: 0.7;
 }
 
+.rlb-popover__subheading {
+    padding: 10px 6px 4px;
+    color: #5c7080;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rlb-paused-list {
+    padding: 0 6px 4px;
+}
+
+.rlb-paused-row {
+    padding: 4px 0;
+    overflow-wrap: anywhere;
+}
+
+.rlb-popover__notice {
+    margin: 6px;
+    padding: 6px 8px;
+    color: #8a4b08;
+    background: rgba(217, 130, 43, 0.14);
+    border-radius: 3px;
+}
+
 .rlb-popover__footer {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     padding-top: 8px;
     margin-top: 4px;
@@ -1624,6 +1894,28 @@ var STYLES = `
     white-space: nowrap;
 }
 
+/* Only the By Task rollup needs fixed numeric rails. The title column receives
+   all remaining room and wraps, while Running keeps its natural table layout. */
+.rlb-task-table {
+    table-layout: fixed;
+    min-width: 560px;
+}
+
+.rlb-task-table__sessions {
+    width: 80px;
+}
+
+.rlb-task-table__own,
+.rlb-task-table__total {
+    width: 88px;
+}
+
+.rlb-task-table .rlb-task-link {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+}
+
 .rlb-muted {
     opacity: 0.6;
 }
@@ -1666,7 +1958,7 @@ var STYLES = `
 }
 
 .rlb-dialog {
-    width: min(840px, calc(100vw - 32px));
+    width: min(960px, calc(100vw - 32px));
     height: min(860px, calc(100vh - 32px));
     max-height: none;
     overflow: hidden;
@@ -1898,9 +2190,11 @@ function createTopbar({ onOpenDashboard }) {
   let observer = null;
   let ticker = null;
   let unsubscribe = null;
+  let unsubscribePaused = null;
   let destroyed = false;
   const isStale = (entry) => findStaleClocks([entry], /* @__PURE__ */ new Date(), staleHours()).length > 0;
   const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
+  const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
   const closePopover = () => {
     popover?.remove();
     popover = null;
@@ -1963,7 +2257,7 @@ function createTopbar({ onOpenDashboard }) {
           renderPopover();
         },
         {
-          title: target ? `Pomodoro ${target}m \u2014 click to cancel` : `Start a ${pomodoroMinutes()}m pomodoro on this session`
+          title: target ? `Pomodoro ${pomodoroLabel(target)} \u2014 click to cancel` : `Start a ${pomodoroMinutes()}m pomodoro on this session`
         }
       ),
       button(
@@ -1995,15 +2289,16 @@ function createTopbar({ onOpenDashboard }) {
     if (!popover)
       return;
     const entries = getRunning();
+    const pausedItems = getPaused();
     popover.replaceChildren();
     popover.appendChild(
       el(
         "div",
         "rlb-popover__title",
-        entries.length ? `${taskCount(entries.length)} Running` : "Logbook"
+        entries.length ? `${taskCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook"
       )
     );
-    if (entries.length === 0) {
+    if (entries.length === 0 && pausedItems.length === 0) {
       popover.appendChild(
         el(
           "div",
@@ -2025,24 +2320,61 @@ function createTopbar({ onOpenDashboard }) {
       for (const entry of entries)
         popover.appendChild(runningRow(entry));
     }
+    if (pausedItems.length > 0) {
+      if (entries.length > 0) {
+        popover.appendChild(
+          el("div", "rlb-popover__subheading", `${taskCount(pausedItems.length)} Paused`)
+        );
+      }
+      const list = el("div", "rlb-paused-list");
+      for (const item of pausedItems) {
+        list.appendChild(el("div", "rlb-paused-row", item.title || item.taskUid));
+      }
+      popover.appendChild(list);
+    }
+    if (getNotice()) {
+      popover.appendChild(
+        el("div", "rlb-popover__notice bp3-text-small", getNotice())
+      );
+    }
     const footer = el("div", "rlb-popover__footer");
     footer.appendChild(
-      button("bp3-button bp3-small bp3-icon-timeline-bar-chart", "Dashboard", () => {
+      button("bp3-button bp3-small", "Dashboard", () => {
         closePopover();
         onOpenDashboard();
       })
     );
-    if (entries.length > 1) {
+    if (entries.length > 0) {
       footer.appendChild(
         button(
-          "bp3-button bp3-small bp3-icon-stop",
-          "Clock out all",
-          () => run(() => clockOutAll())
+          "bp3-button bp3-small",
+          "Pause All",
+          () => run(() => pauseAll())
         )
       );
     }
+    if (entries.length > 1) {
+      footer.appendChild(
+        button(
+          "bp3-button bp3-small",
+          "Clock Out All",
+          () => run(() => clockOutAll2())
+        )
+      );
+    }
+    if (pausedItems.length > 0) {
+      const reason = resumeBlockReason();
+      const resume = button(
+        "bp3-button bp3-small",
+        "Resume All",
+        () => run(() => resumeAll()),
+        { title: reason || "Resume paused Tasks with fresh Sessions" }
+      );
+      resume.disabled = Boolean(reason);
+      footer.appendChild(resume);
+    }
     footer.appendChild(
-      button("bp3-button bp3-small bp3-minimal bp3-icon-refresh", "", () => run(async () => refresh()), {
+      button("bp3-button bp3-small bp3-minimal", "Refresh", () => run(async () => refresh()), {
         title: "Re-read clocks from the graph"
       })
     );
@@ -2065,6 +2397,7 @@ function createTopbar({ onOpenDashboard }) {
     if (!buttonNode)
       return;
     const entries = getRunning();
+    const pausedItems = getPaused();
     const running2 = entries.length > 0;
     const now = Date.now();
     const overrun = entries.some((entry) => isOverrun(entry, now));
@@ -2074,7 +2407,7 @@ function createTopbar({ onOpenDashboard }) {
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       buttonNode.replaceChildren(iconNode);
-      buttonNode.title = "Logbook \u2014 no clock running. Click for the dashboard.";
+      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Task running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -2085,8 +2418,8 @@ function createTopbar({ onOpenDashboard }) {
     timeNode.textContent = formatElapsed(elapsed);
     if (entries.length > 1) {
       parallelNode.textContent = taskCount(entries.length);
-      separatorNode.textContent = " \xB7 ";
-      buttonNode.replaceChildren(parallelNode, separatorNode, timeNode);
+      separatorNode.textContent = "\xB7";
+      buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     } else {
       buttonNode.replaceChildren(timeNode);
     }
@@ -2099,7 +2432,7 @@ This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its t
       const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
       buttonNode.title = `Clocked in: ${first.title}
 This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
-Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
+Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
   };
@@ -2210,6 +2543,11 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
         if (popover)
           renderPopover();
       });
+      unsubscribePaused = subscribe2(() => {
+        renderButton();
+        if (popover)
+          renderPopover();
+      });
       ticker = setInterval(tick, 1e3);
       observer = new MutationObserver(attach2);
       observer.observe(document.body, { childList: true, subtree: true });
@@ -2220,6 +2558,8 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
       destroyed = true;
       unsubscribe?.();
       unsubscribe = null;
+      unsubscribePaused?.();
+      unsubscribePaused = null;
       if (ticker)
         clearInterval(ticker);
       ticker = null;
@@ -2366,10 +2706,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
         if (uid)
           await clockOutBlock(uid);
         else
-          await clockOutAll();
+          await clockOutAll2();
       })
     );
-    add(PALETTE_COMMANDS[3], () => guard(() => clockOutAll()));
+    add(PALETTE_COMMANDS[3], () => guard(() => clockOutAll2()));
     add(PALETTE_COMMANDS[4], () => dashboard.open());
     add(PALETTE_COMMANDS[5], () => {
       refresh();
@@ -2406,6 +2746,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       registerSettings();
       registerCommands();
       load();
+      load2();
       detachPomodoro = attach();
       topbar.mount();
       refresh();
@@ -2420,6 +2761,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       topbar.unmount();
       dashboard.destroy();
       reset();
+      reset3();
       removeStyles(STYLE_ID);
       for (const label of [CONTEXT_CLOCK_IN, CONTEXT_POMODORO, CONTEXT_CLOCK_OUT]) {
         try {

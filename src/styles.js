@@ -150,6 +150,32 @@ export const STYLES = `
     opacity: 0.7;
 }
 
+.rlb-popover__subheading {
+    padding: 10px 6px 4px;
+    color: #5c7080;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rlb-paused-list {
+    padding: 0 6px 4px;
+}
+
+.rlb-paused-row {
+    padding: 4px 0;
+    overflow-wrap: anywhere;
+}
+
+.rlb-popover__notice {
+    margin: 6px;
+    padding: 6px 8px;
+    color: #8a4b08;
+    background: rgba(217, 130, 43, 0.14);
+    border-radius: 3px;
+}
+
 .rlb-popover__footer {
     display: flex;
     flex-wrap: wrap;
@@ -475,6 +501,28 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+/* Only the By Task rollup needs fixed numeric rails. The title column receives
+   all remaining room and wraps, while Running keeps its natural table layout. */
+.rlb-task-table {
+    table-layout: fixed;
+    min-width: 560px;
+}
+
+.rlb-task-table__sessions {
+    width: 80px;
+}
+
+.rlb-task-table__own,
+.rlb-task-table__total {
+    width: 88px;
+}
+
+.rlb-task-table .rlb-task-link {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+}
+
 .rlb-muted {
     opacity: 0.6;
 }
@@ -517,7 +565,7 @@ export const STYLES = `
 }
 
 .rlb-dialog {
-    width: min(840px, calc(100vw - 32px));
+    width: min(960px, calc(100vw - 32px));
     height: min(860px, calc(100vh - 32px));
     max-height: none;
     overflow: hidden;

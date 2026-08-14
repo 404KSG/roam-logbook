@@ -48,6 +48,12 @@ export function targetMinutes(clockUid) {
     return targets.get(clockUid) ?? null;
 }
 
+/** Exact target duration, including a resumed sub-minute remainder. */
+export function targetDurationMs(clockUid) {
+    const minutes = targetMinutes(clockUid);
+    return minutes === null ? null : minutes * 60_000;
+}
+
 export function isActive(clockUid) {
     return targets.has(clockUid);
 }
@@ -57,6 +63,12 @@ export function start(clockUid, minutes = pomodoroMinutes()) {
     targets.set(clockUid, minutes);
     persist();
     return true;
+}
+
+/** Start a target from an exact saved duration without exposing decimal minutes. */
+export function startDurationMs(clockUid, durationMs) {
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return false;
+    return start(clockUid, durationMs / 60_000);
 }
 
 export function cancel(clockUid) {

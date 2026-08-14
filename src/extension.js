@@ -12,6 +12,7 @@ import { injectStyles, removeStyles } from './dom.js';
 import { getBlockString, getFocusedBlockUid } from './roam.js';
 import { isTaskBlock } from './org.js';
 import * as pomodoro from './pomodoro.js';
+import * as paused from './paused.js';
 import {
     normalizeChecked,
     normalizeSelected,
@@ -180,10 +181,10 @@ function createController({ extensionAPI }) {
             guard(async () => {
                 const uid = getFocusedBlockUid();
                 if (uid) await clock.clockOutBlock(uid);
-                else await clock.clockOutAll();
+                else await paused.clockOutAll();
             })
         );
-        add(PALETTE_COMMANDS[3], () => guard(() => clock.clockOutAll()));
+        add(PALETTE_COMMANDS[3], () => guard(() => paused.clockOutAll()));
         add(PALETTE_COMMANDS[4], () => dashboard.open());
         add(PALETTE_COMMANDS[5], () => {
             clock.refresh();
@@ -221,6 +222,7 @@ function createController({ extensionAPI }) {
             registerSettings();
             registerCommands();
             pomodoro.load();
+            paused.load();
             detachPomodoro = pomodoro.attach();
             topbar.mount();
             // The graph is the source of truth, so a reload picks any clock left
@@ -236,6 +238,7 @@ function createController({ extensionAPI }) {
             topbar.unmount();
             dashboard.destroy();
             clock.reset();
+            paused.reset();
             removeStyles(STYLE_ID);
             for (const label of [CONTEXT_CLOCK_IN, CONTEXT_POMODORO, CONTEXT_CLOCK_OUT]) {
                 try {

@@ -81,7 +81,7 @@ test('onload mounts the topbar widget and registers every command', () => {
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
-    assert.match(css, /width: min\(840px, calc\(100vw - 32px\)\)/);
+    assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
@@ -275,6 +275,14 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Tas
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
         assert.equal(popover.querySelector('.rlb-popover__title').textContent, '3 Tasks Running');
+        const footer = [...popover.querySelectorAll('.rlb-popover__footer button')];
+        assert.deepEqual(footer.map(node => node.textContent), [
+            'Dashboard',
+            'Pause All',
+            'Clock Out All',
+            'Refresh',
+        ]);
+        assert.ok(footer.every(node => !/\bbp3-icon-/.test(node.className)));
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -312,7 +320,11 @@ test('the popover lists the running clock', () => {
         assert.equal(action.getAttribute('aria-label'), action.title);
     }
     const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
-    assert.deepEqual(footerActions.map(action => action.textContent), ['Dashboard', 'Refresh']);
+    assert.deepEqual(footerActions.map(action => action.textContent), [
+        'Dashboard',
+        'Pause All',
+        'Refresh',
+    ]);
     for (const action of footerActions) {
         assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
@@ -343,6 +355,13 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.ok(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'));
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
+    const taskTable = dialog().querySelector('.rlb-task-table');
+    assert.ok(taskTable, 'By Task uses its own stable column contract');
+    assert.deepEqual(
+        [...taskTable.querySelectorAll('col')].map(column => column.className),
+        ['rlb-task-table__task', 'rlb-task-table__sessions', 'rlb-task-table__own', 'rlb-task-table__total']
+    );
+    assert.match(document.getElementById('roam-logbook-styles').textContent, /\.rlb-task-table \.rlb-task-link[^}]*white-space: normal/s);
 });
 
 test('the task tree collapses and expands from the caret', () => {
@@ -436,7 +455,7 @@ test('clocking out through the palette closes the entry', async () => {
     assert.equal(topbarWidget().textContent, '');
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(topbarWidget().querySelector('button').title, /no clock running/);
+    assert.match(topbarWidget().querySelector('button').title, /no Task running/);
 });
 
 test('a pomodoro survives unload and reload', async () => {

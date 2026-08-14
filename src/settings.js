@@ -12,6 +12,8 @@ export const SETTING_STALE_HOURS = 'staleHours';
 export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
 /** Internal, not shown in the panel: which running clocks have a pomodoro. */
 export const SETTING_POMODORO_STATE = 'pomodoroTargets';
+/** Internal, graph-scoped state for work deliberately paused as one batch. */
+export const SETTING_PAUSED_BATCH = 'pausedBatch';
 
 const DEFAULTS = {
     [SETTING_TOPBAR]: true,

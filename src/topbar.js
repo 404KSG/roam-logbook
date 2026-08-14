@@ -8,6 +8,7 @@
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
+import * as paused from './paused.js';
 import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { pomodoroMinutes, showTopbarWidget, staleHours } from './settings.js';
@@ -40,12 +41,15 @@ export function createTopbar({ onOpenDashboard }) {
     let observer = null;
     let ticker = null;
     let unsubscribe = null;
+    let unsubscribePaused = null;
     let destroyed = false;
 
     const isStale = entry =>
         findStaleClocks([entry], new Date(), staleHours()).length > 0;
 
     const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
+    const pomodoroLabel = minutes =>
+        Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 60_000);
 
     // ---- popover ----
 
@@ -132,7 +136,7 @@ export function createTopbar({ onOpenDashboard }) {
                 },
                 {
                     title: target
-                        ? `Pomodoro ${target}m — click to cancel`
+                        ? `Pomodoro ${pomodoroLabel(target)} — click to cancel`
                         : `Start a ${pomodoroMinutes()}m pomodoro on this session`,
                 }
             ),
@@ -166,17 +170,22 @@ export function createTopbar({ onOpenDashboard }) {
     function renderPopover() {
         if (!popover) return;
         const entries = clock.getRunning();
+        const pausedItems = paused.getPaused();
         popover.replaceChildren();
 
         popover.appendChild(
             el(
                 'div',
                 'rlb-popover__title',
-                entries.length ? `${taskCount(entries.length)} Running` : 'Logbook'
+                entries.length
+                    ? `${taskCount(entries.length)} Running`
+                    : pausedItems.length
+                      ? `${taskCount(pausedItems.length)} Paused`
+                      : 'Logbook'
             )
         );
 
-        if (entries.length === 0) {
+        if (entries.length === 0 && pausedItems.length === 0) {
             popover.appendChild(
                 el(
                     'div',
@@ -199,6 +208,25 @@ export function createTopbar({ onOpenDashboard }) {
             for (const entry of entries) popover.appendChild(runningRow(entry));
         }
 
+        if (pausedItems.length > 0) {
+            if (entries.length > 0) {
+                popover.appendChild(
+                    el('div', 'rlb-popover__subheading', `${taskCount(pausedItems.length)} Paused`)
+                );
+            }
+            const list = el('div', 'rlb-paused-list');
+            for (const item of pausedItems) {
+                list.appendChild(el('div', 'rlb-paused-row', item.title || item.taskUid));
+            }
+            popover.appendChild(list);
+        }
+
+        if (paused.getNotice()) {
+            popover.appendChild(
+                el('div', 'rlb-popover__notice bp3-text-small', paused.getNotice())
+            );
+        }
+
         const footer = el('div', 'rlb-popover__footer');
         footer.appendChild(
             button('bp3-button bp3-small', 'Dashboard', () => {
@@ -206,12 +234,30 @@ export function createTopbar({ onOpenDashboard }) {
                 onOpenDashboard();
             })
         );
+        if (entries.length > 0) {
+            footer.appendChild(
+                button('bp3-button bp3-small', 'Pause All', () =>
+                    run(() => paused.pauseAll())
+                )
+            );
+        }
         if (entries.length > 1) {
             footer.appendChild(
                 button('bp3-button bp3-small', 'Clock Out All', () =>
-                    run(() => clock.clockOutAll())
+                    run(() => paused.clockOutAll())
                 )
             );
+        }
+        if (pausedItems.length > 0) {
+            const reason = paused.resumeBlockReason();
+            const resume = button(
+                'bp3-button bp3-small',
+                'Resume All',
+                () => run(() => paused.resumeAll()),
+                { title: reason || 'Resume paused Tasks with fresh Sessions' }
+            );
+            resume.disabled = Boolean(reason);
+            footer.appendChild(resume);
         }
         footer.appendChild(
             button('bp3-button bp3-small bp3-minimal', 'Refresh', () => run(async () => clock.refresh()), {
@@ -240,6 +286,7 @@ export function createTopbar({ onOpenDashboard }) {
     const renderButton = () => {
         if (!buttonNode) return;
         const entries = clock.getRunning();
+        const pausedItems = paused.getPaused();
         const running = entries.length > 0;
         const now = Date.now();
         const overrun = entries.some(entry => pomodoro.isOverrun(entry, now));
@@ -250,7 +297,9 @@ export function createTopbar({ onOpenDashboard }) {
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             buttonNode.replaceChildren(iconNode);
-            buttonNode.title = 'Logbook — no clock running. Click for the dashboard.';
+            buttonNode.title = pausedItems.length
+                ? `${taskCount(pausedItems.length)} Paused — click to resume or review.`
+                : 'Logbook — no Task running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
         }
@@ -286,7 +335,7 @@ export function createTopbar({ onOpenDashboard }) {
                 `Clocked in: ${first.title}\n` +
                 `This session ${formatElapsed(elapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
                 (target
-                    ? `\nPomodoro ${target}m — ${
+                    ? `\nPomodoro ${pomodoroLabel(target)} — ${
                           overrun
                               ? `over by ${formatElapsed(pomodoro.overrunMs(first, now))}`
                               : `${formatElapsed(target * 60_000 - elapsed)} left`
@@ -453,6 +502,10 @@ export function createTopbar({ onOpenDashboard }) {
                 renderButton();
                 if (popover) renderPopover();
             });
+            unsubscribePaused = paused.subscribe(() => {
+                renderButton();
+                if (popover) renderPopover();
+            });
             ticker = setInterval(tick, 1000);
             observer = new MutationObserver(attach);
             observer.observe(document.body, { childList: true, subtree: true });
@@ -463,6 +516,8 @@ export function createTopbar({ onOpenDashboard }) {
             destroyed = true;
             unsubscribe?.();
             unsubscribe = null;
+            unsubscribePaused?.();
+            unsubscribePaused = null;
             if (ticker) clearInterval(ticker);
             ticker = null;
             observer?.disconnect();

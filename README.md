@@ -31,17 +31,21 @@ The extension reads and writes the local graph only. There are no analytics, net
 12:34
 ```
 
-With parallel timing enabled, it adds only the active-task count while preserving the same primary timer semantics — it does not sum the sessions:
+With parallel timing enabled, it follows the stable elapsed timer with only the active-task count while preserving the same primary timer semantics — it does not sum the sessions:
 
 ```
-2 Tasks · 0:28
+0:28 · 2 Tasks
 ```
 
-Task names, banked totals, Pomodoro targets, and actions stay in the tooltip and full running-task popover. Click the icon, time, or task count to open that popover, where each clock can be stopped, thrown away, given a Pomodoro, or jumped to.
+Task names, banked totals, Pomodoro targets, and actions stay in the tooltip and full running-task popover. Click the icon, time, or task count to open that popover, where each clock can be stopped, thrown away, given a Pomodoro, or jumped to. Footer actions are text-only; compact per-task controls remain icon buttons.
+
+**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. Clicking the idle history icon then shows the paused Tasks and **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
+
+If a running Session had an unfinished Pomodoro, its exact remaining budget continues on the new Session. A completed or overrun Pomodoro does not restart. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. Resuming more than one Task requires **Allow multiple clocks at once**; the extension never changes that setting or partially resumes the batch. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
 
 **Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The target stays in the popover and tooltip. Past the target, the elapsed time turns a restrained red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A centered analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. The By Task title column wraps while Sessions, Own, and Total keep stable numeric rails; narrow screens scroll only when those columns truly need it.
 
 ### Custom hotkeys
 
@@ -83,7 +87,7 @@ Clocks that have been open longer than the threshold (8 hours by default) are ma
 
 ### One clock or several
 
-By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `N Tasks · elapsed` using its existing primary live timer, while the popover lists every parallel task. Clocking the same task twice is refused so nothing gets double-counted.
+By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `elapsed · N Tasks` using its existing primary live timer, while the popover lists every parallel task. Clocking the same task twice is refused so nothing gets double-counted.
 
 ## Settings
 
