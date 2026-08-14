@@ -122,13 +122,13 @@ function referencedBlockUid(string) {
   const match = BLOCK_REF_ONLY_RE.exec(string) || EMBED_ONLY_RE.exec(string);
   return match ? match[1] : null;
 }
-function taskTitle(string, { maxLength = 80 } = {}) {
+function taskTitle(string, { maxLength = Infinity } = {}) {
   if (typeof string !== "string")
     return "(untitled)";
   const cleaned = string.replace(TODO_RE, "").replace(/\{\{\[\[?[^}]*\}\}/g, "").replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[\[([^\]]+)\]\]/g, "$1").replace(/#\[\[([^\]]+)\]\]/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
   if (!cleaned)
     return "(untitled)";
-  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}\u2026` : cleaned;
+  return Number.isFinite(maxLength) && cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}\u2026` : cleaned;
 }
 
 // src/roam.js
@@ -368,14 +368,29 @@ function read(key) {
   const value = extensionAPI?.settings?.get(key);
   return value === void 0 || value === null ? DEFAULTS[key] : value;
 }
+function booleanSetting(key) {
+  const value = read(key);
+  if (value === true || value === 1)
+    return true;
+  if (value === false || value === 0)
+    return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1")
+      return true;
+    if (normalized === "false" || normalized === "0")
+      return false;
+  }
+  return Boolean(DEFAULTS[key]);
+}
 function showTopbarWidget() {
-  return read(SETTING_TOPBAR) !== false;
+  return booleanSetting(SETTING_TOPBAR);
 }
 function allowMultipleClocks() {
-  return read(SETTING_MULTIPLE) === true;
+  return booleanSetting(SETTING_MULTIPLE);
 }
 function todoBlocksOnly() {
-  return read(SETTING_TODO_ONLY) !== false;
+  return booleanSetting(SETTING_TODO_ONLY);
 }
 function staleHours() {
   const parsed = Number(read(SETTING_STALE_HOURS));
@@ -396,6 +411,12 @@ function normalizeChecked(event) {
 }
 function normalizeSelected(event) {
   return typeof event === "string" ? event : String(event?.target?.value ?? "");
+}
+function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
+  const parsed = Number(normalizeSelected(event).trim());
+  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const rounded = Number(candidate.toFixed(6));
+  return String(rounded > 0 ? rounded : 30);
 }
 
 // src/clock.js
@@ -982,10 +1003,14 @@ function createDashboard() {
     mark.setAttribute("aria-label", done ? "Done" : "To do");
     return mark;
   };
-  const taskLink = (title, taskUid) => button("bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link", title, () => {
-    close();
-    void openBlock(taskUid);
-  }, { title: "Open this block" });
+  const taskLink = (title, taskUid) => {
+    const link = button("bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link", "", () => {
+      close();
+      void openBlock(taskUid);
+    }, { title: "Open this block" });
+    link.appendChild(el("span", "rlb-task-link__text", title));
+    return link;
+  };
   const act = async (action) => {
     try {
       await action();
@@ -1102,7 +1127,7 @@ function load() {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     for (const [clockUid, minutes] of Object.entries(parsed || {})) {
       const value = Number(minutes);
-      if (Number.isFinite(value) && value > 0)
+      if (Number.isFinite(value) && value >= 0)
         targets.set(clockUid, value);
     }
   } catch (error) {
@@ -1113,13 +1138,14 @@ function persist() {
   writeSetting(SETTING_POMODORO_STATE, JSON.stringify(Object.fromEntries(targets)));
 }
 function targetMinutes(clockUid) {
-  return targets.get(clockUid) ?? null;
+  const minutes = targets.get(clockUid);
+  return minutes > 0 ? minutes : null;
 }
 function targetDurationMs(clockUid) {
   const minutes = targetMinutes(clockUid);
   return minutes === null ? null : minutes * 6e4;
 }
-function isActive(clockUid) {
+function isAssigned(clockUid) {
   return targets.has(clockUid);
 }
 function start(clockUid, minutes = pomodoroMinutes()) {
@@ -1134,21 +1160,25 @@ function startDurationMs(clockUid, durationMs) {
     return false;
   return start(clockUid, durationMs / 6e4);
 }
-function cancel(clockUid) {
-  if (!targets.delete(clockUid))
+function suppress(clockUid) {
+  if (!clockUid)
     return false;
+  targets.set(clockUid, 0);
   persist();
   return true;
 }
-function toggle(clockUid, minutes = pomodoroMinutes()) {
-  return isActive(clockUid) ? !cancel(clockUid) : start(clockUid, minutes);
-}
-function prune(runningClockUids) {
-  const live = new Set(runningClockUids);
+function reconcile(running2) {
+  const live = new Set(running2.map((entry) => entry.clockUid));
   let changed = false;
   for (const clockUid of [...targets.keys()]) {
     if (!live.has(clockUid)) {
       targets.delete(clockUid);
+      changed = true;
+    }
+  }
+  for (const entry of running2) {
+    if (!targets.has(entry.clockUid)) {
+      targets.set(entry.clockUid, pomodoroMinutes());
       changed = true;
     }
   }
@@ -1172,7 +1202,7 @@ function attach() {
       sawInitialReplay = true;
       return;
     }
-    prune(running2.map((entry) => entry.clockUid));
+    reconcile(running2);
   });
 }
 function reset2() {
@@ -1192,12 +1222,13 @@ var cleanRecord = (value) => {
   const pausedAtMs = Number(value.pausedAtMs);
   const remaining = value.pomodoroRemainingMs;
   const pomodoroRemainingMs = remaining === null || remaining === void 0 ? null : Number(remaining);
+  const pomodoroSuppressed = value.pomodoroSuppressed === true;
   if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
     return null;
   if (pomodoroRemainingMs !== null && (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)) {
     return null;
   }
-  return { taskUid, title, pausedAtMs, pomodoroRemainingMs };
+  return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed };
 };
 var serialized = () => JSON.stringify({ version: VERSION, items });
 function persist2() {
@@ -1249,12 +1280,19 @@ function load2() {
   }
   return getPaused();
 }
-var exactRemainder = (entry, nowMs) => {
+var pomodoroSnapshot = (entry, nowMs) => {
   const targetMs = targetDurationMs(entry.clockUid);
-  if (targetMs === null)
-    return null;
+  if (targetMs === null) {
+    return {
+      pomodoroRemainingMs: null,
+      pomodoroSuppressed: isAssigned(entry.clockUid)
+    };
+  }
   const remaining = targetMs - Math.max(0, nowMs - entry.start.getTime());
-  return remaining > 0 ? remaining : null;
+  return {
+    pomodoroRemainingMs: remaining > 0 ? remaining : null,
+    pomodoroSuppressed: remaining <= 0
+  };
 };
 async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
   const running2 = getRunning().slice();
@@ -1272,7 +1310,7 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
     taskUid: entry.taskUid,
     title: entry.title,
     pausedAtMs: now.getTime(),
-    pomodoroRemainingMs: exactRemainder(entry, now.getTime()),
+    ...pomodoroSnapshot(entry, now.getTime()),
     clockUid: entry.clockUid
   }));
   for (const { clockUid: _clockUid, ...record } of snapshots) {
@@ -1314,18 +1352,6 @@ var existingTask = (record) => {
   const string = getBlockString(taskUid);
   return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
 };
-function resumeBlockReason() {
-  if (allowMultipleClocks())
-    return "";
-  const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
-  const valid = new Set(
-    items.map(existingTask).filter(Boolean).map((item) => item.taskUid).filter((uid) => !runningTasks.has(uid))
-  );
-  if (valid.size > 1 || valid.size > 0 && runningTasks.size > 0) {
-    return "Enable \u201CAllow multiple clocks at once\u201D in Logbook settings to resume this batch.";
-  }
-  return "";
-}
 async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   notice = "";
   const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
@@ -1347,14 +1373,18 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     plannedTasks.add(valid.taskUid);
     ready.push(valid);
   }
-  if (!allowMultipleClocks() && (ready.length > 1 || ready.length > 0 && runningTasks.size > 0)) {
-    notice = "Enable \u201CAllow multiple clocks at once\u201D in Logbook settings to resume this batch.";
-    if (pruned > 0)
-      notice += ` ${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`;
-    items = [...ready];
-    persist2();
-    notify2();
-    return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+  const needsMultiple = ready.length > 1 || ready.length > 0 && runningTasks.size > 0;
+  let enabledMultiple = false;
+  if (needsMultiple && !allowMultipleClocks()) {
+    writeSetting(SETTING_MULTIPLE, true);
+    if (!allowMultipleClocks()) {
+      notice = "Multiple clocks could not be enabled; no paused Tasks were resumed.";
+      items = [...ready];
+      persist2();
+      notify2();
+      return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+    }
+    enabledMultiple = true;
   }
   let resumed = 0;
   let failed = 0;
@@ -1363,6 +1393,8 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       const result = await clockIn(record.taskUid, { now });
       if (record.pomodoroRemainingMs) {
         startDurationMs(result.clockUid, record.pomodoroRemainingMs);
+      } else if (record.pomodoroSuppressed) {
+        suppress(result.clockUid);
       }
       resumed += 1;
     } catch (error) {
@@ -1373,6 +1405,9 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   items = retained;
   const messages = [];
+  if (enabledMultiple) {
+    messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
+  }
   if (pruned > 0)
     messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
   if (failed > 0)
@@ -1601,10 +1636,6 @@ var STYLES = `
 
 .bp3-dark .rlb-run--overrun .rlb-run__meta {
     color: #ff7373;
-}
-
-.rlb-run__pomodoro--on {
-    color: #cd4246;
 }
 
 .rlb-run__body {
@@ -1912,8 +1943,15 @@ var STYLES = `
 
 .rlb-task-table .rlb-task-link {
     white-space: normal;
+    overflow: visible;
     overflow-wrap: anywhere;
-    text-overflow: clip;
+    text-overflow: initial;
+}
+
+.rlb-task-table .rlb-task-link__text {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .rlb-muted {
@@ -2245,21 +2283,8 @@ function createTopbar({ onOpenDashboard }) {
     meta.dataset.clockUid = entry.clockUid;
     meta.dataset.suffix = suffix;
     body.append(title, meta);
-    const target = targetMinutes(entry.clockUid);
     const actions = el("div", "rlb-run__actions");
     actions.append(
-      button(
-        `bp3-button bp3-minimal bp3-small bp3-icon-stopwatch${target ? " rlb-run__pomodoro--on" : ""}`,
-        "",
-        () => {
-          toggle(entry.clockUid);
-          renderButton();
-          renderPopover();
-        },
-        {
-          title: target ? `Pomodoro ${pomodoroLabel(target)} \u2014 click to cancel` : `Start a ${pomodoroMinutes()}m pomodoro on this session`
-        }
-      ),
       button(
         "bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success",
         "",
@@ -2363,18 +2388,15 @@ function createTopbar({ onOpenDashboard }) {
       );
     }
     if (pausedItems.length > 0) {
-      const reason = resumeBlockReason();
-      const resume = button(
+      footer.appendChild(button(
         "bp3-button bp3-small",
         "Resume All",
         () => run(() => resumeAll()),
-        { title: reason || "Resume paused Tasks with fresh Sessions" }
-      );
-      resume.disabled = Boolean(reason);
-      footer.appendChild(resume);
+        { title: "Resume paused Tasks with fresh Sessions" }
+      ));
     }
     footer.appendChild(
-      button("bp3-button bp3-small bp3-minimal", "Refresh", () => run(async () => refresh()), {
+      button("bp3-button bp3-small bp3-minimal bp3-icon-refresh", "", () => run(async () => refresh()), {
         title: "Re-read clocks from the graph"
       })
     );
@@ -2574,10 +2596,8 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
 // src/extension.js
 var CONTEXT_CLOCK_IN = "Logbook: Clock in";
 var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
-var CONTEXT_POMODORO = "Logbook: Start pomodoro";
 var PALETTE_COMMANDS = [
   "Logbook: Clock in current block",
-  "Logbook: Start pomodoro on current block",
   "Logbook: Clock out current block",
   "Logbook: Clock out all running clocks",
   "Logbook: Open dashboard",
@@ -2612,20 +2632,6 @@ function createController({ extensionAPI: extensionAPI2 }) {
       return;
     }
     await clockIn(uid);
-  });
-  const runningOn = (blockUid) => {
-    const taskUid = resolveTaskUid(blockUid);
-    return getRunning().find((entry) => entry.taskUid === taskUid) ?? null;
-  };
-  const startPomodoro = (blockUid) => guard(async () => {
-    if (!blockUid) {
-      console.warn("[roam-logbook] no block to start a pomodoro on");
-      return;
-    }
-    const existing = runningOn(blockUid);
-    const clockUid = existing ? existing.clockUid : (await clockIn(blockUid)).clockUid;
-    start(clockUid);
-    refresh();
   });
   const registerSettings = () => {
     extensionAPI2.settings.panel.create({
@@ -2666,14 +2672,17 @@ function createController({ extensionAPI: extensionAPI2 }) {
         },
         {
           id: SETTING_POMODORO_MINUTES,
-          name: "Pomodoro length",
-          description: "Running past it turns the topbar entry red; the clock keeps going until you stop it.",
+          name: "Pomodoro duration (minutes)",
+          description: "Every new Session receives this target. Passing it turns elapsed time red; the clock keeps running.",
           action: {
-            type: "select",
-            items: ["15", "20", "25", "30", "45", "60", "90"],
+            type: "input",
+            placeholder: "30",
             defaultValue: "30",
             onChange: (event) => {
-              extensionAPI2.settings.set(SETTING_POMODORO_MINUTES, normalizeSelected(event));
+              extensionAPI2.settings.set(
+                SETTING_POMODORO_MINUTES,
+                normalizePositiveMinutes(event)
+              );
               topbar.refresh();
             }
           }
@@ -2698,9 +2707,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
   const registerCommands = () => {
     const add = (label, callback) => extensionAPI2.ui.commandPalette.addCommand({ label, callback });
     add(PALETTE_COMMANDS[0], clockInFocused);
-    add(PALETTE_COMMANDS[1], () => startPomodoro(getFocusedBlockUid()));
     add(
-      PALETTE_COMMANDS[2],
+      PALETTE_COMMANDS[1],
       () => guard(async () => {
         const uid = getFocusedBlockUid();
         if (uid)
@@ -2709,9 +2717,9 @@ function createController({ extensionAPI: extensionAPI2 }) {
           await clockOutAll2();
       })
     );
-    add(PALETTE_COMMANDS[3], () => guard(() => clockOutAll2()));
-    add(PALETTE_COMMANDS[4], () => dashboard.open());
-    add(PALETTE_COMMANDS[5], () => {
+    add(PALETTE_COMMANDS[2], () => guard(() => clockOutAll2()));
+    add(PALETTE_COMMANDS[3], () => dashboard.open());
+    add(PALETTE_COMMANDS[4], () => {
       refresh();
       dashboard.open();
     });
@@ -2719,19 +2727,6 @@ function createController({ extensionAPI: extensionAPI2 }) {
       label: CONTEXT_CLOCK_IN,
       "display-conditional": canClockIn,
       callback: (context) => guard(() => clockIn(context["block-uid"]))
-    });
-    window.roamAlphaAPI.ui.blockContextMenu.addCommand({
-      label: CONTEXT_POMODORO,
-      // Offered both on a task with no clock and on one already running
-      // without a pomodoro; pointless once a target is already set.
-      "display-conditional": (context) => {
-        const uid = context?.["block-uid"];
-        if (!uid)
-          return false;
-        const entry = runningOn(uid);
-        return entry ? !isActive(entry.clockUid) : canClockIn(context);
-      },
-      callback: (context) => startPomodoro(context["block-uid"])
     });
     window.roamAlphaAPI.ui.blockContextMenu.addCommand({
       label: CONTEXT_CLOCK_OUT,
@@ -2763,7 +2758,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       reset();
       reset3();
       removeStyles(STYLE_ID);
-      for (const label of [CONTEXT_CLOCK_IN, CONTEXT_POMODORO, CONTEXT_CLOCK_OUT]) {
+      for (const label of [CONTEXT_CLOCK_IN, CONTEXT_CLOCK_OUT]) {
         try {
           window.roamAlphaAPI.ui.blockContextMenu.removeCommand({ label });
         } catch (error) {

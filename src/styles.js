@@ -210,10 +210,6 @@ export const STYLES = `
     color: #ff7373;
 }
 
-.rlb-run__pomodoro--on {
-    color: #cd4246;
-}
-
 .rlb-run__body {
     flex: 1 1 auto;
     min-width: 0;
@@ -519,8 +515,15 @@ export const STYLES = `
 
 .rlb-task-table .rlb-task-link {
     white-space: normal;
+    overflow: visible;
     overflow-wrap: anywhere;
-    text-overflow: clip;
+    text-overflow: initial;
+}
+
+.rlb-task-table .rlb-task-link__text {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .rlb-muted {

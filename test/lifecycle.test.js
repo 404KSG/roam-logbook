@@ -72,11 +72,17 @@ test('onload mounts the topbar widget and registers every command', () => {
     assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.equal(settingsPanel.tabTitle, 'Logbook');
-    assert.equal(paletteCommands.size, 6);
+    assert.equal(paletteCommands.size, 5);
+    assert.equal(paletteCommands.has('Logbook: Start pomodoro on current block'), false);
     assert.deepEqual(
         [...contextCommands.keys()],
-        ['Logbook: Clock in', 'Logbook: Start pomodoro', 'Logbook: Clock out']
+        ['Logbook: Clock in', 'Logbook: Clock out']
     );
+    const pomodoroSetting = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
+    assert.equal(pomodoroSetting.name, 'Pomodoro duration (minutes)');
+    assert.equal(pomodoroSetting.action.type, 'input');
+    assert.equal(pomodoroSetting.action.placeholder, '30');
+    assert.equal(pomodoroSetting.action.defaultValue, '30');
 });
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
@@ -130,6 +136,8 @@ test('clocking in shows only the primary live elapsed time in the topbar', async
     const drawer = graph.childrenOf('taskone01')[0];
     assert.equal(drawer.string, 'LOGBOOK::');
     assert.ok(graph.childrenOf(drawer.uid)[0].string.startsWith('CLOCK:: ['));
+    const [running] = clock.getRunning();
+    assert.equal(pomodoro.targetMinutes(running.clockUid), 30, 'Clock In assigns the global target');
 
     assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
@@ -161,8 +169,7 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
 
 test('a Pomodoro overrun marks only the visible elapsed time', () => {
     const [entry] = clock.getRunning();
-    pomodoro.start(entry.clockUid, 30);
-    clock.refresh();
+    assert.equal(pomodoro.targetMinutes(entry.clockUid), 30);
 
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
@@ -178,13 +185,14 @@ test('a Pomodoro overrun marks only the visible elapsed time', () => {
     assert.equal(topbarWidget().querySelector('.rlb-topbar__button--overrun'), null);
     assert.match(topbarWidget().querySelector('button').title, /over by/);
 
-    pomodoro.cancel(entry.clockUid);
+    graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
     clock.refresh();
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
 });
 
 test('a stale clock marks only the visible elapsed time', () => {
     const [entry] = clock.getRunning();
+    pomodoro.suppress(entry.clockUid);
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 9 * 60 * 60_000))}`;
     clock.refresh();
 
@@ -280,9 +288,12 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Tas
             'Dashboard',
             'Pause All',
             'Clock Out All',
-            'Refresh',
+            '',
         ]);
-        assert.ok(footer.every(node => !/\bbp3-icon-/.test(node.className)));
+        assert.ok(footer.slice(0, -1).every(node => !/\bbp3-icon-/.test(node.className)));
+        assert.match(footer.at(-1).className, /\bbp3-icon-refresh\b/);
+        assert.equal(footer.at(-1).title, 'Re-read clocks from the graph');
+        assert.equal(footer.at(-1).getAttribute('aria-label'), 'Re-read clocks from the graph');
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -313,7 +324,8 @@ test('the popover lists the running clock', () => {
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
     assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Task Running');
     assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
-    for (const selector of ['.bp3-icon-stopwatch', '.bp3-icon-stop', '.bp3-icon-trash']) {
+    assert.equal(popover.querySelector('.bp3-icon-stopwatch'), null);
+    for (const selector of ['.bp3-icon-stop', '.bp3-icon-trash']) {
         const action = popover.querySelector(selector);
         assert.ok(action, `${selector} action should be present`);
         assert.ok(action.title);
@@ -323,17 +335,25 @@ test('the popover lists the running clock', () => {
     assert.deepEqual(footerActions.map(action => action.textContent), [
         'Dashboard',
         'Pause All',
-        'Refresh',
+        '',
     ]);
-    for (const action of footerActions) {
+    for (const action of footerActions.slice(0, -1)) {
         assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
+    const refresh = footerActions.at(-1);
+    assert.match(refresh.className, /\bbp3-icon-refresh\b/);
+    assert.equal(refresh.title, 'Re-read clocks from the graph');
+    assert.equal(refresh.getAttribute('aria-label'), 'Re-read clocks from the graph');
 
     click(topbarWidget().querySelector('button'));
     assert.equal(document.querySelector('.rlb-popover'), null, 'second click closes it');
 });
 
 test('the dashboard renders totals and the task breakdown', () => {
+    const fullTitle =
+        "Graph Engineering: How to Build AI Agent Systems That Don't Break at Scale * — complete continuation beyond eighty characters";
+    graph.store.get('taskone01').string = `{{[[TODO]]}} ${fullTitle}`;
+    clock.refresh();
     paletteCommands.get('Logbook: Open dashboard')();
 
     assert.ok(dialog().classList.contains('rlb-root--open'));
@@ -351,7 +371,7 @@ test('the dashboard renders totals and the task breakdown', () => {
         assert.equal(action.getAttribute('aria-label'), action.title);
     }
     assert.match(dialog().textContent, /Today/);
-    assert.match(dialog().textContent, /this is a test task/);
+    assert.match(dialog().textContent, /Graph Engineering:/);
     assert.ok(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'));
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
@@ -361,7 +381,17 @@ test('the dashboard renders totals and the task breakdown', () => {
         [...taskTable.querySelectorAll('col')].map(column => column.className),
         ['rlb-task-table__task', 'rlb-task-table__sessions', 'rlb-task-table__own', 'rlb-task-table__total']
     );
-    assert.match(document.getElementById('roam-logbook-styles').textContent, /\.rlb-task-table \.rlb-task-link[^}]*white-space: normal/s);
+    const longLink = [...taskTable.querySelectorAll('.rlb-task-link')].find(link =>
+        link.textContent.startsWith('Graph Engineering:')
+    );
+    assert.equal(longLink.textContent, fullTitle, 'the complete stored Task title stays readable');
+    assert.equal(longLink.querySelector('.rlb-task-link__text').textContent, fullTitle);
+    const css = document.getElementById('roam-logbook-styles').textContent;
+    assert.match(css, /\.rlb-task-table \.rlb-task-link[^}]*overflow: visible/s);
+    assert.match(css, /\.rlb-task-table \.rlb-task-link__text[^}]*white-space: normal/s);
+
+    graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
+    click(dialog().querySelector('.rlb-header .bp3-icon-refresh'));
 });
 
 test('the task tree collapses and expands from the caret', () => {
@@ -458,24 +488,52 @@ test('clocking out through the palette closes the entry', async () => {
     assert.match(topbarWidget().querySelector('button').title, /no Task running/);
 });
 
-test('a pomodoro survives unload and reload', async () => {
-    await contextCommands.get('Logbook: Start pomodoro').callback({ 'block-uid': 'taskone01' });
+test('automatic targets capture the configured duration per Session and recover missing state on reload', async () => {
+    const duration = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
+    duration.action.onChange({ target: { value: '45' } });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
     const before = clock.getRunning()[0];
     assert.ok(before, 'a clock should be running');
     assert.equal(pomodoro.isActive(before.clockUid), true);
+    assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 30m/);
+    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 45m/);
     assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
 
-    // A real reload: the module keeps no memory, only what reached settings.
+    duration.action.onChange({ target: { value: '20' } });
+    assert.equal(pomodoro.targetMinutes(before.clockUid), 45, 'an active Session keeps its captured target');
+    await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'taskone01' });
+    const originalFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;
+    window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
+    try {
+        await paletteCommands.get('Logbook: Clock in current block')();
+    } finally {
+        window.roamAlphaAPI.ui.getFocusedBlock = originalFocusedBlock;
+    }
+    const next = clock.getRunning()[0];
+    assert.notEqual(next.clockUid, before.clockUid);
+    assert.equal(pomodoro.targetMinutes(next.clockUid), 20, 'the next Session gets the new duration');
+
+    // A real reload with a running graph CLOCK but no target assignment: the
+    // session is discovered and receives the current duration from its original start.
+    graph.store.get(next.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 21 * 60_000))}`;
+    settingsStore.set('pomodoroTargets', '{}');
     extension.onunload();
     extension.onload({ extensionAPI });
 
     const after = clock.getRunning()[0];
-    assert.equal(after.clockUid, before.clockUid, 'the open clock comes back from the graph');
-    assert.equal(pomodoro.isActive(after.clockUid), true, 'and so does its pomodoro');
+    assert.equal(after.clockUid, next.clockUid, 'the open clock comes back from the graph');
+    assert.equal(pomodoro.targetMinutes(after.clockUid), 20, 'missing assignment is repaired on discovery');
+    assert.equal(clock.getRunning().length, 1, 'passing the repaired target never closes the CLOCK');
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 30m/);
+    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 20m/);
+
+    duration.action.onChange({ target: { value: '-4' } });
+    assert.equal(settingsStore.get('pomodoroMinutes'), '20', 'invalid input keeps the current safe value');
+    duration.action.onChange({ target: { value: '12.3456789' } });
+    assert.equal(settingsStore.get('pomodoroMinutes'), '12.345679');
+    assert.equal(pomodoro.targetMinutes(after.clockUid), 20, 'settings edits never rewrite an active target');
 });
 
 test('onunload removes every trace of the extension', () => {

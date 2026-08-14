@@ -34,16 +34,28 @@ function read(key) {
     return value === undefined || value === null ? DEFAULTS[key] : value;
 }
 
+function booleanSetting(key) {
+    const value = read(key);
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1') return true;
+        if (normalized === 'false' || normalized === '0') return false;
+    }
+    return Boolean(DEFAULTS[key]);
+}
+
 export function showTopbarWidget() {
-    return read(SETTING_TOPBAR) !== false;
+    return booleanSetting(SETTING_TOPBAR);
 }
 
 export function allowMultipleClocks() {
-    return read(SETTING_MULTIPLE) === true;
+    return booleanSetting(SETTING_MULTIPLE);
 }
 
 export function todoBlocksOnly() {
-    return read(SETTING_TODO_ONLY) !== false;
+    return booleanSetting(SETTING_TODO_ONLY);
 }
 
 export function staleHours() {
@@ -72,4 +84,12 @@ export function normalizeChecked(event) {
 
 export function normalizeSelected(event) {
     return typeof event === 'string' ? event : String(event?.target?.value ?? '');
+}
+
+/** Normalize an arbitrary positive minute input without persisting noisy decimals. */
+export function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
+    const parsed = Number(normalizeSelected(event).trim());
+    const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    const rounded = Number(candidate.toFixed(6));
+    return String(rounded > 0 ? rounded : 30);
 }

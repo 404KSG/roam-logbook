@@ -13,6 +13,7 @@ import { getBlockString } from './roam.js';
 import {
     allowMultipleClocks,
     readSetting,
+    SETTING_MULTIPLE,
     SETTING_PAUSED_BATCH,
     writeSetting,
 } from './settings.js';
@@ -29,6 +30,7 @@ const cleanRecord = value => {
     const pausedAtMs = Number(value.pausedAtMs);
     const remaining = value.pomodoroRemainingMs;
     const pomodoroRemainingMs = remaining === null || remaining === undefined ? null : Number(remaining);
+    const pomodoroSuppressed = value.pomodoroSuppressed === true;
     if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0) return null;
     if (
         pomodoroRemainingMs !== null &&
@@ -36,7 +38,7 @@ const cleanRecord = value => {
     ) {
         return null;
     }
-    return { taskUid, title, pausedAtMs, pomodoroRemainingMs };
+    return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed };
 };
 
 const serialized = () => JSON.stringify({ version: VERSION, items });
@@ -95,11 +97,19 @@ export function load() {
     return getPaused();
 }
 
-const exactRemainder = (entry, nowMs) => {
+const pomodoroSnapshot = (entry, nowMs) => {
     const targetMs = pomodoro.targetDurationMs(entry.clockUid);
-    if (targetMs === null) return null;
+    if (targetMs === null) {
+        return {
+            pomodoroRemainingMs: null,
+            pomodoroSuppressed: pomodoro.isAssigned(entry.clockUid),
+        };
+    }
     const remaining = targetMs - Math.max(0, nowMs - entry.start.getTime());
-    return remaining > 0 ? remaining : null;
+    return {
+        pomodoroRemainingMs: remaining > 0 ? remaining : null,
+        pomodoroSuppressed: remaining <= 0,
+    };
 };
 
 /** Close every current CLOCK while preserving enough state for a later resume. */
@@ -119,7 +129,7 @@ export async function pauseAll({ now = new Date() } = {}) {
         taskUid: entry.taskUid,
         title: entry.title,
         pausedAtMs: now.getTime(),
-        pomodoroRemainingMs: exactRemainder(entry, now.getTime()),
+        ...pomodoroSnapshot(entry, now.getTime()),
         clockUid: entry.clockUid,
     }));
 
@@ -163,19 +173,6 @@ const existingTask = record => {
     return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
 };
 
-/** Explain the all-or-nothing single-clock guard without changing persisted state. */
-export function resumeBlockReason() {
-    if (allowMultipleClocks()) return '';
-    const runningTasks = new Set(clock.getRunning().map(entry => entry.taskUid));
-    const valid = new Set(
-        items.map(existingTask).filter(Boolean).map(item => item.taskUid).filter(uid => !runningTasks.has(uid))
-    );
-    if (valid.size > 1 || (valid.size > 0 && runningTasks.size > 0)) {
-        return 'Enable “Allow multiple clocks at once” in Logbook settings to resume this batch.';
-    }
-    return '';
-}
-
 /** Start a fresh CLOCK for each valid paused task and consume successful records. */
 export async function resumeAll({ now = new Date() } = {}) {
     notice = '';
@@ -200,13 +197,21 @@ export async function resumeAll({ now = new Date() } = {}) {
         ready.push(valid);
     }
 
-    if (!allowMultipleClocks() && (ready.length > 1 || (ready.length > 0 && runningTasks.size > 0))) {
-        notice = 'Enable “Allow multiple clocks at once” in Logbook settings to resume this batch.';
-        if (pruned > 0) notice += ` ${pruned} missing Task${pruned === 1 ? ' was' : 's were'} removed.`;
-        items = [...ready];
-        persist();
-        notify();
-        return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+    const needsMultiple = ready.length > 1 || (ready.length > 0 && runningTasks.size > 0);
+    let enabledMultiple = false;
+    if (needsMultiple && !allowMultipleClocks()) {
+        // Resume All is explicit consent to restore the complete durable batch.
+        // Flip the graph-scoped setting before the first graph write so a failed
+        // setting persistence can never produce a partial one-clock outcome.
+        writeSetting(SETTING_MULTIPLE, true);
+        if (!allowMultipleClocks()) {
+            notice = 'Multiple clocks could not be enabled; no paused Tasks were resumed.';
+            items = [...ready];
+            persist();
+            notify();
+            return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+        }
+        enabledMultiple = true;
     }
 
     let resumed = 0;
@@ -216,6 +221,8 @@ export async function resumeAll({ now = new Date() } = {}) {
             const result = await clock.clockIn(record.taskUid, { now });
             if (record.pomodoroRemainingMs) {
                 pomodoro.startDurationMs(result.clockUid, record.pomodoroRemainingMs);
+            } else if (record.pomodoroSuppressed) {
+                pomodoro.suppress(result.clockUid);
             }
             resumed += 1;
         } catch (error) {
@@ -227,6 +234,9 @@ export async function resumeAll({ now = new Date() } = {}) {
 
     items = retained;
     const messages = [];
+    if (enabledMultiple) {
+        messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
+    }
     if (pruned > 0) messages.push(`${pruned} missing Task${pruned === 1 ? ' was' : 's were'} removed.`);
     if (failed > 0) messages.push(`${failed} Task${failed === 1 ? '' : 's'} could not be resumed.`);
     notice = messages.join(' ');

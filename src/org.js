@@ -107,8 +107,8 @@ export function referencedBlockUid(string) {
     return match ? match[1] : null;
 }
 
-/** Readable one-liner for menus, the topbar and the dashboard. */
-export function taskTitle(string, { maxLength = 80 } = {}) {
+/** Readable task text. Callers may opt into truncation for constrained surfaces. */
+export function taskTitle(string, { maxLength = Infinity } = {}) {
     if (typeof string !== 'string') return '(untitled)';
     const cleaned = string
         .replace(TODO_RE, '')
@@ -121,5 +121,7 @@ export function taskTitle(string, { maxLength = 80 } = {}) {
         .replace(/\s+/g, ' ')
         .trim();
     if (!cleaned) return '(untitled)';
-    return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}…` : cleaned;
+    return Number.isFinite(maxLength) && cleaned.length > maxLength
+        ? `${cleaned.slice(0, maxLength - 1)}…`
+        : cleaned;
 }

@@ -1,8 +1,8 @@
 /**
- * Pomodoro targets layered on top of running clocks.
+ * Automatic Pomodoro targets layered on top of running clocks.
  *
- * A pomodoro is an *intention*, not a record: it says "I meant this to take 30
- * minutes", and nothing about it belongs in the LOGBOOK drawer, which stays a
+ * A target is an *intention*, not a record, and nothing about it belongs in the
+ * LOGBOOK drawer, which stays a
  * faithful org clock log. So unlike clock state, this lives in extension
  * settings — keyed by clock uid, which is enough to survive a reload while a
  * session is still open.
@@ -19,7 +19,7 @@ import {
     writeSetting,
 } from './settings.js';
 
-/** @type {Map<string, number>} clock uid → target length in minutes */
+/** @type {Map<string, number>} clock uid → positive minutes, or 0 when suppressed */
 let targets = new Map();
 
 /** Read persisted targets. Bad state is discarded, never thrown. */
@@ -31,7 +31,7 @@ export function load() {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         for (const [clockUid, minutes] of Object.entries(parsed || {})) {
             const value = Number(minutes);
-            if (Number.isFinite(value) && value > 0) targets.set(clockUid, value);
+            if (Number.isFinite(value) && value >= 0) targets.set(clockUid, value);
         }
     } catch (error) {
         console.warn('[roam-logbook] could not read pomodoro state', error);
@@ -45,7 +45,8 @@ function persist() {
 }
 
 export function targetMinutes(clockUid) {
-    return targets.get(clockUid) ?? null;
+    const minutes = targets.get(clockUid);
+    return minutes > 0 ? minutes : null;
 }
 
 /** Exact target duration, including a resumed sub-minute remainder. */
@@ -55,6 +56,11 @@ export function targetDurationMs(clockUid) {
 }
 
 export function isActive(clockUid) {
+    return (targets.get(clockUid) ?? 0) > 0;
+}
+
+/** Whether this Session has been assigned, including an explicit suppression. */
+export function isAssigned(clockUid) {
     return targets.has(clockUid);
 }
 
@@ -71,17 +77,41 @@ export function startDurationMs(clockUid, durationMs) {
     return start(clockUid, durationMs / 60_000);
 }
 
+/** Mark a Session as intentionally having no active target (used after overrun resume). */
+export function suppress(clockUid) {
+    if (!clockUid) return false;
+    targets.set(clockUid, 0);
+    persist();
+    return true;
+}
+
 export function cancel(clockUid) {
     if (!targets.delete(clockUid)) return false;
     persist();
     return true;
 }
 
-export function toggle(clockUid, minutes = pomodoroMinutes()) {
-    return isActive(clockUid) ? !cancel(clockUid) : start(clockUid, minutes);
+/** Assign new Sessions and forget assignments whose clock has closed. */
+export function reconcile(running) {
+    const live = new Set(running.map(entry => entry.clockUid));
+    let changed = false;
+    for (const clockUid of [...targets.keys()]) {
+        if (!live.has(clockUid)) {
+            targets.delete(clockUid);
+            changed = true;
+        }
+    }
+    for (const entry of running) {
+        if (!targets.has(entry.clockUid)) {
+            targets.set(entry.clockUid, pomodoroMinutes());
+            changed = true;
+        }
+    }
+    if (changed) persist();
+    return changed;
 }
 
-/** Forget targets whose clock has been closed or discarded. */
+/** Backward-compatible explicit pruning seam used by older integrations/tests. */
 export function prune(runningClockUids) {
     const live = new Set(runningClockUids);
     let changed = false;
@@ -127,7 +157,7 @@ export function attach() {
             sawInitialReplay = true;
             return;
         }
-        prune(running.map(entry => entry.clockUid));
+        reconcile(running);
     });
 }
 

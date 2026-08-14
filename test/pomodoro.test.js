@@ -63,10 +63,17 @@ test('an unset or nonsense length still yields 30 minutes', () => {
     assert.equal(pomodoro.targetMinutes('c1'), 30);
 });
 
-test('toggling turns a pomodoro on and off', () => {
-    assert.equal(pomodoro.toggle('c1'), true);
-    assert.equal(pomodoro.isActive('c1'), true);
-    assert.equal(pomodoro.toggle('c1'), false);
+test('a suppressed assignment is durable and distinct from an active target', () => {
+    const store = useSettings();
+    assert.equal(pomodoro.suppress('c1'), true);
+    assert.equal(pomodoro.isAssigned('c1'), true);
+    assert.equal(pomodoro.isActive('c1'), false);
+    assert.equal(pomodoro.targetMinutes('c1'), null);
+
+    pomodoro.reset();
+    setExtensionAPI({ settings: { get: key => store.get(key), set: (key, value) => store.set(key, value) } });
+    pomodoro.load();
+    assert.equal(pomodoro.isAssigned('c1'), true);
     assert.equal(pomodoro.isActive('c1'), false);
 });
 
@@ -111,8 +118,8 @@ test('clocking out prunes the target through the clock subscription', async () =
     const detach = pomodoro.attach();
 
     const { clockUid } = await clock.clockIn('taskone01', { now: new Date(2026, 7, 8, 9, 0) });
-    pomodoro.start(clockUid, 30);
     assert.equal(pomodoro.isActive(clockUid), true);
+    assert.equal(pomodoro.targetMinutes(clockUid), 30, 'Clock In is assigned automatically');
 
     await clock.clockOut(clockUid, { now: new Date(2026, 7, 8, 10, 0) });
 

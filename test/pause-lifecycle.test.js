@@ -100,8 +100,8 @@ test.after(() => uninstallGraph());
 test('Pause All survives reload and Resume All starts fresh Sessions with the Pomodoro remainder', async t => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pausetwo2' });
-    await contextCommands.get('Logbook: Start pomodoro').callback({ 'block-uid': 'pauseone1' });
     assert.equal(clock.getRunning().length, 2);
+    assert.equal(pomodoro.targetMinutes(clock.getRunning()[0].clockUid), 30);
 
     t.mock.timers.tick(5 * 60_000 + 17_000);
     click(topbarButton());
@@ -113,11 +113,10 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.ok(clockLines('pausetwo2')[0].includes('--'));
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
     assert.ok(action('Resume All'));
-    assert.ok(
-        [...popover().querySelectorAll('.rlb-popover__footer button')].every(
-            button => !/\bbp3-icon-/.test(button.className)
-        )
-    );
+    const footer = [...popover().querySelectorAll('.rlb-popover__footer button')];
+    assert.ok(footer.slice(0, -1).every(button => !/\bbp3-icon-/.test(button.className)));
+    assert.match(footer.at(-1).className, /\bbp3-icon-refresh\b/);
+    assert.equal(footer.at(-1).textContent, '');
 
     const persisted = JSON.parse(settingsStore.get('pausedBatch'));
     assert.equal(persisted.version, 1);
@@ -143,14 +142,32 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     const resumedFirst = clock.getRunning().find(entry => entry.taskUid === 'pauseone1');
     assert.equal(pomodoro.targetDurationMs(resumedFirst.clockUid), 24 * 60_000 + 43_000);
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Running');
-    const resumedPomodoro = [...popover().querySelectorAll('.rlb-run')]
-        .find(row => row.textContent.includes('first paused task'))
-        .querySelector('.rlb-run__pomodoro--on');
-    assert.match(resumedPomodoro.title, /Pomodoro 24:43/);
-    assert.doesNotMatch(resumedPomodoro.title, /\d+\.\d+m/);
+    const resumedRow = [...popover().querySelectorAll('.rlb-run')]
+        .find(row => row.textContent.includes('first paused task'));
+    assert.match(resumedRow.querySelector('.rlb-run__meta').textContent, /24:43/);
+    assert.equal(resumedRow.querySelector('.bp3-icon-stopwatch'), null);
 });
 
-test('the single-clock setting blocks an all-or-nothing multi-task resume', () => {
+test('a persisted string true setting permits an all-or-nothing multi-task resume', async () => {
+    extension.onunload();
+    settingsStore.set('allowMultipleClocks', 'true');
+    savePaused([
+        savedRecord('pauseone1', 'first paused task'),
+        savedRecord('pausetwo2', 'second paused task'),
+    ]);
+    extension.onload({ extensionAPI });
+
+    click(topbarButton());
+    const resume = action('Resume All');
+    assert.equal(resume.disabled, false);
+    click(resume);
+    await settle();
+
+    assert.equal(clock.getRunning().length, 2);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+});
+
+test('Resume All explicitly enables multiple clocks and never leaves a partial one-clock result', async () => {
     extension.onunload();
     settingsStore.set('allowMultipleClocks', false);
     savePaused([
@@ -161,10 +178,14 @@ test('the single-clock setting blocks an all-or-nothing multi-task resume', () =
 
     click(topbarButton());
     const resume = action('Resume All');
-    assert.equal(resume.disabled, true);
-    assert.match(resume.title, /Enable “Allow multiple clocks at once”/);
-    assert.equal(clock.getRunning().length, 0);
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 2);
+    assert.equal(resume.disabled, false, 'explicit Resume All consent is always actionable');
+    click(resume);
+    await settle();
+
+    assert.equal(settingsStore.get('allowMultipleClocks'), true);
+    assert.equal(clock.getRunning().length, 2, 'the complete valid batch is restored');
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.match(popover().textContent, /Multiple clocks were enabled to resume 2 Tasks\./);
 });
 
 test('malformed paused state is discarded with a visible warning', t => {
@@ -226,17 +247,25 @@ test('a failed resume retains only the failed Task for retry', async t => {
 
 test('an overrun Pomodoro is not restarted after pause and resume', async t => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
-    await contextCommands.get('Logbook: Start pomodoro').callback({ 'block-uid': 'pauseone1' });
     t.mock.timers.tick(31 * 60_000);
 
     click(topbarButton());
     click(action('Pause All'));
     await settle();
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items[0].pomodoroRemainingMs, null);
+    const pausedRecord = JSON.parse(settingsStore.get('pausedBatch')).items[0];
+    assert.equal(pausedRecord.pomodoroRemainingMs, null);
+    assert.equal(pausedRecord.pomodoroSuppressed, true);
 
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    click(topbarButton());
     click(action('Resume All'));
     await settle();
-    assert.equal(pomodoro.targetMinutes(clock.getRunning()[0].clockUid), null);
+    const resumed = clock.getRunning()[0];
+    assert.equal(pomodoro.targetMinutes(resumed.clockUid), null);
+    assert.equal(pomodoro.isAssigned(resumed.clockUid), true);
+    assert.equal(pomodoro.isActive(resumed.clockUid), false);
+    assert.equal(JSON.parse(settingsStore.get('pomodoroTargets'))[resumed.clockUid], 0);
 });
 
 test('Clock Out All permanently finishes running Tasks and clears an older paused batch', async () => {

@@ -11,7 +11,7 @@ import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
 import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
 import { findStaleClocks } from './stats.js';
-import { pomodoroMinutes, showTopbarWidget, staleHours } from './settings.js';
+import { showTopbarWidget, staleHours } from './settings.js';
 import { openBlock } from './roam.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
@@ -121,25 +121,8 @@ export function createTopbar({ onOpenDashboard }) {
         meta.dataset.suffix = suffix;
         body.append(title, meta);
 
-        const target = pomodoro.targetMinutes(entry.clockUid);
         const actions = el('div', 'rlb-run__actions');
         actions.append(
-            button(
-                `bp3-button bp3-minimal bp3-small bp3-icon-stopwatch${
-                    target ? ' rlb-run__pomodoro--on' : ''
-                }`,
-                '',
-                () => {
-                    pomodoro.toggle(entry.clockUid);
-                    renderButton();
-                    renderPopover();
-                },
-                {
-                    title: target
-                        ? `Pomodoro ${pomodoroLabel(target)} — click to cancel`
-                        : `Start a ${pomodoroMinutes()}m pomodoro on this session`,
-                }
-            ),
             button(
                 'bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success',
                 '',
@@ -249,18 +232,15 @@ export function createTopbar({ onOpenDashboard }) {
             );
         }
         if (pausedItems.length > 0) {
-            const reason = paused.resumeBlockReason();
-            const resume = button(
+            footer.appendChild(button(
                 'bp3-button bp3-small',
                 'Resume All',
                 () => run(() => paused.resumeAll()),
-                { title: reason || 'Resume paused Tasks with fresh Sessions' }
-            );
-            resume.disabled = Boolean(reason);
-            footer.appendChild(resume);
+                { title: 'Resume paused Tasks with fresh Sessions' }
+            ));
         }
         footer.appendChild(
-            button('bp3-button bp3-small bp3-minimal', 'Refresh', () => run(async () => clock.refresh()), {
+            button('bp3-button bp3-small bp3-minimal bp3-icon-refresh', '', () => run(async () => clock.refresh()), {
                 title: 'Re-read clocks from the graph',
             })
         );

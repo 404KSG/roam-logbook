@@ -298,11 +298,14 @@ export function createDashboard() {
         return mark;
     };
 
-    const taskLink = (title, taskUid) =>
-        button('bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link', title, () => {
+    const taskLink = (title, taskUid) => {
+        const link = button('bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link', '', () => {
             close();
             void openBlock(taskUid);
         }, { title: 'Open this block' });
+        link.appendChild(el('span', 'rlb-task-link__text', title));
+        return link;
+    };
 
     const act = async action => {
         try {
