@@ -201,20 +201,20 @@ export function createTopbar({ onOpenDashboard }) {
 
         const footer = el('div', 'rlb-popover__footer');
         footer.appendChild(
-            button('bp3-button bp3-small bp3-icon-timeline-bar-chart', 'Dashboard', () => {
+            button('bp3-button bp3-small', 'Dashboard', () => {
                 closePopover();
                 onOpenDashboard();
             })
         );
         if (entries.length > 1) {
             footer.appendChild(
-                button('bp3-button bp3-small bp3-icon-stop', 'Clock out all', () =>
+                button('bp3-button bp3-small', 'Clock Out All', () =>
                     run(() => clock.clockOutAll())
                 )
             );
         }
         footer.appendChild(
-            button('bp3-button bp3-small bp3-minimal bp3-icon-refresh', '', () => run(async () => clock.refresh()), {
+            button('bp3-button bp3-small bp3-minimal', 'Refresh', () => run(async () => clock.refresh()), {
                 title: 'Re-read clocks from the graph',
             })
         );
@@ -265,8 +265,8 @@ export function createTopbar({ onOpenDashboard }) {
         timeNode.textContent = formatElapsed(elapsed);
         if (entries.length > 1) {
             parallelNode.textContent = taskCount(entries.length);
-            separatorNode.textContent = ' · ';
-            buttonNode.replaceChildren(parallelNode, separatorNode, timeNode);
+            separatorNode.textContent = '·';
+            buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         } else {
             buttonNode.replaceChildren(timeNode);
         }

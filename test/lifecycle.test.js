@@ -225,7 +225,7 @@ test('clock in is hidden and clock out offered while the clock runs', () => {
     assert.equal(contextCommands.get('Logbook: Clock out')['display-conditional'](context), true);
 });
 
-test('multiple-clock mode adds a neutral Task count without exposing task titles', async () => {
+test('multiple-clock mode leads with elapsed time and follows with a compact Task count', async () => {
     const [primary] = clock.getRunning();
     graph.store.get(primary.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 10 * 60_000))}`;
     graph.store.set('tasktwo002', {
@@ -234,39 +234,63 @@ test('multiple-clock mode adds a neutral Task count without exposing task titles
         parent: null,
         order: 10,
     });
+    graph.store.set('taskthree3', {
+        uid: 'taskthree3',
+        string: '{{[[TODO]]}} third parallel task',
+        parent: null,
+        order: 11,
+    });
     settingsStore.set('allowMultipleClocks', true);
     clock.refresh();
 
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'tasktwo002' });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskthree3' });
     try {
-        assert.equal(clock.getRunning().length, 2);
+        assert.equal(clock.getRunning().length, 3);
         // Keep the exact primary-session ordering supplied by the current clock
         // reader; the topbar must not invent a sum or expose task titles.
-        assert.match(topbarWidget().textContent.trim(), /^2 Tasks · \d+:\d{2}(?::\d{2})?$/);
-        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '2 Tasks');
-        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent.trim(), '·');
+        assert.match(
+            [...topbarWidget().querySelector('button').children]
+                .map(node => node.textContent)
+                .join(' '),
+            /^\d+:\d{2}(?::\d{2})? · 3 Tasks$/
+        );
+        const visible = [...topbarWidget().querySelector('button').children];
+        assert.deepEqual(visible.map(node => node.className.split(' ')[0]), [
+            'rlb-topbar__time',
+            'rlb-topbar__separator',
+            'rlb-topbar__parallel',
+        ]);
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Tasks');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent, '·');
         assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--overrun'), null);
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
-        assert.doesNotMatch(topbarWidget().textContent, /parallel task|this is a test task|clocks|\//);
-        assert.match(topbarWidget().querySelector('button').title, /^2 Tasks Running\n/);
+        assert.doesNotMatch(topbarWidget().textContent, /parallel task|third parallel task|this is a test task|clocks|\//);
+        assert.match(topbarWidget().querySelector('button').title, /^3 Tasks Running\n/);
         assert.doesNotMatch(topbarWidget().querySelector('button').title, /clocks running/i);
 
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
-        assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
-        assert.equal(popover.querySelector('.rlb-popover__title').textContent, '2 Tasks Running');
+        assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, '3 Tasks Running');
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
         await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'tasktwo002' });
+        await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'taskthree3' });
         settingsStore.set('allowMultipleClocks', false);
         for (const drawer of graph.childrenOf('tasktwo002')) {
             for (const child of graph.childrenOf(drawer.uid)) graph.store.delete(child.uid);
             graph.store.delete(drawer.uid);
         }
         graph.store.delete('tasktwo002');
+        for (const drawer of graph.childrenOf('taskthree3')) {
+            for (const child of graph.childrenOf(drawer.uid)) graph.store.delete(child.uid);
+            graph.store.delete(drawer.uid);
+        }
+        graph.store.delete('taskthree3');
         graph.store.get(primary.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
         clock.refresh();
     }
@@ -286,6 +310,11 @@ test('the popover lists the running clock', () => {
         assert.ok(action, `${selector} action should be present`);
         assert.ok(action.title);
         assert.equal(action.getAttribute('aria-label'), action.title);
+    }
+    const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
+    assert.deepEqual(footerActions.map(action => action.textContent), ['Dashboard', 'Refresh']);
+    for (const action of footerActions) {
+        assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
 
     click(topbarWidget().querySelector('button'));

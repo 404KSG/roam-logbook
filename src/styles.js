@@ -15,7 +15,7 @@ export const STYLES = `
     min-width: 0;
     /* Roam's controls carry no margin of their own, so the widget has to keep
        its own distance rather than butt up against the one beside it. */
-    margin: 0 6px;
+    margin: 0 3px;
 }
 
 .rlb-topbar__button {
@@ -25,7 +25,7 @@ export const STYLES = `
     min-width: 30px;
     height: 30px;
     min-height: 30px;
-    padding: 0 7px;
+    padding: 0 4px;
     overflow: visible;
     background: transparent;
     font-variant-numeric: tabular-nums;
@@ -46,7 +46,11 @@ export const STYLES = `
     font-size: 14px;
     font-weight: 500;
     line-height: 1;
-    white-space: pre;
+    white-space: nowrap;
+}
+
+.rlb-topbar__separator {
+    margin: 0 4px;
 }
 
 .bp3-dark .rlb-topbar__parallel,
@@ -148,6 +152,7 @@ export const STYLES = `
 
 .rlb-popover__footer {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     padding-top: 8px;
     margin-top: 4px;
