@@ -31,9 +31,27 @@ export const STYLES = `
     font-variant-numeric: tabular-nums;
 }
 
-.rlb-topbar__button > .bp3-icon {
+.rlb-topbar__icon {
     flex: 0 0 auto;
-    color: inherit;
+    color: #5c7080;
+}
+
+.bp3-dark .rlb-topbar__icon {
+    color: #a7b6c2;
+}
+
+.rlb-topbar__parallel,
+.rlb-topbar__separator {
+    color: #5c7080;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: pre;
+}
+
+.bp3-dark .rlb-topbar__parallel,
+.bp3-dark .rlb-topbar__separator {
+    color: #a7b6c2;
 }
 
 .rlb-topbar__time {

@@ -28,7 +28,7 @@ Only Blueprint icons already supplied by Roam are used:
 
 | Action | Blueprint icon |
 | --- | --- |
-| Idle topbar entry | `stopwatch` |
+| Idle topbar entry | `history` |
 | Pomodoro | `stopwatch` |
 | Clock out | `stop` |
 | Discard clock | `trash` |
@@ -40,8 +40,10 @@ The running topbar has no icon or status-dot DOM. Emoji, external icons, and cus
 
 ## Interaction and accessibility
 
-- The topbar is a minimal timing-state entry: idle is icon-only; running visibly shows only the existing primary session's elapsed time.
-- Task context, totals, Pomodoro targets, parallel-clock details, and actions remain available through the rich tooltip and running-clock popover.
+- The topbar widget belongs to Roam's left navigation cluster immediately after Back/Forward, before the main and right action controls. Descendant navigation signals and conservative left-side fallbacks keep placement stable across Roam rerenders without relying on one class name.
+- The topbar is a minimal timing-state entry: idle is a neutral-gray `history` icon; one running task visibly shows only the existing primary session's elapsed time; parallel timing shows `N Tasks · elapsed` without aggregating session time or exposing task titles.
+- The active-task count and separator remain neutral in light and dark themes. Normal, Pomodoro-overrun, and stale colors apply only to the elapsed-time element.
+- Task context, totals, Pomodoro targets, parallel-task details, and actions remain available through the rich tooltip and running-task popover. Count language is `1 Task Running` / `N Tasks Running`; clock action names remain unchanged.
 - Normal elapsed text uses Roam/Blueprint's neutral foreground family. Pomodoro overrun and stale states color only the elapsed text red or amber; the button has no status background or green treatment.
 - Dashboard functionality stays in the dashboard rather than moving into the popover.
 - Every icon-only control has both `title` and `aria-label` text.
@@ -73,4 +75,4 @@ Tests mock only Roam, time, and jsdom boundaries. Existing clock, parser, hierar
 4. Rebuild from a clean clone of the exact source commit.
 5. Publish the fork and submit a Draft Roam Depot entry for live preview.
 
-The Draft remains unmerged until a real Roam graph smoke test confirms topbar placement, Blueprint icon availability, light/dark appearance, context menus, hotkey customization, and dashboard behavior with existing `LOGBOOK::` data.
+The Draft remains unmerged until a real Roam graph smoke test confirms left-navigation placement, Blueprint `history` availability, light/dark appearance, parallel-task labeling, context menus, hotkey customization, and dashboard behavior with existing `LOGBOOK::` data.

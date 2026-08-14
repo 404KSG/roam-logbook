@@ -1185,9 +1185,27 @@ var STYLES = `
     font-variant-numeric: tabular-nums;
 }
 
-.rlb-topbar__button > .bp3-icon {
+.rlb-topbar__icon {
     flex: 0 0 auto;
-    color: inherit;
+    color: #5c7080;
+}
+
+.bp3-dark .rlb-topbar__icon {
+    color: #a7b6c2;
+}
+
+.rlb-topbar__parallel,
+.rlb-topbar__separator {
+    color: #5c7080;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: pre;
+}
+
+.bp3-dark .rlb-topbar__parallel,
+.bp3-dark .rlb-topbar__separator {
+    color: #a7b6c2;
 }
 
 .rlb-topbar__time {
@@ -1865,11 +1883,16 @@ var STYLES = `
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var TOPBAR_SELECTOR = ".rm-topbar";
-var NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
+var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
+var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
+var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
+var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 function createTopbar({ onOpenDashboard }) {
   let container = null;
   let timeNode = null;
   let iconNode = null;
+  let parallelNode = null;
+  let separatorNode = null;
   let buttonNode = null;
   let popover = null;
   let observer = null;
@@ -1877,6 +1900,7 @@ function createTopbar({ onOpenDashboard }) {
   let unsubscribe = null;
   let destroyed = false;
   const isStale = (entry) => findStaleClocks([entry], /* @__PURE__ */ new Date(), staleHours()).length > 0;
+  const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
   const closePopover = () => {
     popover?.remove();
     popover = null;
@@ -1973,7 +1997,11 @@ function createTopbar({ onOpenDashboard }) {
     const entries = getRunning();
     popover.replaceChildren();
     popover.appendChild(
-      el("div", "rlb-popover__title", entries.length ? "Running clocks" : "Logbook")
+      el(
+        "div",
+        "rlb-popover__title",
+        entries.length ? `${taskCount(entries.length)} Running` : "Logbook"
+      )
     );
     if (entries.length === 0) {
       popover.appendChild(
@@ -1990,7 +2018,7 @@ function createTopbar({ onOpenDashboard }) {
           el(
             "div",
             "rlb-popover__empty bp3-text-small",
-            `${stale.length} clock${stale.length > 1 ? "s have" : " has"} been open for over ${staleHours()}h \u2014 likely forgotten.`
+            `${taskCount(stale.length)} ${stale.length > 1 ? "have" : "has"} been open for over ${staleHours()}h \u2014 likely forgotten.`
           )
         );
       }
@@ -2042,7 +2070,7 @@ function createTopbar({ onOpenDashboard }) {
     const overrun = entries.some((entry) => isOverrun(entry, now));
     const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
     if (!running2) {
-      iconNode.className = "bp3-icon bp3-icon-stopwatch";
+      iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       buttonNode.replaceChildren(iconNode);
@@ -2055,9 +2083,15 @@ function createTopbar({ onOpenDashboard }) {
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(elapsed);
-    buttonNode.replaceChildren(timeNode);
     if (entries.length > 1) {
-      buttonNode.title = `${entries.length} clocks running
+      parallelNode.textContent = taskCount(entries.length);
+      separatorNode.textContent = " \xB7 ";
+      buttonNode.replaceChildren(parallelNode, separatorNode, timeNode);
+    } else {
+      buttonNode.replaceChildren(timeNode);
+    }
+    if (entries.length > 1) {
+      buttonNode.title = `${taskCount(entries.length)} Running
 Primary timer: ${first.title}
 This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
@@ -2091,7 +2125,9 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
   const build = () => {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
-    iconNode = el("span", "bp3-icon bp3-icon-stopwatch");
+    iconNode = el("span", "bp3-icon bp3-icon-history rlb-topbar__icon");
+    parallelNode = el("span", "rlb-topbar__parallel");
+    separatorNode = el("span", "rlb-topbar__separator");
     timeNode = el("span", "rlb-topbar__time");
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
     buttonNode.appendChild(iconNode);
@@ -2105,34 +2141,63 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
       remove();
       return;
     }
-    if (container?.isConnected)
-      return;
     const topbar = document.querySelector(TOPBAR_SELECTOR);
     if (!topbar)
       return;
     if (!container)
       build();
-    topbar.insertBefore(container, afterNavigation(topbar));
+    const placement = afterNavigation(topbar);
+    if (container.parentNode !== placement.parent || container.nextSibling !== placement.before) {
+      placement.parent.insertBefore(container, placement.before);
+    }
   };
   const afterNavigation = (topbar) => {
-    let anchor = null;
-    for (const child of topbar.children) {
-      if (child === container || !isNavigationControl(child))
-        break;
-      anchor = child;
+    const descendants = [...topbar.querySelectorAll("*")].filter(
+      (node) => node !== container && !container?.contains(node)
+    );
+    const mainIndex = descendants.findIndex(isMainControl);
+    const leading = mainIndex >= 0 ? descendants.slice(0, mainIndex) : descendants;
+    const signal = leading.find((node) => FORWARD_PATTERN.test(controlSignals(node))) || leading.find((node) => BACK_PATTERN.test(controlSignals(node))) || leading.find((node) => MENU_PATTERN.test(controlSignals(node)));
+    if (signal) {
+      const anchor = navigationCluster(signal, topbar);
+      const next = anchor.nextSibling;
+      return {
+        parent: anchor.parentNode,
+        before: next === container ? container.nextSibling : next
+      };
     }
-    return anchor ? anchor.nextSibling : null;
+    const main = descendants.find(isMainControl);
+    if (main) {
+      const boundary = surfaceChild(main, topbar);
+      return { parent: boundary.parentNode, before: boundary };
+    }
+    let surface = topbar;
+    while (surface.children.length === 1 && surface.firstElementChild !== container && surface.firstElementChild.children.length > 0) {
+      surface = surface.firstElementChild;
+    }
+    return { parent: surface, before: surface.firstElementChild?.nextSibling ?? null };
   };
-  const isNavigationControl = (element) => {
-    const classOf = (node) => node.getAttribute?.("class") || "";
-    const named = (node) => NAV_ICON_PATTERN.test(classOf(node));
-    if (named(element) || [...element.querySelectorAll("[class]")].some(named))
-      return true;
-    if (element.querySelector("input, textarea, select"))
-      return false;
-    if ((element.textContent || "").trim().length > 0)
-      return false;
-    return Boolean(element.querySelector("svg") || /icon/i.test(classOf(element)));
+  const controlSignals = (element) => [
+    element.className,
+    element.getAttribute?.("data-icon"),
+    element.getAttribute?.("aria-label"),
+    element.getAttribute?.("title"),
+    element.getAttribute?.("data-name")
+  ].filter((value) => typeof value === "string").join(" ").replaceAll("_", "-").toLowerCase();
+  const isMainControl = (element) => element.matches?.('input, textarea, select, [contenteditable="true"]') || MAIN_CONTROL_PATTERN.test(controlSignals(element));
+  const navigationCluster = (signal, topbar) => {
+    let anchor = signal.closest?.('button, a, [role="button"]') || signal;
+    while (anchor.parentElement && anchor.parentElement !== topbar && ![...anchor.parentElement.querySelectorAll("*")].some(isMainControl)) {
+      anchor = anchor.parentElement;
+    }
+    return anchor;
+  };
+  const surfaceChild = (signal, topbar) => {
+    let boundary = signal;
+    while (boundary.parentElement && boundary.parentElement !== topbar && !boundary.previousElementSibling) {
+      boundary = boundary.parentElement;
+    }
+    return boundary;
   };
   const remove = () => {
     closePopover();
@@ -2229,7 +2294,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
         {
           id: SETTING_TOPBAR,
           name: "Show topbar widget",
-          description: "The live counter and its clock list in Roam\u2019s topbar.",
+          description: "The live counter and its running-task list in Roam\u2019s left navigation.",
           action: {
             type: "switch",
             defaultValue: true,

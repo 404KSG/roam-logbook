@@ -68,7 +68,8 @@ test.after(() => extension.onunload());
 test('onload mounts the topbar widget and registers every command', () => {
     assert.ok(topbarWidget(), 'widget should be attached to .rm-topbar');
     assert.equal(topbarWidget().textContent, '', 'idle stays icon-only');
-    assert.ok(topbarWidget().querySelector('.bp3-icon-stopwatch'));
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__icon.bp3-icon-history'));
+    assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.equal(settingsPanel.tabTitle, 'Logbook');
     assert.equal(paletteCommands.size, 6);
@@ -91,6 +92,10 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-topbar__time[^}]*min-width: 4\.6ch/s);
     assert.match(css, /\.rlb-topbar__time--neutral[^}]*#5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
+    assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
+    assert.match(css, /\.bp3-dark \.rlb-topbar__icon[^}]*color: #a7b6c2/s);
+    assert.match(css, /\.rlb-topbar__parallel,[^}]*color: #5c7080/s);
+    assert.match(css, /\.bp3-dark \.rlb-topbar__parallel,[^}]*color: #a7b6c2/s);
     for (const state of ['neutral', 'overrun', 'stale']) {
         assert.match(css, new RegExp(`\\.rlb-topbar__time--${state}\\s*{`));
     }
@@ -189,6 +194,13 @@ test('a stale clock marks only the visible elapsed time', () => {
     assert.match(topbarWidget().textContent.trim(), /^9:\d{2}:\d{2}$/);
     assert.match(topbarWidget().querySelector('button').title, /likely forgotten/);
 
+    click(topbarWidget().querySelector('button'));
+    const popover = document.querySelector('body > .rlb-popover');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Task Running');
+    assert.match(popover.textContent, /1 Task has been open for over 8h/);
+    assert.doesNotMatch(popover.textContent, /clock has been open/i);
+    click(topbarWidget().querySelector('button'));
+
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
     clock.refresh();
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
@@ -213,7 +225,7 @@ test('clock in is hidden and clock out offered while the clock runs', () => {
     assert.equal(contextCommands.get('Logbook: Clock out')['display-conditional'](context), true);
 });
 
-test('multiple-clock mode keeps the primary elapsed timer minimal', async () => {
+test('multiple-clock mode adds a neutral Task count without exposing task titles', async () => {
     const [primary] = clock.getRunning();
     graph.store.get(primary.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 10 * 60_000))}`;
     graph.store.set('tasktwo002', {
@@ -229,14 +241,22 @@ test('multiple-clock mode keeps the primary elapsed timer minimal', async () => 
     try {
         assert.equal(clock.getRunning().length, 2);
         // Keep the exact primary-session ordering supplied by the current clock
-        // reader; the topbar must not invent a sum or expose parallel details.
-        assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
+        // reader; the topbar must not invent a sum or expose task titles.
+        assert.match(topbarWidget().textContent.trim(), /^2 Tasks · \d+:\d{2}(?::\d{2})?$/);
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '2 Tasks');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent.trim(), '·');
+        assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--overrun'), null);
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
-        assert.doesNotMatch(topbarWidget().textContent, /parallel task|clocks|\/|·/);
-        assert.match(topbarWidget().querySelector('button').title, /2 clocks running/);
+        assert.doesNotMatch(topbarWidget().textContent, /parallel task|this is a test task|clocks|\//);
+        assert.match(topbarWidget().querySelector('button').title, /^2 Tasks Running\n/);
+        assert.doesNotMatch(topbarWidget().querySelector('button').title, /clocks running/i);
 
         click(topbarWidget().querySelector('button'));
-        assert.equal(document.querySelectorAll('body > .rlb-popover .rlb-run').length, 2);
+        const popover = document.querySelector('body > .rlb-popover');
+        assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, '2 Tasks Running');
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -259,7 +279,7 @@ test('the popover lists the running clock', () => {
 
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
-    assert.match(popover.textContent, /Running clocks/);
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Task Running');
     assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
     for (const selector of ['.bp3-icon-stopwatch', '.bp3-icon-stop', '.bp3-icon-trash']) {
         const action = popover.querySelector(selector);
@@ -385,7 +405,7 @@ test('clocking out through the palette closes the entry', async () => {
     // Idle is icon-only — it earns no words in Roam's topbar — so the state
     // shows up in the icon and the tooltip rather than in the text.
     assert.equal(topbarWidget().textContent, '');
-    assert.ok(topbarWidget().querySelector('.bp3-icon-stopwatch'));
+    assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.match(topbarWidget().querySelector('button').title, /no clock running/);
 });

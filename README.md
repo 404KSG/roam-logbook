@@ -25,13 +25,19 @@ The extension reads and writes the local graph only. There are no analytics, net
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single stopwatch icon. While a clock runs, the topbar becomes only its live elapsed time:
+**Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. With one running task, it becomes only that task's live elapsed time:
 
 ```
 12:34
 ```
 
-Task names, banked totals, Pomodoro targets, parallel clocks, and actions stay in the tooltip and full running-clocks popover. Click the time to open that popover, where each clock can be stopped, thrown away, given a Pomodoro, or jumped to.
+With parallel timing enabled, it adds only the active-task count while preserving the same primary timer semantics — it does not sum the sessions:
+
+```
+2 Tasks · 0:28
+```
+
+Task names, banked totals, Pomodoro targets, and actions stay in the tooltip and full running-task popover. Click the icon, time, or task count to open that popover, where each clock can be stopped, thrown away, given a Pomodoro, or jumped to.
 
 **Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The target stays in the popover and tooltip. Past the target, the elapsed time turns a restrained red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 
@@ -77,13 +83,13 @@ Clocks that have been open longer than the threshold (8 hours by default) are ma
 
 ### One clock or several
 
-By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar still shows only its existing primary live timer, while the popover lists every parallel clock. Clocking the same task twice is refused so nothing gets double-counted.
+By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `N Tasks · elapsed` using its existing primary live timer, while the popover lists every parallel task. Clocking the same task twice is refused so nothing gets double-counted.
 
 ## Settings
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Show topbar widget | on | The live counter and its clock list |
+| Show topbar widget | on | The left-navigation history icon, live counter, and running-task list |
 | Pomodoro length | 30m | Target for a pomodoro session; running past it only changes the colour |
 | Only offer clock in on TODO blocks | on | Off lets any block be clocked |
 | Allow multiple clocks at once | off | On runs several clocks in parallel |

@@ -104,7 +104,7 @@ function createController({ extensionAPI }) {
                 {
                     id: SETTING_TOPBAR,
                     name: 'Show topbar widget',
-                    description: 'The live counter and its clock list in Roam’s topbar.',
+                    description: 'The live counter and its running-task list in Roam’s left navigation.',
                     action: {
                         type: 'switch',
                         defaultValue: true,

@@ -21,15 +21,20 @@ const TOPBAR_SELECTOR = '.rm-topbar';
  *
  * Nothing about the topbar's markup is a public contract, and a guessed class
  * name already put this widget in front of the hamburger once. So the anchor is
- * found by what the controls *are* — the forward arrow, else the menu toggle —
- * matching on a class substring so a renamed variant still lands.
+ * found by what the controls *are* — Forward, else Back, else the menu/nav —
+ * using Blueprint names and accessible metadata so nested variants still land.
  */
-const NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
+const FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
+const BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
+const MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
+const MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 
 export function createTopbar({ onOpenDashboard }) {
     let container = null;
     let timeNode = null;
     let iconNode = null;
+    let parallelNode = null;
+    let separatorNode = null;
     let buttonNode = null;
     let popover = null;
     let observer = null;
@@ -39,6 +44,8 @@ export function createTopbar({ onOpenDashboard }) {
 
     const isStale = entry =>
         findStaleClocks([entry], new Date(), staleHours()).length > 0;
+
+    const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
 
     // ---- popover ----
 
@@ -162,7 +169,11 @@ export function createTopbar({ onOpenDashboard }) {
         popover.replaceChildren();
 
         popover.appendChild(
-            el('div', 'rlb-popover__title', entries.length ? 'Running clocks' : 'Logbook')
+            el(
+                'div',
+                'rlb-popover__title',
+                entries.length ? `${taskCount(entries.length)} Running` : 'Logbook'
+            )
         );
 
         if (entries.length === 0) {
@@ -180,7 +191,7 @@ export function createTopbar({ onOpenDashboard }) {
                     el(
                         'div',
                         'rlb-popover__empty bp3-text-small',
-                        `${stale.length} clock${stale.length > 1 ? 's have' : ' has'} been open for over ` +
+                        `${taskCount(stale.length)} ${stale.length > 1 ? 'have' : 'has'} been open for over ` +
                             `${staleHours()}h — likely forgotten.`
                     )
                 );
@@ -235,7 +246,7 @@ export function createTopbar({ onOpenDashboard }) {
         const stale = findStaleClocks(entries, new Date(), staleHours()).length > 0;
 
         if (!running) {
-            iconNode.className = 'bp3-icon bp3-icon-stopwatch';
+            iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             buttonNode.replaceChildren(iconNode);
@@ -252,11 +263,17 @@ export function createTopbar({ onOpenDashboard }) {
         const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(elapsed);
-        buttonNode.replaceChildren(timeNode);
+        if (entries.length > 1) {
+            parallelNode.textContent = taskCount(entries.length);
+            separatorNode.textContent = ' · ';
+            buttonNode.replaceChildren(parallelNode, separatorNode, timeNode);
+        } else {
+            buttonNode.replaceChildren(timeNode);
+        }
 
         if (entries.length > 1) {
             buttonNode.title =
-                `${entries.length} clocks running\n` +
+                `${taskCount(entries.length)} Running\n` +
                 `Primary timer: ${first.title}\n` +
                 `This session ${formatElapsed(elapsed)}` +
                 (overrun ? '\nA Pomodoro is over its target.' : '') +
@@ -303,7 +320,9 @@ export function createTopbar({ onOpenDashboard }) {
         container = el('div', 'rlb-topbar');
         container.id = WIDGET_ID;
 
-        iconNode = el('span', 'bp3-icon bp3-icon-stopwatch');
+        iconNode = el('span', 'bp3-icon bp3-icon-history rlb-topbar__icon');
+        parallelNode = el('span', 'rlb-topbar__parallel');
+        separatorNode = el('span', 'rlb-topbar__separator');
         timeNode = el('span', 'rlb-topbar__time');
 
         buttonNode = button('bp3-button bp3-minimal rlb-topbar__button', '', togglePopover);
@@ -318,50 +337,109 @@ export function createTopbar({ onOpenDashboard }) {
             remove();
             return;
         }
-        if (container?.isConnected) return;
         const topbar = document.querySelector(TOPBAR_SELECTOR);
         if (!topbar) return;
         if (!container) build();
 
-        topbar.insertBefore(container, afterNavigation(topbar));
+        const placement = afterNavigation(topbar);
+        if (
+            container.parentNode !== placement.parent ||
+            container.nextSibling !== placement.before
+        ) {
+            placement.parent.insertBefore(container, placement.before);
+        }
     };
 
     /**
      * The node to insert before, so the widget lands just past the navigation.
      *
-     * @returns {Node|null} null appends to the end — the safe default, since
-     *   guessing wrong on the left displaces controls the user needs, whereas on
-     *   the right the widget is merely in a less convenient spot.
+     * Roam currently nests Back/Forward inside a left-navigation wrapper, but
+     * older layouts expose the buttons directly. Search by observable control
+     * signals, then resolve the match back to the smallest navigation cluster
+     * whose parent also owns the main controls.
      */
     const afterNavigation = topbar => {
-        let anchor = null;
-        // Walk the leading run only, and stop at the first child that is not a
-        // navigation control. Searching the whole topbar instead would let the
-        // right sidebar's own arrow win and drag the widget across to it.
-        for (const child of topbar.children) {
-            if (child === container || !isNavigationControl(child)) break;
-            anchor = child;
+        const descendants = [...topbar.querySelectorAll('*')].filter(
+            node => node !== container && !container?.contains(node)
+        );
+        const mainIndex = descendants.findIndex(isMainControl);
+        const leading = mainIndex >= 0 ? descendants.slice(0, mainIndex) : descendants;
+        const signal =
+            leading.find(node => FORWARD_PATTERN.test(controlSignals(node))) ||
+            leading.find(node => BACK_PATTERN.test(controlSignals(node))) ||
+            leading.find(node => MENU_PATTERN.test(controlSignals(node)));
+
+        if (signal) {
+            const anchor = navigationCluster(signal, topbar);
+            const next = anchor.nextSibling;
+            return {
+                parent: anchor.parentNode,
+                before: next === container ? container.nextSibling : next,
+            };
         }
-        return anchor ? anchor.nextSibling : null;
+
+        // Unknown layouts still stay on the left. Prefer the first recognisable
+        // main/search surface; if none exists, preserve the leading control and
+        // insert after it rather than falling through to the far-right actions.
+        const main = descendants.find(isMainControl);
+        if (main) {
+            const boundary = surfaceChild(main, topbar);
+            return { parent: boundary.parentNode, before: boundary };
+        }
+
+        let surface = topbar;
+        while (
+            surface.children.length === 1 &&
+            surface.firstElementChild !== container &&
+            surface.firstElementChild.children.length > 0
+        ) {
+            surface = surface.firstElementChild;
+        }
+        return { parent: surface, before: surface.firstElementChild?.nextSibling ?? null };
     };
 
-    /**
-     * Whether a topbar child belongs to the navigation cluster.
-     *
-     * A named Blueprint icon is the strongest signal, but Roam's back/forward
-     * arrows are not named that way, so the general test is what these controls
-     * have in common: a glyph, no text of its own, and nothing to type into.
-     * The search box is the thing that ends the cluster, and it is excluded by
-     * the form-field check even though it too holds an icon.
-     */
-    const isNavigationControl = element => {
-        const classOf = node => node.getAttribute?.('class') || '';
-        const named = node => NAV_ICON_PATTERN.test(classOf(node));
-        if (named(element) || [...element.querySelectorAll('[class]')].some(named)) return true;
+    /** Classes and accessible metadata are more stable than one Roam class name. */
+    const controlSignals = element =>
+        [
+            element.className,
+            element.getAttribute?.('data-icon'),
+            element.getAttribute?.('aria-label'),
+            element.getAttribute?.('title'),
+            element.getAttribute?.('data-name'),
+        ]
+            .filter(value => typeof value === 'string')
+            .join(' ')
+            .replaceAll('_', '-')
+            .toLowerCase();
 
-        if (element.querySelector('input, textarea, select')) return false;
-        if ((element.textContent || '').trim().length > 0) return false;
-        return Boolean(element.querySelector('svg') || /icon/i.test(classOf(element)));
+    const isMainControl = element =>
+        element.matches?.('input, textarea, select, [contenteditable="true"]') ||
+        MAIN_CONTROL_PATTERN.test(controlSignals(element));
+
+    /** Climb through icon/button wrappers, but stop before the main/right shell. */
+    const navigationCluster = (signal, topbar) => {
+        let anchor = signal.closest?.('button, a, [role="button"]') || signal;
+        while (
+            anchor.parentElement &&
+            anchor.parentElement !== topbar &&
+            ![...anchor.parentElement.querySelectorAll('*')].some(isMainControl)
+        ) {
+            anchor = anchor.parentElement;
+        }
+        return anchor;
+    };
+
+    /** Resolve a nested search/main signal to the sibling owned by its layout surface. */
+    const surfaceChild = (signal, topbar) => {
+        let boundary = signal;
+        while (
+            boundary.parentElement &&
+            boundary.parentElement !== topbar &&
+            !boundary.previousElementSibling
+        ) {
+            boundary = boundary.parentElement;
+        }
+        return boundary;
     };
 
     const remove = () => {

@@ -44,9 +44,57 @@ async function mountInto(topbarHtml) {
     );
 }
 
+/** Mount into Roam's nested topbar shell and expose only user-visible placement. */
+async function mountIntoNestedTopbar() {
+    const dom = new JSDOM(`<!doctype html><html><body>
+        <div class="rm-topbar">
+            <div class="rm-topbar__inner" data-name="shell">
+                <nav class="rm-topbar__navigation" data-name="navigation" aria-label="Page navigation">
+                    <button title="Open left sidebar"><span class="bp3-icon bp3-icon-menu"></span></button>
+                    <button aria-label="Back"><span class="bp3-icon bp3-icon-chevron-left"></span></button>
+                    <button aria-label="Forward"><span class="bp3-icon bp3-icon-chevron-right"></span></button>
+                </nav>
+                <div class="rm-topbar__main" data-name="main">
+                    <div class="rm-find-or-create-wrapper"><input aria-label="Find or create a page" /></div>
+                </div>
+                <div class="rm-topbar__right" data-name="right"><button>Help</button></div>
+            </div>
+        </div>
+    </body></html>`);
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    installGraph([]);
+    globalThis.window.roamAlphaAPI.ui.blockContextMenu = {
+        addCommand: () => {},
+        removeCommand: () => {},
+    };
+
+    loaded?.onunload();
+    loaded = (await import('../src/extension.js')).default;
+    loaded.onload({ extensionAPI });
+
+    const shell = document.querySelector('[data-name="shell"]');
+    return {
+        topbarOrder: [...document.querySelector('.rm-topbar').children].map(child =>
+            child.id === 'roam-logbook-topbar' ? 'WIDGET' : child.dataset.name
+        ),
+        shellOrder: [...shell.children].map(child =>
+            child.id === 'roam-logbook-topbar' ? 'WIDGET' : child.dataset.name
+        ),
+    };
+}
+
 const named = (name, className = '') => `<button data-name="${name}" class="${className}"></button>`;
 
 test.after(() => loaded?.onunload());
+
+test('lands after a nested Back/Forward navigation wrapper and before main controls', async () => {
+    const placement = await mountIntoNestedTopbar();
+
+    assert.deepEqual(placement.topbarOrder, ['shell']);
+    assert.deepEqual(placement.shellOrder, ['navigation', 'WIDGET', 'main', 'right']);
+});
 
 test('lands after the back/forward arrows, before the rest of the topbar', async () => {
     const order = await mountInto(
@@ -104,12 +152,10 @@ test('falls back to the menu toggle when there are no arrows', async () => {
     assert.deepEqual(order, ['menu', 'WIDGET', 'search']);
 });
 
-test('an unrecognised topbar appends rather than displacing anything', async () => {
+test('an unrecognised topbar stays near the leading control instead of the far right', async () => {
     const order = await mountInto(named('mystery') + named('other'));
 
-    // Guessing wrong on the left shoves controls the user needs; on the right the
-    // widget is merely in a less convenient place.
-    assert.deepEqual(order, ['mystery', 'other', 'WIDGET']);
+    assert.deepEqual(order, ['mystery', 'WIDGET', 'other']);
 });
 
 test('an arrow further right does not drag the widget across', async () => {
@@ -122,4 +168,34 @@ test('an arrow further right does not drag the widget across', async () => {
     // Matching the first arrow, not the last, keeps the right sidebar toggle
     // from being mistaken for forward navigation.
     assert.deepEqual(order, ['menu', 'WIDGET', 'search', 'sidebar']);
+});
+
+test('reattaches once after Roam rebuilds the nested navigation shell', async () => {
+    await mountIntoNestedTopbar();
+    const topbar = document.querySelector('.rm-topbar');
+    topbar.innerHTML = `
+        <div class="rm-topbar__inner" data-name="replacement-shell">
+            <nav aria-label="Page navigation" data-name="replacement-navigation">
+                <button aria-label="Back"><span class="bp3-icon-chevron-left"></span></button>
+                <button aria-label="Forward"><span class="bp3-icon-chevron-right"></span></button>
+            </nav>
+            <div class="rm-topbar__main" data-name="replacement-main">
+                <input aria-label="Find or create a page" />
+            </div>
+            <div class="rm-topbar__right" data-name="replacement-right"></div>
+        </div>`;
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const shell = document.querySelector('[data-name="replacement-shell"]');
+    const order = [...shell.children].map(child =>
+        child.id === 'roam-logbook-topbar' ? 'WIDGET' : child.dataset.name
+    );
+    assert.deepEqual(order, [
+        'replacement-navigation',
+        'WIDGET',
+        'replacement-main',
+        'replacement-right',
+    ]);
+    assert.equal(document.querySelectorAll('#roam-logbook-topbar').length, 1);
 });
