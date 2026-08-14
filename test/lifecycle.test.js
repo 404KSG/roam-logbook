@@ -29,6 +29,7 @@ globalThis.window.roamAlphaAPI.ui.blockContextMenu = {
 
 const contextCommands = new Map();
 const paletteCommands = new Map();
+const paletteCommandSpecs = new Map();
 const settingsStore = new Map();
 let settingsPanel = null;
 
@@ -40,8 +41,14 @@ const extensionAPI = {
     },
     ui: {
         commandPalette: {
-            addCommand: ({ label, callback }) => paletteCommands.set(label, callback),
-            removeCommand: ({ label }) => paletteCommands.delete(label),
+            addCommand: spec => {
+                paletteCommands.set(spec.label, spec.callback);
+                paletteCommandSpecs.set(spec.label, spec);
+            },
+            removeCommand: ({ label }) => {
+                paletteCommands.delete(label);
+                paletteCommandSpecs.delete(label);
+            },
         },
     },
 };
@@ -66,6 +73,28 @@ test('onload mounts the topbar widget and registers every command', () => {
         [...contextCommands.keys()],
         ['Logbook: Clock in', 'Logbook: Start pomodoro', 'Logbook: Clock out']
     );
+});
+
+test('dashboard stylesheet exposes the approved shell geometry and theme tokens', () => {
+    const css = document.getElementById('roam-logbook-styles').textContent;
+    assert.match(css, /width: min\(840px, calc\(100vw - 32px\)\)/);
+    assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
+    assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
+    assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
+    assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
+});
+
+test('clock commands leave shortcut selection to Roam Hotkeys', () => {
+    for (const label of [
+        'Logbook: Clock in current block',
+        'Logbook: Clock out current block',
+        'Logbook: Clock out all running clocks',
+    ]) {
+        const spec = paletteCommandSpecs.get(label);
+        assert.ok(spec, `${label} should be registered`);
+        assert.equal('default-hotkey' in spec, false);
+        assert.equal('defaultHotkey' in spec, false);
+    }
 });
 
 test('the context menu offers clock in on a TODO block only', () => {
@@ -163,6 +192,13 @@ test('the popover lists the running clock', () => {
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
     assert.match(popover.textContent, /Running clocks/);
+    assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
+    for (const selector of ['.bp3-icon-stopwatch', '.bp3-icon-stop', '.bp3-icon-trash']) {
+        const action = popover.querySelector(selector);
+        assert.ok(action, `${selector} action should be present`);
+        assert.ok(action.title);
+        assert.equal(action.getAttribute('aria-label'), action.title);
+    }
 
     click(topbarWidget().querySelector('button'));
     assert.equal(document.querySelector('.rlb-popover'), null, 'second click closes it');
@@ -172,8 +208,22 @@ test('the dashboard renders totals and the task breakdown', () => {
     paletteCommands.get('Logbook: Open dashboard')();
 
     assert.ok(dialog().classList.contains('rlb-root--open'));
+    const shell = dialog().querySelector('.rlb-dialog');
+    assert.equal(shell.getAttribute('aria-modal'), 'true');
+    assert.ok(dialog().querySelector('.rlb-header__subtitle'));
+    assert.equal(dialog().querySelector('.rlb-header .bp3-icon'), null, 'header has no decorative icon');
+    assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
+    assert.equal(dialog().querySelector('.rlb-stats').getAttribute('aria-label'), 'Logbook summary');
+    assert.ok(dialog().querySelector('.rlb-body__scroll'));
+    for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {
+        const action = dialog().querySelector(selector);
+        assert.ok(action.classList.contains('rlb-icon-button'));
+        assert.ok(action.title);
+        assert.equal(action.getAttribute('aria-label'), action.title);
+    }
     assert.match(dialog().textContent, /Today/);
     assert.match(dialog().textContent, /this is a test task/);
+    assert.ok(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'));
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
 });
@@ -201,9 +251,11 @@ test('the task tree collapses and expands from the caret', () => {
         order: 0,
         page: 'Test Page',
     });
+    const end = new Date();
+    const start = new Date(end.getTime() - 60 * 60_000);
     graph.store.set('clock00001', {
         uid: 'clock00001',
-        string: 'CLOCK:: [2026-08-08 Sat 09:00]--[2026-08-08 Sat 10:00] => 1:00',
+        string: `CLOCK:: ${formatStamp(start)}--${formatStamp(end)} => 1:00`,
         parent: 'drawer0001',
         order: 0,
         page: 'Test Page',
@@ -265,7 +317,8 @@ test('clocking out through the palette closes the entry', async () => {
     // Idle is icon-only — it earns no words in Roam's topbar — so the state
     // shows up in the icon and the tooltip rather than in the text.
     assert.equal(topbarWidget().textContent, '');
-    assert.ok(topbarWidget().querySelector('.bp3-icon-time'));
+    assert.ok(topbarWidget().querySelector('.bp3-icon-timeline-events'));
+    assert.equal(topbarWidget().querySelector('.bp3-icon-time'), null);
     assert.match(topbarWidget().querySelector('button').title, /no clock running/);
 });
 

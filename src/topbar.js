@@ -107,7 +107,7 @@ export function createTopbar({ onOpenDashboard }) {
 
         const body = el('div', 'rlb-run__body');
         const title = button(
-            'bp3-button bp3-minimal rlb-run__title',
+            'bp3-button bp3-minimal bp3-icon-document-open rlb-run__title',
             entry.title,
             () => {
                 closePopover();
@@ -252,7 +252,7 @@ export function createTopbar({ onOpenDashboard }) {
         buttonNode.classList.toggle('rlb-topbar__button--overrun', overrun);
         iconNode.className = running
             ? `rlb-dot${overrun ? ' rlb-dot--overrun' : stale ? ' rlb-dot--stale' : ''}`
-            : 'bp3-icon bp3-icon-time';
+            : 'bp3-icon bp3-icon-timeline-events';
 
         if (!running) {
             // Idle is icon-only. The topbar is Roam's space, and a label that
@@ -323,7 +323,7 @@ export function createTopbar({ onOpenDashboard }) {
         container = el('div', 'rlb-topbar');
         container.id = WIDGET_ID;
 
-        iconNode = el('span', 'bp3-icon bp3-icon-time');
+        iconNode = el('span', 'bp3-icon bp3-icon-timeline-events');
         // Built once and updated in place: the counter re-renders every second,
         // and rebuilding the nodes made a long title reflow on every tick.
         timeNode = el('span', 'rlb-topbar__time');

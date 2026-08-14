@@ -732,6 +732,7 @@ function findStaleClocks(entries, now, staleHours2) {
 var ROOT_ID = "roam-logbook-dashboard";
 function createDashboard() {
   let root = null;
+  let summaryNode = null;
   let bodyNode = null;
   let rangeId = "week";
   let returnFocusTo = null;
@@ -746,7 +747,7 @@ function createDashboard() {
     bodyNode.replaceChildren();
     const rangeLabel = getRange(rangeId).label;
     const duplicatesFixedCard = rangeId === "today" || rangeId === "week";
-    bodyNode.appendChild(
+    summaryNode.replaceChildren(
       statsRow([
         ["Today", formatMinutesHuman(model.todayMinutes)],
         ["Last 7 days", formatMinutesHuman(model.weekMinutes)],
@@ -768,8 +769,11 @@ function createDashboard() {
   };
   const statsRow = (pairs) => {
     const wrapper = el("div", "rlb-stats");
+    wrapper.setAttribute("role", "list");
+    wrapper.setAttribute("aria-label", "Logbook summary");
     for (const [label, value] of pairs) {
       const card = el("div", "rlb-stat");
+      card.setAttribute("role", "listitem");
       card.append(el("strong", "rlb-stat__value", value), el("span", "rlb-stat__label", label));
       wrapper.appendChild(card);
     }
@@ -967,7 +971,7 @@ function createDashboard() {
     mark.setAttribute("aria-label", done ? "Done" : "To do");
     return mark;
   };
-  const taskLink = (title, taskUid) => button("bp3-button bp3-minimal bp3-small rlb-task-link", title, () => {
+  const taskLink = (title, taskUid) => button("bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link", title, () => {
     close();
     void openBlock(taskUid);
   }, { title: "Open this block" });
@@ -997,10 +1001,19 @@ function createDashboard() {
     dialog.tabIndex = -1;
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "roam-logbook-dashboard-title");
     const header = el("header", "bp3-dialog-header rlb-header");
-    header.appendChild(el("h2", "bp3-heading rlb-header__title", "Logbook"));
+    const heading = el("div", "rlb-header__heading");
+    const title = el("h2", "bp3-heading rlb-header__title", "Logbook");
+    title.id = "roam-logbook-dashboard-title";
+    heading.append(
+      title,
+      el("p", "rlb-header__subtitle", "Focus sessions, activity, and task rollups")
+    );
+    header.appendChild(heading);
     const selectWrapper = el("div", "bp3-select bp3-small");
     const select = el("select");
+    select.setAttribute("aria-label", "Dashboard date range");
     for (const range of RANGES) {
       const option = el("option", "", range.label);
       option.value = range.id;
@@ -1015,19 +1028,20 @@ function createDashboard() {
     selectWrapper.appendChild(select);
     header.append(
       selectWrapper,
-      button("bp3-button bp3-minimal bp3-small bp3-icon-refresh", "", () => {
+      button("bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button", "", () => {
         refresh();
         render();
       }, { title: "Reload from the graph" }),
       button(
-        "bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross",
+        "bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross rlb-icon-button",
         "",
         close,
         { title: "Close" }
       )
     );
-    bodyNode = el("div", "rlb-body");
-    dialog.append(header, bodyNode);
+    summaryNode = el("div", "rlb-summary");
+    bodyNode = el("div", "rlb-body rlb-body__scroll");
+    dialog.append(header, summaryNode, bodyNode);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     return overlay;
@@ -1060,6 +1074,7 @@ function createDashboard() {
       document.removeEventListener("keydown", onKeyDown, true);
       root?.remove();
       root = null;
+      summaryNode = null;
       bodyNode = null;
     }
   };
@@ -1664,6 +1679,251 @@ var STYLES = `
     text-align: center;
     opacity: 0.65;
 }
+
+/* ---- Roam-native analytical dashboard shell ---- */
+
+.rlb-root {
+    --rlb-surface: #ffffff;
+    --rlb-surface-subtle: #f5f8fa;
+    --rlb-text: #182026;
+    --rlb-muted: #5c7080;
+    --rlb-border: rgba(16, 22, 26, 0.14);
+    --rlb-border-light: rgba(16, 22, 26, 0.08);
+    --rlb-accent: #2d72d2;
+    --rlb-accent-soft: rgba(45, 114, 210, 0.12);
+    --rlb-overlay: rgba(16, 22, 26, 0.56);
+    align-items: center;
+    padding: 16px;
+    background: var(--rlb-overlay);
+    color: var(--rlb-text);
+    font-family: inherit;
+}
+
+.bp3-dark .rlb-root {
+    --rlb-surface: #293742;
+    --rlb-surface-subtle: #202b33;
+    --rlb-text: #f5f8fa;
+    --rlb-muted: #a7b6c2;
+    --rlb-border: rgba(255, 255, 255, 0.17);
+    --rlb-border-light: rgba(255, 255, 255, 0.09);
+    --rlb-accent: #48aff0;
+    --rlb-accent-soft: rgba(72, 175, 240, 0.14);
+    --rlb-overlay: rgba(16, 22, 26, 0.74);
+}
+
+.rlb-dialog {
+    width: min(840px, calc(100vw - 32px));
+    height: min(860px, calc(100vh - 32px));
+    max-height: none;
+    overflow: hidden;
+    border: 1px solid var(--rlb-border);
+    border-radius: 4px;
+    background: var(--rlb-surface);
+    color: var(--rlb-text);
+    box-shadow: 0 10px 32px rgba(16, 22, 26, 0.24);
+}
+
+.rlb-header {
+    flex: 0 0 auto;
+    min-height: 72px;
+    padding: 12px 16px 12px 20px;
+    border-bottom: 1px solid var(--rlb-border);
+    background: var(--rlb-surface);
+    box-shadow: none;
+}
+
+.rlb-header__heading {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.rlb-header__title {
+    color: inherit;
+    font-size: 20px;
+    line-height: 1.25;
+}
+
+.rlb-header__subtitle {
+    margin: 3px 0 0;
+    color: var(--rlb-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.rlb-header .bp3-select select {
+    min-width: 112px;
+}
+
+.rlb-icon-button {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+}
+
+.rlb-summary {
+    flex: 0 0 auto;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--rlb-border);
+    background: var(--rlb-surface-subtle);
+}
+
+.rlb-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0;
+    margin: 0;
+}
+
+.rlb-stat {
+    min-width: 0;
+    padding: 14px 16px;
+    border-right: 1px solid var(--rlb-border-light);
+    border-radius: 0;
+    background: transparent;
+}
+
+.rlb-stat:first-child {
+    padding-left: 0;
+}
+
+.rlb-stat:last-child {
+    padding-right: 0;
+    border-right: 0;
+}
+
+.rlb-stat__value {
+    color: var(--rlb-text);
+    font-size: 19px;
+    line-height: 1.3;
+}
+
+.rlb-stat__label {
+    display: block;
+    margin-top: 2px;
+    color: var(--rlb-muted);
+    font-size: 10px;
+}
+
+.rlb-body,
+.rlb-body__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0 20px 24px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.rlb-section {
+    margin: 0;
+    padding: 22px 0 20px;
+    border-bottom: 1px solid var(--rlb-border-light);
+}
+
+.rlb-section:last-child {
+    border-bottom: 0;
+}
+
+.rlb-section__title {
+    color: var(--rlb-muted);
+}
+
+.rlb-bars {
+    height: 112px;
+    padding: 10px 0 6px;
+}
+
+.rlb-bar__fill {
+    background: var(--rlb-accent);
+}
+
+.rlb-bar--empty .rlb-bar__fill {
+    background: var(--rlb-border);
+}
+
+.rlb-table th {
+    color: var(--rlb-muted);
+    border-bottom-color: var(--rlb-border);
+}
+
+.rlb-table td,
+.bp3-dark .rlb-table td {
+    border-bottom-color: var(--rlb-border-light);
+}
+
+.bp3-dark .rlb-table th {
+    border-bottom-color: var(--rlb-border);
+}
+
+.rlb-muted {
+    color: var(--rlb-muted);
+    opacity: 1;
+}
+
+.rlb-empty {
+    padding: 64px 24px;
+    color: var(--rlb-muted);
+    opacity: 1;
+}
+
+@media (max-width: 600px) {
+    .rlb-root {
+        padding: 0;
+    }
+
+    .rlb-dialog {
+        width: 100vw;
+        height: 100vh;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .rlb-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .rlb-header__heading {
+        flex-basis: calc(100% - 80px);
+    }
+
+    .rlb-header .bp3-select {
+        order: 2;
+        width: 100%;
+    }
+
+    .rlb-header .bp3-select select {
+        width: 100%;
+    }
+
+    .rlb-summary {
+        padding: 0 12px;
+        overflow-x: auto;
+    }
+
+    .rlb-stats {
+        grid-template-columns: repeat(4, minmax(108px, 1fr));
+    }
+
+    .rlb-stat {
+        padding: 12px;
+    }
+
+    .rlb-body,
+    .rlb-body__scroll {
+        padding: 0 12px 20px;
+    }
+
+    .rlb-section {
+        overflow-x: auto;
+    }
+
+    .rlb-table {
+        min-width: 560px;
+    }
+}
 `;
 
 // src/topbar.js
@@ -1723,7 +1983,7 @@ function createTopbar({ onOpenDashboard }) {
     );
     const body = el("div", "rlb-run__body");
     const title = button(
-      "bp3-button bp3-minimal rlb-run__title",
+      "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
       entry.title,
       () => {
         closePopover();
@@ -1852,7 +2112,7 @@ function createTopbar({ onOpenDashboard }) {
     const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
     buttonNode.classList.toggle("rlb-topbar__button--running", running2 && !overrun);
     buttonNode.classList.toggle("rlb-topbar__button--overrun", overrun);
-    iconNode.className = running2 ? `rlb-dot${overrun ? " rlb-dot--overrun" : stale ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-time";
+    iconNode.className = running2 ? `rlb-dot${overrun ? " rlb-dot--overrun" : stale ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-timeline-events";
     if (!running2) {
       timeNode.textContent = "";
       targetNode.textContent = "";
@@ -1904,7 +2164,7 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
   const build = () => {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
-    iconNode = el("span", "bp3-icon bp3-icon-time");
+    iconNode = el("span", "bp3-icon bp3-icon-timeline-events");
     timeNode = el("span", "rlb-topbar__time");
     targetNode = el("span", "rlb-topbar__target");
     totalNode = el("span", "rlb-topbar__total");

@@ -17,6 +17,7 @@ const ROOT_ID = 'roam-logbook-dashboard';
 
 export function createDashboard() {
     let root = null;
+    let summaryNode = null;
     let bodyNode = null;
     let rangeId = 'week';
     let returnFocusTo = null;
@@ -36,7 +37,7 @@ export function createDashboard() {
         // range would just repeat one of them unless the range is wider.
         const rangeLabel = getRange(rangeId).label;
         const duplicatesFixedCard = rangeId === 'today' || rangeId === 'week';
-        bodyNode.appendChild(
+        summaryNode.replaceChildren(
             statsRow([
                 ['Today', formatMinutesHuman(model.todayMinutes)],
                 ['Last 7 days', formatMinutesHuman(model.weekMinutes)],
@@ -62,8 +63,11 @@ export function createDashboard() {
 
     const statsRow = pairs => {
         const wrapper = el('div', 'rlb-stats');
+        wrapper.setAttribute('role', 'list');
+        wrapper.setAttribute('aria-label', 'Logbook summary');
         for (const [label, value] of pairs) {
             const card = el('div', 'rlb-stat');
+            card.setAttribute('role', 'listitem');
             card.append(el('strong', 'rlb-stat__value', value), el('span', 'rlb-stat__label', label));
             wrapper.appendChild(card);
         }
@@ -285,7 +289,7 @@ export function createDashboard() {
     };
 
     const taskLink = (title, taskUid) =>
-        button('bp3-button bp3-minimal bp3-small rlb-task-link', title, () => {
+        button('bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link', title, () => {
             close();
             void openBlock(taskUid);
         }, { title: 'Open this block' });
@@ -318,12 +322,21 @@ export function createDashboard() {
         dialog.tabIndex = -1;
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', 'roam-logbook-dashboard-title');
 
         const header = el('header', 'bp3-dialog-header rlb-header');
-        header.appendChild(el('h2', 'bp3-heading rlb-header__title', 'Logbook'));
+        const heading = el('div', 'rlb-header__heading');
+        const title = el('h2', 'bp3-heading rlb-header__title', 'Logbook');
+        title.id = 'roam-logbook-dashboard-title';
+        heading.append(
+            title,
+            el('p', 'rlb-header__subtitle', 'Focus sessions, activity, and task rollups')
+        );
+        header.appendChild(heading);
 
         const selectWrapper = el('div', 'bp3-select bp3-small');
         const select = el('select');
+        select.setAttribute('aria-label', 'Dashboard date range');
         for (const range of RANGES) {
             const option = el('option', '', range.label);
             option.value = range.id;
@@ -338,20 +351,21 @@ export function createDashboard() {
 
         header.append(
             selectWrapper,
-            button('bp3-button bp3-minimal bp3-small bp3-icon-refresh', '', () => {
+            button('bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button', '', () => {
                 clock.refresh();
                 render();
             }, { title: 'Reload from the graph' }),
             button(
-                'bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross',
+                'bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross rlb-icon-button',
                 '',
                 close,
                 { title: 'Close' }
             )
         );
 
-        bodyNode = el('div', 'rlb-body');
-        dialog.append(header, bodyNode);
+        summaryNode = el('div', 'rlb-summary');
+        bodyNode = el('div', 'rlb-body rlb-body__scroll');
+        dialog.append(header, summaryNode, bodyNode);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
         return overlay;
@@ -383,6 +397,7 @@ export function createDashboard() {
             document.removeEventListener('keydown', onKeyDown, true);
             root?.remove();
             root = null;
+            summaryNode = null;
             bodyNode = null;
         },
     };

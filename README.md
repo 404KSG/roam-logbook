@@ -1,6 +1,8 @@
-# Roam Logbook
+# Roam Logbook – 404KSG
 
-org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a dashboard.
+Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
+
+This is an MIT-licensed fork of [forrestchang/roam-logbook](https://github.com/forrestchang/roam-logbook). It preserves the original LOGBOOK/CLOCK workflow and reporting behavior while refining the topbar and dashboard presentation.
 
 Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer under the task:
 
@@ -10,11 +12,20 @@ Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer und
     - CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00
 ```
 
+## Installation
+
+The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
+
+- The Roam Depot entry for this fork is intentionally submitted as a **Draft preview** first. Until it is accepted, use the shorthand published on that Draft PR if you want to smoke-test it in a non-critical graph.
+- For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
+
+The extension reads and writes the local graph only. There are no analytics, network calls, or runtime services.
+
 ## Use
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single clock icon; running it reads
+**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single timeline icon; running it reads
 
 ```
 ● 12:34 / 30:00 · 2h 05m · task name
@@ -24,7 +35,11 @@ the session so far, the pomodoro target when one is set, everything banked again
 
 **Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The counter becomes `12:34 / 30:00`. Past the target the entry turns a soft red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. Totals for today and the last 7 days, a per-day bar row, and a per-task tree over the range you pick.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A centered analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick.
+
+### Custom hotkeys
+
+Clock in and clock out deliberately have no default key binding. Open **Roam Settings → Hotkeys**, search for `Logbook`, and assign the Command Palette actions to the keys you prefer. The extension does not install a global keyboard listener.
 
 ### Sub-tasks
 
@@ -84,12 +99,16 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 ## Development
 
 ```bash
-npm test     # unit tests plus a jsdom lifecycle smoke test
+npm ci
+npm test     # unit tests plus jsdom lifecycle and presentation tests
 npm run lint
 npm run build
 npm run check
+./build.sh   # clean, repeatable Roam Depot build
 ```
 
 `npm run build` bundles `src/` into `extension.js` with esbuild. Commit the bundle alongside the source.
 
-MIT licensed.
+## Attribution
+
+Copyright for the original work remains with [forrestchang](https://github.com/forrestchang). Fork changes are maintained by [404KSG](https://github.com/404KSG). See [LICENSE](LICENSE) for the MIT terms.
