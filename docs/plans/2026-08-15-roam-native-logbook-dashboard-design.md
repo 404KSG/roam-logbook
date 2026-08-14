@@ -28,7 +28,7 @@ Only Blueprint icons already supplied by Roam are used:
 
 | Action | Blueprint icon |
 | --- | --- |
-| Idle topbar entry | `timeline-events` |
+| Idle topbar entry | `stopwatch` |
 | Pomodoro | `stopwatch` |
 | Clock out | `stop` |
 | Discard clock | `trash` |
@@ -36,11 +36,13 @@ Only Blueprint icons already supplied by Roam are used:
 | Refresh | `refresh` |
 | Close | `cross` |
 
-The running topbar may continue to use the restrained status dot. Emoji, external icons, and custom SVG are excluded.
+The running topbar has no icon or status-dot DOM. Emoji, external icons, and custom SVG are excluded.
 
 ## Interaction and accessibility
 
-- The topbar keeps elapsed time, task context, total, Pomodoro target, stale/overrun styling, and its running-clock popover.
+- The topbar is a minimal timing-state entry: idle is icon-only; running visibly shows only the existing primary session's elapsed time.
+- Task context, totals, Pomodoro targets, parallel-clock details, and actions remain available through the rich tooltip and running-clock popover.
+- Normal elapsed text uses Roam/Blueprint's neutral foreground family. Pomodoro overrun and stale states color only the elapsed text red or amber; the button has no status background or green treatment.
 - Dashboard functionality stays in the dashboard rather than moving into the popover.
 - Every icon-only control has both `title` and `aria-label` text.
 - The dialog keeps `role="dialog"`, `aria-modal`, Escape close, overlay close, and focus return.

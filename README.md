@@ -25,15 +25,15 @@ The extension reads and writes the local graph only. There are no analytics, net
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single timeline icon; running it reads
+**Topbar** — sits just past Roam's back/forward arrows, so it neither displaces the navigation nor crowds the buttons on the right. Idle it is a single stopwatch icon. While a clock runs, the topbar becomes only its live elapsed time:
 
 ```
-● 12:34 / 30:00 · 2h 05m · task name
+12:34
 ```
 
-the session so far, the pomodoro target when one is set, everything banked against that task, then the task itself. Weight and opacity fall off left to right, so the eye lands on the counter; the title is the first thing to ellipsize when space runs short and is repeated in full in the tooltip. Click for the list of open clocks, where each can be stopped, thrown away, given a pomodoro, or jumped to.
+Task names, banked totals, Pomodoro targets, parallel clocks, and actions stay in the tooltip and full running-clocks popover. Click the time to open that popover, where each clock can be stopped, thrown away, given a Pomodoro, or jumped to.
 
-**Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The counter becomes `12:34 / 30:00`. Past the target the entry turns a soft red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
+**Pomodoro** — right-click a task and choose **Logbook: Start pomodoro**, or hit the stopwatch on a row in the popover to put a target on a session already running. The target stays in the popover and tooltip. Past the target, the elapsed time turns a restrained red and **keeps counting** — nothing stops on its own, because only you know whether to push on or break. Length is configurable, 30 minutes by default.
 
 **Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A centered analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick.
 
@@ -73,11 +73,11 @@ Clocking in on a block whose entire content is `((uid))` or `{{embed: ((uid))}}`
 
 A clock with no end stamp is a running clock — that is the whole persistence model, so a session survives a reload, a crash, or a clock started on another device. On load the extension reads them straight back out of the graph.
 
-Clocks that have been open longer than the threshold (8 hours by default) are marked as likely forgotten: an amber dot on the topbar, a warning in the popover, and a `stale` tag in the dashboard's Running section. Each can be closed at the current time or discarded.
+Clocks that have been open longer than the threshold (8 hours by default) are marked as likely forgotten: the topbar's elapsed time turns restrained amber, the popover shows a warning, and the dashboard's Running section adds a `stale` tag. Each can be closed at the current time or discarded.
 
 ### One clock or several
 
-By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar then shows the count, and clocking the same task twice is refused so nothing gets double-counted.
+By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar still shows only its existing primary live timer, while the popover lists every parallel clock. Clocking the same task twice is refused so nothing gets double-counted.
 
 ## Settings
 

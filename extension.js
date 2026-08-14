@@ -1173,122 +1173,58 @@ var STYLES = `
 }
 
 .rlb-topbar__button {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    /* Blueprint centres button content. Combined with overflow: hidden that
-       clips an over-wide widget at BOTH ends, which ate the leading digits of
-       the counter as well as the ellipsis off the end of the title. */
-    justify-content: flex-start;
-    /* A long task name must never widen the widget into Roam's own controls.
-       Scales down with the window so a narrow graph view stays usable. */
-    max-width: min(260px, 26vw);
-    overflow: hidden;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0 7px;
+    overflow: visible;
+    background: transparent;
     font-variant-numeric: tabular-nums;
 }
 
-.rlb-topbar__button > .bp3-icon,
-.rlb-topbar__button > .rlb-dot {
+.rlb-topbar__button > .bp3-icon {
     flex: 0 0 auto;
+    color: inherit;
 }
 
-.rlb-topbar__labels {
-    display: flex;
-    align-items: baseline;
-    /* Flex strips leading whitespace from an item, so spacing between segments
-       has to come from gap; writing " . 44m" into the text silently loses the
-       space and renders as "19:50. 44m". */
-    gap: 5px;
-    /* Without this the labels box refuses to shrink below its text, the button
-       blows past max-width, and the ellipsis below never gets a chance to apply. */
-    min-width: 0;
-    overflow: hidden;
-}
-
-/* An empty segment would still earn a gap on both sides, so it is removed from
-   layout entirely rather than left as a zero-width item. */
-.rlb-topbar__labels > :empty {
-    display: none;
-}
-
-.rlb-topbar__target::before,
-.rlb-topbar__total::before,
-.rlb-topbar__label::before {
-    margin-right: 5px;
-    opacity: 0.45;
-}
-
-.rlb-topbar__target::before {
-    content: '/';
-}
-
-.rlb-topbar__total::before,
-.rlb-topbar__label::before {
-    content: '\xB7';
-}
-
-/* The counter is the point of the widget, so it is the one thing that never shrinks. */
 .rlb-topbar__time {
-    flex: 0 0 auto;
-    font-weight: 600;
-}
-
-/* Target and total are context for the counter, so they read quieter than it
-   and louder than the title, which the popover and tooltip both repeat. */
-.rlb-topbar__target {
-    flex: 0 0 auto;
-    font-weight: 600;
-    opacity: 0.55;
-}
-
-.rlb-topbar__total {
-    flex: 0 0 auto;
-    font-size: 0.92em;
-    opacity: 0.7;
-}
-
-/* The title is what gives way, down to an ellipsis.
-   The max-width is what makes the ellipsis reliable: it gives the element a
-   definite size to overflow, instead of depending on shrinkage propagating
-   correctly down a nested flex chain. */
-.rlb-topbar__label {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: inline-block;
+    min-width: 4.6ch;
+    color: #5c7080;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
     white-space: nowrap;
-    font-size: 0.92em;
-    opacity: 0.8;
 }
 
-/* On a narrow window the title is dropped outright rather than squeezed to a
-   few characters \u2014 the counter and the totals are what earn the space, and the
-   task name is still one hover or one click away. */
-@media (max-width: 1080px) {
-    .rlb-topbar__label {
-        display: none;
-    }
+.rlb-topbar__time--neutral {
+    color: #5c7080;
 }
 
-.rlb-topbar__button--running {
-    color: #0f9960;
+.bp3-dark .rlb-topbar__time--neutral {
+    color: #a7b6c2;
 }
 
-.bp3-dark .rlb-topbar__button--running {
-    color: #3dcc91;
+.rlb-topbar__time--overrun {
+    color: #c23030;
 }
 
-/* Past the pomodoro target. Deliberately a soft red: the clock is still running
-   and nothing is wrong, it is a nudge to decide, not an error. */
-.rlb-topbar__button--overrun {
-    color: #cd4246;
-    background: rgba(205, 66, 70, 0.12);
-}
-
-.bp3-dark .rlb-topbar__button--overrun {
+.bp3-dark .rlb-topbar__time--overrun {
     color: #ff7373;
-    background: rgba(255, 115, 115, 0.15);
+}
+
+.rlb-topbar__time--stale {
+    color: #b56b17;
+}
+
+.bp3-dark .rlb-topbar__time--stale {
+    color: #f29d49;
 }
 
 .rlb-dot {
@@ -1930,14 +1866,9 @@ var STYLES = `
 var WIDGET_ID = "roam-logbook-topbar";
 var TOPBAR_SELECTOR = ".rm-topbar";
 var NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
-var TOPBAR_TITLE_LENGTH = 32;
 function createTopbar({ onOpenDashboard }) {
   let container = null;
-  let labelNode = null;
   let timeNode = null;
-  let targetNode = null;
-  let totalNode = null;
-  let titleNode = null;
   let iconNode = null;
   let buttonNode = null;
   let popover = null;
@@ -2110,35 +2041,31 @@ function createTopbar({ onOpenDashboard }) {
     const now = Date.now();
     const overrun = entries.some((entry) => isOverrun(entry, now));
     const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
-    buttonNode.classList.toggle("rlb-topbar__button--running", running2 && !overrun);
-    buttonNode.classList.toggle("rlb-topbar__button--overrun", overrun);
-    iconNode.className = running2 ? `rlb-dot${overrun ? " rlb-dot--overrun" : stale ? " rlb-dot--stale" : ""}` : "bp3-icon bp3-icon-timeline-events";
     if (!running2) {
+      iconNode.className = "bp3-icon bp3-icon-stopwatch";
       timeNode.textContent = "";
-      targetNode.textContent = "";
-      totalNode.textContent = "";
-      titleNode.textContent = "";
+      timeNode.className = "rlb-topbar__time";
+      buttonNode.replaceChildren(iconNode);
       buttonNode.title = "Logbook \u2014 no clock running. Click for the dashboard.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
     const [first] = entries;
     const elapsed = now - first.start.getTime();
+    const state = overrun ? "overrun" : stale ? "stale" : "neutral";
+    timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(elapsed);
+    buttonNode.replaceChildren(timeNode);
     if (entries.length > 1) {
-      targetNode.textContent = "";
-      totalNode.textContent = "";
-      titleNode.textContent = `${entries.length} clocks`;
-      buttonNode.title = `${entries.length} clocks running`;
+      buttonNode.title = `${entries.length} clocks running
+Primary timer: ${first.title}
+This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
       const target = targetMinutes(first.clockUid);
-      targetNode.textContent = target ? formatElapsed(target * 6e4) : "";
       const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
-      totalNode.textContent = formatMinutesHuman(totalMinutes2);
-      titleNode.textContent = taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH });
       buttonNode.title = `Clocked in: ${first.title}
 This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
-Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "");
+Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
   };
@@ -2164,15 +2091,10 @@ Pomodoro ${target}m \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first,
   const build = () => {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
-    iconNode = el("span", "bp3-icon bp3-icon-timeline-events");
+    iconNode = el("span", "bp3-icon bp3-icon-stopwatch");
     timeNode = el("span", "rlb-topbar__time");
-    targetNode = el("span", "rlb-topbar__target");
-    totalNode = el("span", "rlb-topbar__total");
-    titleNode = el("span", "rlb-topbar__label");
-    labelNode = el("span", "rlb-topbar__labels");
-    labelNode.append(timeNode, targetNode, totalNode, titleNode);
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
-    buttonNode.append(iconNode, labelNode);
+    buttonNode.appendChild(iconNode);
     container.appendChild(buttonNode);
     renderButton();
   };

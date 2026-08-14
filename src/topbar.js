@@ -7,7 +7,6 @@
 
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
-import { taskTitle } from './org.js';
 import * as pomodoro from './pomodoro.js';
 import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
 import { findStaleClocks } from './stats.js';
@@ -27,20 +26,9 @@ const TOPBAR_SELECTOR = '.rm-topbar';
  */
 const NAV_ICON_PATTERN = /icon-(menu|arrow-left|arrow-right|chevron-left|chevron-right)\b/;
 
-/**
- * A backstop, not the layout. CSS ellipsis does the real work — this only keeps a
- * pathological title out of the DOM, and stays short because CJK titles are twice
- * as wide per character as the Latin ones this budget was eyeballed against.
- */
-const TOPBAR_TITLE_LENGTH = 32;
-
 export function createTopbar({ onOpenDashboard }) {
     let container = null;
-    let labelNode = null;
     let timeNode = null;
-    let targetNode = null;
-    let totalNode = null;
-    let titleNode = null;
     let iconNode = null;
     let buttonNode = null;
     let popover = null;
@@ -246,21 +234,11 @@ export function createTopbar({ onOpenDashboard }) {
         const overrun = entries.some(entry => pomodoro.isOverrun(entry, now));
         const stale = findStaleClocks(entries, new Date(), staleHours()).length > 0;
 
-        // Overrun outranks stale: it is the more actionable of the two, and a
-        // pomodoro that has blown past its target is usually not yet 8h old.
-        buttonNode.classList.toggle('rlb-topbar__button--running', running && !overrun);
-        buttonNode.classList.toggle('rlb-topbar__button--overrun', overrun);
-        iconNode.className = running
-            ? `rlb-dot${overrun ? ' rlb-dot--overrun' : stale ? ' rlb-dot--stale' : ''}`
-            : 'bp3-icon bp3-icon-timeline-events';
-
         if (!running) {
-            // Idle is icon-only. The topbar is Roam's space, and a label that
-            // says nothing beyond what the icon already says is rent unpaid.
+            iconNode.className = 'bp3-icon bp3-icon-stopwatch';
             timeNode.textContent = '';
-            targetNode.textContent = '';
-            totalNode.textContent = '';
-            titleNode.textContent = '';
+            timeNode.className = 'rlb-topbar__time';
+            buttonNode.replaceChildren(iconNode);
             buttonNode.title = 'Logbook — no clock running. Click for the dashboard.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
@@ -268,24 +246,25 @@ export function createTopbar({ onOpenDashboard }) {
 
         const [first] = entries;
         const elapsed = now - first.start.getTime();
+        // The topbar is a timing-state entry, not a task summary. Overrun
+        // outranks stale, matching the previous status priority without putting
+        // either state on the whole button.
+        const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
+        timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(elapsed);
+        buttonNode.replaceChildren(timeNode);
 
         if (entries.length > 1) {
-            // Which clock the target or total belongs to would be a guess, so
-            // neither is shown; the popover breaks the sessions out individually.
-            targetNode.textContent = '';
-            totalNode.textContent = '';
-            titleNode.textContent = `${entries.length} clocks`;
-            buttonNode.title = `${entries.length} clocks running`;
+            buttonNode.title =
+                `${entries.length} clocks running\n` +
+                `Primary timer: ${first.title}\n` +
+                `This session ${formatElapsed(elapsed)}` +
+                (overrun ? '\nA Pomodoro is over its target.' : '') +
+                (!overrun && stale ? '\nA clock is likely forgotten.' : '') +
+                '\nClick for all clock details.';
         } else {
             const target = pomodoro.targetMinutes(first.clockUid);
-            targetNode.textContent = target ? formatElapsed(target * 60_000) : '';
-
             const totalMinutes = first.priorMinutes + Math.floor(elapsed / 60_000);
-            totalNode.textContent = formatMinutesHuman(totalMinutes);
-
-            titleNode.textContent = taskTitle(first.taskString, { maxLength: TOPBAR_TITLE_LENGTH });
-            // The tooltip spells out what the truncated button cannot.
             buttonNode.title =
                 `Clocked in: ${first.title}\n` +
                 `This session ${formatElapsed(elapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
@@ -295,7 +274,8 @@ export function createTopbar({ onOpenDashboard }) {
                               ? `over by ${formatElapsed(pomodoro.overrunMs(first, now))}`
                               : `${formatElapsed(target * 60_000 - elapsed)} left`
                       }`
-                    : '');
+                    : '') +
+                (!overrun && stale ? '\nThis clock is likely forgotten.' : '');
         }
         buttonNode.setAttribute('aria-label', buttonNode.title);
     };
@@ -323,18 +303,11 @@ export function createTopbar({ onOpenDashboard }) {
         container = el('div', 'rlb-topbar');
         container.id = WIDGET_ID;
 
-        iconNode = el('span', 'bp3-icon bp3-icon-timeline-events');
-        // Built once and updated in place: the counter re-renders every second,
-        // and rebuilding the nodes made a long title reflow on every tick.
+        iconNode = el('span', 'bp3-icon bp3-icon-stopwatch');
         timeNode = el('span', 'rlb-topbar__time');
-        targetNode = el('span', 'rlb-topbar__target');
-        totalNode = el('span', 'rlb-topbar__total');
-        titleNode = el('span', 'rlb-topbar__label');
-        labelNode = el('span', 'rlb-topbar__labels');
-        labelNode.append(timeNode, targetNode, totalNode, titleNode);
 
         buttonNode = button('bp3-button bp3-minimal rlb-topbar__button', '', togglePopover);
-        buttonNode.append(iconNode, labelNode);
+        buttonNode.appendChild(iconNode);
         container.appendChild(buttonNode);
         renderButton();
     };
