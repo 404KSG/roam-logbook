@@ -40,14 +40,9 @@ const geometryExpression = `(() => {
         const range = document.createRange();
         range.selectNodeContents(node);
         const rangeRect = range.getBoundingClientRect();
-        const style = getComputedStyle(node);
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        context.font = [style.fontStyle, style.fontWeight, style.fontSize, style.fontFamily].join(' ');
-        const metrics = context.measureText(node.textContent);
         return {
-            left: rangeRect.left - metrics.actualBoundingBoxLeft,
-            right: rangeRect.left + metrics.actualBoundingBoxRight,
+            left: rangeRect.left,
+            right: rangeRect.right,
         };
     };
     const time = document.querySelector('.rlb-topbar__time');
