@@ -21,6 +21,7 @@ export async function findChromium() {
             // Try the next known installation path.
         }
     }
+    if (process.env.CI) throw new Error('Chromium is required in CI but no executable was found');
     return null;
 }
 

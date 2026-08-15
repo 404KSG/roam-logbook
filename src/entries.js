@@ -6,12 +6,16 @@
  * another device, because it is just a `CLOCK::` block with no end stamp.
  */
 
-import { isDrawerBlock, parseClockLine, referencedBlockUid, taskStatus, taskTitle } from './org.js';
 import {
-    getBlockString,
+    isDrawerBlock,
+    parseClockLineDetailed,
+    referencedBlockUid,
+    taskStatus,
+    taskTitle,
+} from './org.js';
+import {
     query,
     queryOrThrow,
-    resolveReferencedUid,
     validateQueryRows,
 } from './roam.js';
 
@@ -27,9 +31,9 @@ const entriesQuery = predicate =>
   [?c :block/string ?clock-string]
   [?t :block/children ?d]
   [?t :block/uid ?task-uid]
-  [?t :block/string ?task-string]
-  [?t :block/page ?p]
-  [?p :node/title ?page-title]]`;
+  [(get-else $ ?t :block/string nil) ?task-string]
+  [(get-else $ ?t :block/page nil) ?p]
+  [(get-else $ ?p :node/title nil) ?page-title]]`;
 
 /**
  * `includes?` also catches org's own `:LOGBOOK:` spelling, but it is the less
@@ -53,13 +57,19 @@ function queryEntryRows() {
  * @typedef {object} ClockEntry
  * @property {string} clockUid    uid of the `CLOCK::` block itself
  * @property {string} taskUid     uid of the task the drawer hangs under
- * @property {string} taskString  raw task block text
+ * @property {string|null} taskString  raw task block text, when recoverable
  * @property {string} title       display title for the task
  * @property {'TODO'|'DONE'|null} status
  * @property {string|null} pageTitle
  * @property {Date} start
  * @property {Date|null} end      null while the clock is running
  * @property {number|null} minutes
+ * @property {number|null} computedMinutes  duration from the timestamps
+ * @property {number|null} declaredMinutes  hand-written `=> H:MM`, if present
+ * @property {number|null} effectiveMinutes  compatible reporting value
+ * @property {object|null} issue            explainable data-health issue
+ * @property {object[]} issues              all issues attached to this record
+ * @property {string} rawClock              original CLOCK block text
  * @property {boolean} running
  */
 
@@ -74,36 +84,70 @@ export function readAllEntries() {
             typeof row[1] === 'string' &&
             typeof row[2] === 'string' &&
             typeof row[3] === 'string' &&
-            typeof row[4] === 'string' &&
+            (typeof row[4] === 'string' || row[4] === null || row[4] === undefined) &&
             (typeof row[5] === 'string' || row[5] === null || row[5] === undefined)
     );
     const entries = [];
 
     for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
         if (!isDrawerBlock(drawerString)) continue;
-        const parsed = parseClockLine(clockString);
-        if (!parsed) continue;
+        const parsed = parseClockLineDetailed(clockString);
+        if (!parsed.issue && !parsed.ok) continue;
+        const value = parsed.ok ? parsed.value : null;
+        const issues = [];
+        const timingIssue = parsed.ok ? parsed.value.issue : parsed.issue;
+        if (typeof taskString !== 'string' || taskString.trim() === '') {
+            issues.push({
+                code: 'orphan-task',
+                message: 'Task metadata is missing; the Session is retained under Deleted task.',
+                rawClock: clockString,
+            });
+        }
+        if (timingIssue) issues.push({ ...timingIssue, rawClock: clockString });
+        const title =
+            typeof taskString === 'string' && taskString.trim() !== ''
+                ? taskTitle(taskString)
+                : `Deleted task · ${taskUid}`;
         entries.push({
             clockUid,
             taskUid,
-            taskString,
-            title: taskTitle(taskString),
-            status: taskStatus(taskString),
+            taskString: taskString ?? null,
+            title,
+            status: typeof taskString === 'string' ? taskStatus(taskString) : null,
             pageTitle: pageTitle ?? null,
-            start: parsed.start,
-            end: parsed.end,
-            minutes: parsed.minutes,
-            running: parsed.running,
+            rawClock: clockString,
+            start: value?.start ?? null,
+            end: value?.end ?? null,
+            minutes: value?.effectiveMinutes ?? null,
+            computedMinutes: value?.computedMinutes ?? null,
+            declaredMinutes: value?.declaredMinutes ?? null,
+            effectiveMinutes: value?.effectiveMinutes ?? null,
+            issue: issues[0] ?? null,
+            issues,
+            running: value?.running ?? false,
         });
     }
 
-    entries.sort((a, b) => b.start.getTime() - a.start.getTime());
+    entries.sort((a, b) => (b.start?.getTime() ?? -Infinity) - (a.start?.getTime() ?? -Infinity));
     return entries;
 }
 
 /** Just the open clocks — what the topbar counts and what "unfinished" means. */
 export function readRunningEntries() {
     return readAllEntries().filter(entry => entry.running);
+}
+
+/**
+ * Read the graph inputs needed by one dashboard operation.
+ *
+ * Keeping the entries and hierarchy together makes the snapshot boundary
+ * explicit: callers can derive clock state and render from the same read rather
+ * than asking the graph-backed clock module to read the entries a second time.
+ */
+export function readDashboardSnapshot() {
+    const entries = readAllEntries();
+    const hierarchy = readHierarchy([...new Set(entries.map(entry => entry.taskUid))]);
+    return { entries, hierarchy };
 }
 
 // ---- hierarchy, for the dashboard's roll-up ----
@@ -128,6 +172,28 @@ const MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
+
+const BLOCK_STRINGS_QUERY = `[:find ?uid ?string
+  :in $ [?uid ...]
+  :where
+  [?b :block/uid ?uid]
+  [?b :block/string ?string]]`;
+
+const readBlockStrings = uids => {
+    if (uids.length === 0) return {};
+    const result = {};
+    try {
+        const rows = validateQueryRows(
+            queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+            'block string batch',
+            row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
+        );
+        for (const [uid, string] of rows) result[uid] = string;
+    } catch (error) {
+        console.warn('[roam-logbook] referenced task strings unavailable for roll-up', error);
+    }
+    return result;
+};
 
 /**
  * The block structure the dashboard needs to nest tasks under each other.
@@ -177,14 +243,18 @@ export function readHierarchy(taskUids) {
             'parent',
             row => row.length >= 3 && row.every(value => typeof value === 'string')
         );
+        const referencedTargets = parentRows
+            .map(([, , rawParentString]) => referencedBlockUid(rawParentString))
+            .filter(Boolean);
+        const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
         for (const [uid, rawParentUid, rawParentString] of parentRows) {
             // Sub-tasks are routinely written under a `((reference))` to a task
             // rather than under the task itself — pulling a task into a daily note
             // and working beneath it. The reference stands for what it points at,
             // so the walk continues from the original block.
             const referenced = referencedBlockUid(rawParentString);
-            const parentUid = referenced ? resolveReferencedUid(rawParentUid) : rawParentUid;
-            const parentString = referenced ? getBlockString(parentUid) : rawParentString;
+            const parentUid = referenced || rawParentUid;
+            const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
 
             parentOf[uid] = parentUid;
             if (parentUid in stringOf) continue;

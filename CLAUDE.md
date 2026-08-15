@@ -2,10 +2,11 @@
 
 ## Build Workflow
 
-After modifying source files in `src/`, always build before committing:
+After modifying source files in `src/`, verify the source and generated bundle before committing:
 
 ```bash
-npm run check   # lint + test + build
+npm run check   # lint + test + byte-for-byte bundle verification
+npm run build   # explicitly regenerate extension.js when source changed
 ```
 
 Then commit both the source files and `extension.js` together — Roam Depot loads the
@@ -29,8 +30,8 @@ Layering, innermost first:
 
 - `time.js`, `org.js`, `stats.js` — pure. Timestamp/duration math, the org LOGBOOK
   text format, and dashboard aggregation. Fully unit-tested.
-- `roam.js` — the only module that touches `window.roamAlphaAPI`. Degrades to
-  `null`/`[]` when a namespace is missing so it stays importable under Node.
+- `roam.js` — the only module that touches `window.roamAlphaAPI`. Its query seam
+  distinguishes a valid empty result from an uncertain/failed read.
 - `entries.js`, `clock.js` — read entries out of the graph; clock in/out/discard.
   `refresh()` also tags each open clock with `priorMinutes`, so the topbar can show
   a running task total every second without touching the query path.
@@ -52,6 +53,12 @@ Layering, innermost first:
     an item — `" · 44m"` renders as `"· 44m"`. Separators are `::before`
     pseudo-elements and spacing is `gap`; never put them in the text.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
+
+Persisted internal state uses explicit envelopes: Pause Batch format 2,
+Pomodoro target format 1, and state-backup format 1. Legacy known formats may
+migrate; unknown or corrupt values remain untouched and are backed up once.
+`CONTEXT.md` is the domain vocabulary authority for Task, Session, Own, Total,
+Pause Batch, and Pomodoro Target.
 
 ## Testing
 
@@ -84,3 +91,12 @@ real graph:
 
 Test uids must be at least 6 characters: the block-reference regex ignores shorter
 ones, and real Roam uids are 9.
+
+## Release checklist
+
+- Commit source and generated `extension.js` together.
+- Run `npm ci`, `npm run check`, and `npm run verify:bundle` from a clean clone.
+- Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
+- Inspect the Roam Depot build and update the final PR test count only at release.
+- Run `npm run verify:live` manually against a disposable real graph; do not call
+  fake-adapter lifecycle coverage a live Roam test.

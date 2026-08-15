@@ -101,21 +101,39 @@ export function parseTimestamp(text) {
     const match = STAMP_RE.exec(text.trim());
     if (!match) return null;
 
-    const [, year, month, day, , hour, minute, second] = match;
-    const date = new Date(
-        Number(year),
-        Number(month) - 1,
-        Number(day),
-        Number(hour),
-        Number(minute),
-        Number(second || 0),
-        0
-    );
+    const [, yearText, monthText, dayText, , hourText, minuteText, secondText] = match;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const second = Number(secondText || 0);
+    if (
+        month < 1 ||
+        month > 12 ||
+        hour > 23 ||
+        minute > 59 ||
+        second > 59 ||
+        hour < 0 ||
+        minute < 0 ||
+        second < 0
+    ) {
+        return null;
+    }
+
+    // Construct through setFullYear so four-digit years 0000–0099 are not
+    // silently reinterpreted as 1900–1999 by the multi-argument Date constructor.
+    const date = new Date(0);
+    date.setFullYear(year, month - 1, day);
+    date.setHours(hour, minute, second, 0);
     const rolledOver =
-        date.getFullYear() !== Number(year) ||
-        date.getMonth() !== Number(month) - 1 ||
-        date.getDate() !== Number(day);
-    if (rolledOver || Number(hour) > 23 || Number(minute) > 59) return null;
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day ||
+        date.getHours() !== hour ||
+        date.getMinutes() !== minute ||
+        date.getSeconds() !== second;
+    if (rolledOver) return null;
     return date;
 }
 

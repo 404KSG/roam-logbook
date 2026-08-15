@@ -7,7 +7,7 @@
 
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
-import { readAllEntries, readHierarchy } from './entries.js';
+import { readDashboardSnapshot } from './entries.js';
 import { openBlock } from './roam.js';
 import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
 import { staleHours } from './settings.js';
@@ -62,8 +62,12 @@ export function createDashboard({
         if (!bodyNode) return;
         clearLiveTicker();
         const now = nowFn();
-        const entries = readAllEntries();
-        const hierarchy = readHierarchy([...new Set(entries.map(entry => entry.taskUid))]);
+        const snapshot = readDashboardSnapshot();
+        const entries = snapshot.entries;
+        const hierarchy = snapshot.hierarchy;
+        // Publish the exact snapshot to the clock seam. This updates running
+        // state without issuing the entries query a second time.
+        clock.refresh({ entries });
         const model = buildDashboard(entries, { now, rangeId, hierarchy });
         bodyNode.replaceChildren();
 
@@ -80,6 +84,8 @@ export function createDashboard({
             ])
         );
 
+        if (model.issues.length > 0) bodyNode.appendChild(dataIssuesSection(model.issues));
+
         if (model.running.length > 0) {
             bodyNode.appendChild(runningSection(model.running, now));
         }
@@ -95,6 +101,28 @@ export function createDashboard({
         bodyNode.appendChild(daysSection(model.days, now));
         bodyNode.appendChild(tasksSection(model.tree));
         startLiveTicker();
+    };
+
+    const dataIssuesSection = issues => {
+        const details = el('details', 'rlb-data-issues');
+        const summary = el(
+            'summary',
+            'rlb-data-issues__summary',
+            `${issues.length} timing record${issues.length === 1 ? '' : 's'} need review`
+        );
+        details.appendChild(summary);
+        const list = el('div', 'rlb-data-issues__list');
+        for (const entry of issues) {
+            const issueText = (entry.issues || [entry.issue]).filter(Boolean).map(issue => issue.message).join(' ');
+            const raw = entry.rawClock || '(CLOCK text unavailable)';
+            const label = `Task: ${entry.title} · CLOCK: ${raw} · Issue: ${issueText}`;
+            const item = el('div', 'rlb-data-issues__item', label);
+            item.title = label;
+            item.setAttribute('aria-label', label);
+            list.appendChild(item);
+        }
+        details.appendChild(list);
+        return details;
     };
 
     const statsRow = pairs => {
@@ -486,16 +514,15 @@ export function createDashboard({
             if (range.id === rangeId) option.selected = true;
             select.appendChild(option);
         }
-        select.addEventListener('change', event => {
-            rangeId = event.target.value;
-            render();
+            select.addEventListener('change', event => {
+                rangeId = event.target.value;
+                render();
         });
         selectWrapper.appendChild(select);
 
         header.append(
             selectWrapper,
             button('bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button', '', () => {
-                clock.refresh();
                 render();
             }, { title: 'Reload from the graph' }),
             button(
@@ -537,7 +564,6 @@ export function createDashboard({
             root.classList.add('rlb-root--open');
             root.setAttribute('aria-hidden', 'false');
             document.addEventListener('keydown', onKeyDown, true);
-            clock.refresh();
             render();
             const dialog = root.querySelector('.rlb-dialog');
             const initial = dialogFocusables(dialog)[0];

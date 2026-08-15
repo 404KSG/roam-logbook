@@ -66,10 +66,13 @@ function notify() {
  * Each open clock is tagged with `priorMinutes`, the time already banked against
  * the same task. A failed read leaves the last valid snapshot untouched.
  */
-export function refresh() {
+export function refresh({ entries } = {}) {
     let all;
     try {
-        all = readAllEntries();
+        if (entries !== undefined && !Array.isArray(entries)) {
+            throw new GraphReadError('Clock refresh received an invalid entries snapshot');
+        }
+        all = entries ?? readAllEntries();
     } catch (error) {
         lastRefreshStatus = { ok: false, error };
         notice = GRAPH_UNCERTAIN;

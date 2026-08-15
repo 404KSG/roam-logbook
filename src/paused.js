@@ -9,16 +9,18 @@
 import * as clock from './clock.js';
 import { taskTitle } from './org.js';
 import * as pomodoro from './pomodoro.js';
+import { STATE_FORMATS } from './version.js';
 import { getBlockString, GraphReadError } from './roam.js';
 import {
     allowMultipleClocks,
     readSetting,
     SETTING_MULTIPLE,
     SETTING_PAUSED_BATCH,
+    preserveStateBackup,
     writeSetting,
 } from './settings.js';
 
-const VERSION = 2;
+const VERSION = STATE_FORMATS.pauseBatch;
 const LEGACY_VERSION = 1;
 let items = [];
 let pendingResume = [];
@@ -131,8 +133,11 @@ export function load() {
         throw new Error('unsupported paused-batch version');
     } catch (error) {
         unsupportedRaw = raw;
-        notice = 'Saved paused-task state uses an unsupported or invalid version and was kept.';
-        console.warn('[roam-logbook] could not read paused task state', error);
+        const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
+        notice = firstWarning
+            ? 'Saved paused-task state uses an unsupported or invalid version and was kept.'
+            : '';
+        if (firstWarning) console.warn('[roam-logbook] could not read paused task state', error);
         return getPaused();
     }
 }

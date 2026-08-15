@@ -32,7 +32,12 @@ const BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
 const MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
 const MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 
-export function createTopbar({ onOpenDashboard }) {
+export function createTopbar({
+    onOpenDashboard,
+    now: nowFn = () => new Date(),
+    setIntervalFn = (callback, delay) => setInterval(callback, delay),
+    clearIntervalFn = tickerId => clearInterval(tickerId),
+}) {
     let container = null;
     let timeNode = null;
     let iconNode = null;
@@ -41,6 +46,10 @@ export function createTopbar({ onOpenDashboard }) {
     let buttonNode = null;
     let popover = null;
     let observer = null;
+    let hostObserver = null;
+    let recoveryObserver = null;
+    let recoveryTarget = null;
+    let observedTopbar = null;
     let ticker = null;
     let unsubscribe = null;
     let unsubscribePaused = null;
@@ -49,6 +58,16 @@ export function createTopbar({ onOpenDashboard }) {
     let clockOutAllConfirmTimer = null;
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
+    let attachQueued = false;
+    let attachTimer = null;
+    let attachCount = 0;
+    let tickCount = 0;
+    let layoutMode = null;
+
+    const nowDate = () => {
+        const value = nowFn();
+        return value instanceof Date ? value : new Date(value);
+    };
 
     const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
     const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
@@ -125,8 +144,7 @@ export function createTopbar({ onOpenDashboard }) {
         );
     };
 
-    const runningRow = entry => {
-        const now = Date.now();
+    const runningRow = (entry, now = nowDate()) => {
         const overrun = pomodoro.isOverrun(entry, now);
         const row = el('div', `rlb-run${overrun ? ' rlb-run--overrun' : ''}`);
 
@@ -232,7 +250,7 @@ export function createTopbar({ onOpenDashboard }) {
                 )
             );
         } else {
-            const stale = findStaleClocks(entries, new Date(), staleHours());
+            const stale = findStaleClocks(entries, nowDate(), staleHours());
             if (stale.length > 0) {
                 popover.appendChild(
                     el(
@@ -243,7 +261,7 @@ export function createTopbar({ onOpenDashboard }) {
                     )
                 );
             }
-            for (const entry of entries) popover.appendChild(runningRow(entry));
+            for (const entry of entries) popover.appendChild(runningRow(entry, nowDate()));
         }
 
         if (pausedItems.length > 0) {
@@ -346,21 +364,29 @@ export function createTopbar({ onOpenDashboard }) {
 
     // ---- widget ----
 
-    const renderButton = () => {
+    const syncButtonLayout = mode => {
+        if (layoutMode === mode) return;
+        if (mode === 'idle') buttonNode.replaceChildren(iconNode);
+        else if (mode === 'parallel') buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
+        else buttonNode.replaceChildren(timeNode);
+        layoutMode = mode;
+    };
+
+    const renderButton = (entries = clock.getRunning(), now = nowDate()) => {
         if (!buttonNode) return;
-        const entries = clock.getRunning();
         const pausedItems = paused.getPaused();
         const running = entries.length > 0;
-        const now = Date.now();
         const overrun = entries.some(entry => pomodoro.isOverrun(entry, now));
-        const stale = findStaleClocks(entries, new Date(), staleHours()).length > 0;
+        const stale = findStaleClocks(entries, now, staleHours()).length > 0;
 
         if (!running) {
             buttonNode.classList.remove('rlb-topbar__button--parallel');
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
-            buttonNode.replaceChildren(iconNode);
+            parallelNode.textContent = '';
+            separatorNode.textContent = '';
+            syncButtonLayout('idle');
             buttonNode.title = pausedItems.length
                 ? `${taskCount(pausedItems.length)} Paused — click to resume or review.`
                 : 'Logbook — no Session running. Click for details.';
@@ -380,10 +406,12 @@ export function createTopbar({ onOpenDashboard }) {
             buttonNode.classList.add('rlb-topbar__button--parallel');
             parallelNode.textContent = sessionCount(entries.length);
             separatorNode.textContent = '';
-            buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
+            syncButtonLayout('parallel');
         } else {
             buttonNode.classList.remove('rlb-topbar__button--parallel');
-            buttonNode.replaceChildren(timeNode);
+            parallelNode.textContent = '';
+            separatorNode.textContent = '';
+            syncButtonLayout('single');
         }
 
         if (entries.length > 1) {
@@ -414,11 +442,13 @@ export function createTopbar({ onOpenDashboard }) {
     };
 
     const tick = () => {
-        if (clock.getRunning().length === 0) return;
-        renderButton();
+        tickCount += 1;
+        const entries = clock.getRunning();
+        if (entries.length === 0) return;
+        const now = nowDate();
+        renderButton(entries, now);
         if (popover) {
-            const now = Date.now();
-            const byUid = new Map(clock.getRunning().map(entry => [entry.clockUid, entry]));
+            const byUid = new Map(entries.map(entry => [entry.clockUid, entry]));
             for (const meta of popover.querySelectorAll('.rlb-run__meta')) {
                 const entry = byUid.get(meta.dataset.clockUid);
                 if (!entry) continue;
@@ -454,12 +484,16 @@ export function createTopbar({ onOpenDashboard }) {
 
     const attach = () => {
         if (destroyed) return;
+        attachCount += 1;
         if (!showTopbarWidget()) {
+            observeRecoveryTarget(null);
             remove();
             return;
         }
         const topbar = document.querySelector(TOPBAR_SELECTOR);
+        observeRecoveryTarget(topbar);
         if (!topbar) return;
+        if (topbar !== observedTopbar) observeTopbar(topbar);
         if (!container) build();
 
         const placement = afterNavigation(topbar);
@@ -469,6 +503,78 @@ export function createTopbar({ onOpenDashboard }) {
         ) {
             placement.parent.insertBefore(container, placement.before);
         }
+    };
+
+    const isPluginNode = node =>
+        Boolean(
+            node &&
+                (node === container ||
+                    node === popover ||
+                    container?.contains(node) ||
+                    popover?.contains(node))
+        );
+
+    const hasNonPluginMutation = record => {
+        if (isPluginNode(record.target)) return false;
+        const nodes = [...record.addedNodes, ...record.removedNodes];
+        return nodes.length === 0 || nodes.some(node => !isPluginNode(node));
+    };
+
+    const touchesTopbar = record => {
+        if (isPluginNode(record.target)) return false;
+        const nodes = [...record.addedNodes, ...record.removedNodes];
+        // Inserting or updating our widget is expected to happen inside the
+        // observed host. Do not let that self-mutation enter the recovery path.
+        if (nodes.length > 0 && nodes.every(isPluginNode)) return false;
+        if (record.target?.closest?.(TOPBAR_SELECTOR)) return true;
+        return nodes.some(
+            node => node?.matches?.(TOPBAR_SELECTOR) || node?.querySelector?.(TOPBAR_SELECTOR)
+        );
+    };
+
+    const scheduleAttach = () => {
+        if (destroyed || attachQueued) return;
+        attachQueued = true;
+        const flush = () => {
+            attachQueued = false;
+            attachTimer = null;
+            attach();
+        };
+        if (typeof queueMicrotask === 'function') queueMicrotask(flush);
+        else attachTimer = setTimeout(flush, 0);
+    };
+
+    const observeTopbar = topbar => {
+        hostObserver?.disconnect();
+        observedTopbar = topbar;
+        hostObserver = new MutationObserver(records => {
+            if (records.some(hasNonPluginMutation)) scheduleAttach();
+        });
+        // The topbar is the stable host seam. We only observe its descendants;
+        // the recovery observer below is filtered to host replacement signals.
+        hostObserver.observe(topbar, { childList: true, subtree: true });
+    };
+
+    /**
+     * Observe only the shell that owns the topbar after the host is found.
+     *
+     * A body-wide subtree observer is useful during the initial boot, when
+     * Roam has not mounted its shell yet. Once the shell exists, its immediate
+     * parent is enough to notice replacement; the topbar's own descendants are
+     * handled by hostObserver above. This keeps ordinary page mutations out of
+     * the recovery path altogether.
+     */
+    const observeRecoveryTarget = topbar => {
+        const target = topbar?.parentElement || document.body;
+        const subtree = !topbar;
+        if (recoveryObserver && recoveryTarget === target) return;
+        recoveryObserver?.disconnect();
+        recoveryObserver = new MutationObserver(records => {
+            if (records.some(touchesTopbar)) scheduleAttach();
+        });
+        recoveryTarget = target;
+        recoveryObserver.observe(target, { childList: true, ...(subtree ? { subtree: true } : {}) });
+        observer = recoveryObserver;
     };
 
     /**
@@ -578,22 +684,32 @@ export function createTopbar({ onOpenDashboard }) {
                 renderButton();
                 if (popover) renderPopover();
             });
-            ticker = setInterval(tick, 1000);
-            observer = new MutationObserver(attach);
-            observer.observe(document.body, { childList: true, subtree: true });
+            ticker = setIntervalFn(tick, 1000);
             attach();
         },
         refresh: attach,
+        getPerformanceSnapshot() {
+            return { attachCount, tickCount };
+        },
         unmount() {
             destroyed = true;
             unsubscribe?.();
             unsubscribe = null;
             unsubscribePaused?.();
             unsubscribePaused = null;
-            if (ticker) clearInterval(ticker);
+            if (ticker) clearIntervalFn(ticker);
             ticker = null;
             observer?.disconnect();
             observer = null;
+            hostObserver?.disconnect();
+            hostObserver = null;
+            recoveryObserver?.disconnect();
+            recoveryObserver = null;
+            recoveryTarget = null;
+            observedTopbar = null;
+            attachQueued = false;
+            if (attachTimer) clearTimeout(attachTimer);
+            attachTimer = null;
             remove();
             container = null;
         },

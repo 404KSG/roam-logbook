@@ -1,0 +1,178 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+
+import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
+
+const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"><button aria-label="Back"></button><button aria-label="Forward"></button><input aria-label="Find or Create Page"></div></body></html>');
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+globalThis.MutationObserver = dom.window.MutationObserver;
+globalThis.HTMLElement = dom.window.HTMLElement;
+
+const TASK = { uid: 'perf-task1', string: '{{[[TODO]]}} performance task', parent: null };
+const settings = new Map([['showTopbarWidget', true]]);
+const extensionAPI = {
+    settings: {
+        get: key => settings.get(key),
+        set: (key, value) => settings.set(key, value),
+    },
+};
+
+const clock = await import('../src/clock.js');
+const { setExtensionAPI } = await import('../src/settings.js');
+const { createTopbar } = await import('../src/topbar.js');
+const { createDashboard } = await import('../src/dashboard.js');
+const { readDashboardSnapshot } = await import('../src/entries.js');
+const { buildDashboard } = await import('../src/stats.js');
+
+const settleMutations = async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+};
+
+test.beforeEach(() => {
+    installGraph([TASK]);
+    setExtensionAPI(extensionAPI);
+    clock.reset();
+    document.body.innerHTML = '<div class="rm-topbar"><button aria-label="Back"></button><button aria-label="Forward"></button><input aria-label="Find or Create Page"></div>';
+});
+
+test.after(() => {
+    clock.reset();
+    setExtensionAPI(null);
+    uninstallGraph();
+});
+
+test('unrelated document mutations do not cause repeated attachment work', async () => {
+    const topbar = createTopbar({ onOpenDashboard: () => {} });
+    topbar.mount();
+    const initial = topbar.getPerformanceSnapshot().attachCount;
+
+    for (let index = 0; index < 1000; index += 1) {
+        const node = document.createElement('div');
+        node.textContent = `unrelated-${index}`;
+        document.body.appendChild(node);
+    }
+    await settleMutations();
+
+    assert.equal(topbar.getPerformanceSnapshot().attachCount, initial);
+    topbar.unmount();
+});
+
+test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
+    const topbar = createTopbar({ onOpenDashboard: () => {} });
+    topbar.mount();
+    const initial = topbar.getPerformanceSnapshot().attachCount;
+    const widget = document.querySelector('#roam-logbook-topbar');
+    widget.appendChild(document.createElement('span'));
+    await settleMutations();
+
+    assert.equal(topbar.getPerformanceSnapshot().attachCount, initial);
+    topbar.unmount();
+});
+
+test('the one-second tick updates existing DOM handles without a graph read or replacement', async () => {
+    let tick;
+    const started = new Date('2026-08-15T09:00:00');
+    const graph = installGraph([
+        TASK,
+        { uid: 'perf-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'perf-clock', string: 'CLOCK:: [2026-08-15 Sat 09:00]', parent: 'perf-drawer' },
+    ]);
+    clock.refresh();
+    const topbar = createTopbar({
+        onOpenDashboard: () => {},
+        now: () => new Date(started.getTime() + 61_000),
+        setIntervalFn: callback => {
+            tick = callback;
+            return 'ticker';
+        },
+        clearIntervalFn: () => {},
+    });
+    topbar.mount();
+    const button = document.querySelector('#roam-logbook-topbar button');
+    const children = [...button.children];
+    let queries = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        queries += 1;
+        return originalQuery(...args);
+    };
+
+    tick();
+
+    assert.equal(queries, 0);
+    assert.deepEqual([...button.children], children);
+    assert.equal(button.textContent.trim(), '1:01');
+    topbar.unmount();
+});
+
+test('opening the dashboard consumes one entries snapshot for clock state and rendering', () => {
+    const graph = installGraph([
+        TASK,
+        { uid: 'perf-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        {
+            uid: 'perf-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'perf-drawer',
+        },
+    ]);
+    let entryQueries = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        const result = originalQuery(...args);
+        if (String(args[0]).includes('LOGBOOK:')) entryQueries += 1;
+        return result;
+    };
+    const dashboard = createDashboard({
+        now: () => new Date('2026-08-15T12:00:00'),
+        setIntervalFn: () => 'dashboard-ticker',
+        clearIntervalFn: () => {},
+    });
+
+    dashboard.open();
+
+    assert.equal(entryQueries, 1);
+    dashboard.destroy();
+});
+
+test('1000 and 10000 CLOCK snapshots keep graph query count fixed and render linearly', () => {
+    const queryCounts = [];
+    const durations = [];
+    for (const count of [1000, 10000]) {
+        const blocks = [
+            TASK,
+            { uid: 'perf-large-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        ];
+        for (let index = 0; index < count; index += 1) {
+            const minute = String(index % 60).padStart(2, '0');
+            blocks.push({
+                uid: `perf-large-${index}`,
+                string: `CLOCK:: [2026-08-15 Sat 09:${minute}]--[2026-08-15 Sat 10:${minute}] => 1:00`,
+                parent: 'perf-large-drawer',
+            });
+        }
+        const graph = installGraph(blocks);
+        let queries = 0;
+        const originalQuery = graph.api.data.q;
+        graph.api.data.q = (...args) => {
+            queries += 1;
+            return originalQuery(...args);
+        };
+        const before = performance.now();
+        const snapshot = readDashboardSnapshot();
+        const model = buildDashboard(snapshot.entries, {
+            now: new Date('2026-08-15T12:00:00'),
+            rangeId: 'all',
+            hierarchy: snapshot.hierarchy,
+        });
+        durations.push(performance.now() - before);
+        queryCounts.push(queries);
+        assert.equal(snapshot.entries.length, count);
+        assert.equal(model.totalMinutes, count * 60);
+    }
+
+    assert.deepEqual(queryCounts, [3, 3], 'entries, mirrors, and parents stay batched');
+    assert.ok(durations[1] < durations[0] * 30 + 2000, JSON.stringify(durations));
+});

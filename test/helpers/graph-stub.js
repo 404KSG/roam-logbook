@@ -18,7 +18,7 @@ export function installGraph(blocks = []) {
             uid: block.uid,
             string: block.string,
             parent: block.parent ?? null,
-            page: block.page ?? 'Test Page',
+            page: block.page === undefined ? 'Test Page' : block.page,
         });
     }
 
@@ -35,7 +35,7 @@ export function installGraph(blocks = []) {
         if (datalog.includes('LOGBOOK:')) {
             const rows = [];
             for (const drawer of store.values()) {
-                if (!drawer.string.includes('LOGBOOK:')) continue;
+                if (typeof drawer.string !== 'string' || !drawer.string.includes('LOGBOOK:')) continue;
                 const task = drawer.parent ? store.get(drawer.parent) : null;
                 if (!task) continue;
                 for (const child of childrenOf(drawer.uid)) {
@@ -43,6 +43,12 @@ export function installGraph(blocks = []) {
                 }
             }
             return rows;
+        }
+        if (datalog.includes(':find ?uid ?string') && datalog.includes(':in $ [?uid ...]')) {
+            const wanted = new Set(args[0]);
+            return [...store.values()]
+                .filter(block => wanted.has(block.uid) && typeof block.string === 'string')
+                .map(block => [block.uid, block.string]);
         }
         if (datalog.includes(':find ?uid ?parent-uid')) {
             const wanted = new Set(args[0]);
@@ -55,6 +61,7 @@ export function installGraph(blocks = []) {
             const wanted = new Set(args[0]);
             const rows = [];
             for (const block of store.values()) {
+                if (typeof block.string !== 'string') continue;
                 for (const [, refUid] of block.string.matchAll(/\(\(([a-zA-Z0-9_-]+)\)\)/g)) {
                     if (wanted.has(refUid)) rows.push([refUid, block.uid, block.string]);
                 }

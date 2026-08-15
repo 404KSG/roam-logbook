@@ -1,5 +1,8 @@
 # Roam Logbook – 404KSG
 
+Current package version: **0.9.0-beta**. This is a beta fork; the graph remains
+the source of truth and no local CLOCK database is created.
+
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
 
 This is an MIT-licensed fork of [forrestchang/roam-logbook](https://github.com/forrestchang/roam-logbook). It preserves the original LOGBOOK/CLOCK workflow and reporting behavior while refining the topbar and dashboard presentation.
@@ -106,6 +109,16 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 - A session that runs past midnight counts wholly against the day it began, as org's own clock reports do.
 - Everything happens locally against your graph: no analytics, no network calls, no runtime dependency.
 
+### Compatibility and data health
+
+Pause Batch state is stored as version 2 `{ version, data }`; Pomodoro targets
+use version 1 `{ version, data }`. The extension migrates the legacy Pause Batch
+shape and flat Pomodoro map in place. Unknown or corrupt composite state is kept
+untouched, copied once into the versioned internal `stateBackups` setting, and
+reported without destructive migration. A valid orphan CLOCK is reported under
+`Deleted task · UID` and remains part of global and by-day totals. Data issues
+are review-only: the extension never auto-rewrites CLOCK records.
+
 ## Development
 
 ```bash
@@ -117,7 +130,23 @@ npm run check
 ./build.sh   # clean, repeatable Roam Depot build
 ```
 
-`npm run build` bundles `src/` into `extension.js` with esbuild. Commit the bundle alongside the source.
+`npm run build` bundles `src/` into `extension.js` with esbuild. A temporary
+destination is also supported, for example `node build.js --outfile=/tmp/extension.js`
+or `RLB_BUILD_OUTFILE=/tmp/extension.js npm run build`. `npm run verify:bundle`
+builds into a temporary directory and compares the result byte-for-byte with the
+checked-in bundle; `npm run check` runs this drift check without rewriting the
+working tree. Commit the bundle alongside the source.
+
+### Release checklist
+
+- Source commit and generated `extension.js` are present and `npm run check` is green.
+- A clean clone runs `npm ci`, `npm run check`, and `npm run verify:bundle`.
+- Required Chromium browser-layout tests and the final-bundle lifecycle smoke pass.
+- Depot build output is inspected before release; the Depot PR test count is updated
+  at final publication time.
+- Run the real Roam live smoke manually (`npm run verify:live`) against a disposable
+  graph. Automated tests use a fake adapter and must not be described as a live
+  Roam verification.
 
 ## Attribution
 

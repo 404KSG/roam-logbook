@@ -25,7 +25,8 @@ export const CLOCK_LABEL = 'CLOCK::';
 // A leading `:` is accepted so drawers pasted straight out of an org file parse.
 const DRAWER_RE = /^\s*:?LOGBOOK:{1,2}\s*$/i;
 const CLOCK_RE =
-    /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:[0-5]\d))?\s*$/i;
+    /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:\d+))?\s*$/i;
+const CLOCK_LIKE_RE = /^\s*:?CLOCK:{1,2}(?:\s|$)/i;
 
 const TODO_RE = /\{\{\[\[(TODO|DONE)\]\]\}\}|\{\{(TODO|DONE)\}\}/;
 const BLOCK_REF_ONLY_RE = /^\s*\(\(([a-zA-Z0-9_-]{6,})\)\)\s*$/;
@@ -37,7 +38,7 @@ export function isDrawerBlock(string) {
 }
 
 export function isClockBlock(string) {
-    return typeof string === 'string' && CLOCK_RE.test(string);
+    return parseClockLineDetailed(string).ok;
 }
 
 /** True for `{{[[TODO]]}}` and `{{[[DONE]]}}` blocks, plain-brace variants too. */
@@ -69,21 +70,99 @@ export function taskStatus(string) {
  * @returns {{start: Date, end: Date|null, minutes: number|null, running: boolean}|null}
  */
 export function parseClockLine(string) {
-    if (typeof string !== 'string') return null;
+    const result = parseClockLineDetailed(string);
+    return result.ok ? result.value : null;
+}
+
+/**
+ * Parse a CLOCK line without losing the reason a clock-shaped record is invalid.
+ * `parseClockLine` keeps its historical nullable contract; graph readers use this
+ * richer seam to surface data issues without changing valid totals.
+ */
+export function parseClockLineDetailed(string) {
+    if (typeof string !== 'string') return { ok: false, issue: null };
     const match = CLOCK_RE.exec(string);
-    if (!match) return null;
+    if (!match) {
+        return CLOCK_LIKE_RE.test(string)
+            ? {
+                  ok: false,
+                  issue: {
+                      code: 'malformed-clock',
+                      message: 'CLOCK record does not match the expected Org format.',
+                  },
+              }
+            : { ok: false, issue: null };
+    }
 
     const start = parseTimestamp(match[1]);
-    if (!start) return null;
+    if (!start) {
+        return {
+            ok: false,
+            issue: {
+                code: 'invalid-timestamp',
+                field: 'start',
+                raw: match[1],
+                message: `Start timestamp is invalid: ${match[1]}`,
+            },
+        };
+    }
 
     const end = match[2] ? parseTimestamp(match[2]) : null;
-    if (match[2] && !end) return null;
-    if (end && end.getTime() < start.getTime()) return null;
+    if (match[2] && !end) {
+        return {
+            ok: false,
+            issue: {
+                code: 'invalid-timestamp',
+                field: 'end',
+                raw: match[2],
+                message: `End timestamp is invalid: ${match[2]}`,
+            },
+        };
+    }
+    if (end && end.getTime() < start.getTime()) {
+        return {
+            ok: false,
+            issue: {
+                code: 'negative-duration',
+                message: 'End timestamp is earlier than the start timestamp.',
+            },
+        };
+    }
 
-    const stated = match[3] ? parseDurationMinutes(match[3]) : null;
-    const minutes = end ? (stated ?? durationMinutes(start.getTime(), end.getTime())) : null;
+    const declaredMinutes = match[3] ? parseDurationMinutes(match[3]) : null;
+    if (match[3] && declaredMinutes === null) {
+        return {
+            ok: false,
+            issue: {
+                code: 'invalid-declared-duration',
+                raw: match[3],
+                message: `Declared duration is invalid: ${match[3]}`,
+            },
+        };
+    }
+    const computedMinutes = end ? durationMinutes(start.getTime(), end.getTime()) : null;
+    const effectiveMinutes = end ? (declaredMinutes ?? computedMinutes) : null;
+    const issue =
+        end && declaredMinutes !== null && declaredMinutes !== computedMinutes
+            ? {
+                  code: 'declared-duration-mismatch',
+                  message: `Declared ${match[3]} differs from the ${formatDurationMinutes(computedMinutes)} computed from timestamps.`,
+              }
+            : null;
 
-    return { start, end, minutes, running: !end };
+    return {
+        ok: true,
+        value: {
+            start,
+            end,
+            computedMinutes,
+            declaredMinutes,
+            effectiveMinutes,
+            minutes: effectiveMinutes,
+            running: !end,
+            issue,
+        },
+    };
 }
 
 /** Serialise a clock entry. Omitting `end` writes the running form. */

@@ -51,18 +51,21 @@ function parseTimestamp(text) {
   const match = STAMP_RE.exec(text.trim());
   if (!match)
     return null;
-  const [, year, month, day, , hour, minute, second] = match;
-  const date = new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second || 0),
-    0
-  );
-  const rolledOver = date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1 || date.getDate() !== Number(day);
-  if (rolledOver || Number(hour) > 23 || Number(minute) > 59)
+  const [, yearText, monthText, dayText, , hourText, minuteText, secondText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText || 0);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59 || hour < 0 || minute < 0 || second < 0) {
+    return null;
+  }
+  const date = /* @__PURE__ */ new Date(0);
+  date.setFullYear(year, month - 1, day);
+  date.setHours(hour, minute, second, 0);
+  const rolledOver = date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day || date.getHours() !== hour || date.getMinutes() !== minute || date.getSeconds() !== second;
+  if (rolledOver)
     return null;
   return date;
 }
@@ -111,7 +114,8 @@ function startOfDaysAgo(date, days) {
 var DRAWER_LABEL = "LOGBOOK::";
 var CLOCK_LABEL = "CLOCK::";
 var DRAWER_RE = /^\s*:?LOGBOOK:{1,2}\s*$/i;
-var CLOCK_RE = /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:[0-5]\d))?\s*$/i;
+var CLOCK_RE = /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:\d+))?\s*$/i;
+var CLOCK_LIKE_RE = /^\s*:?CLOCK:{1,2}(?:\s|$)/i;
 var TODO_RE = /\{\{\[\[(TODO|DONE)\]\]\}\}|\{\{(TODO|DONE)\}\}/;
 var BLOCK_REF_ONLY_RE = /^\s*\(\(([a-zA-Z0-9_-]{6,})\)\)\s*$/;
 var EMBED_ONLY_RE = /^\s*\{\{\[?\[?embed(?:-path|-children)?\]?\]?\s*:\s*\(\(([a-zA-Z0-9_-]{6,})\)\)\s*\}\}\s*$/i;
@@ -129,23 +133,82 @@ function taskStatus(string) {
     return null;
   return (match[1] || match[2]).toUpperCase();
 }
-function parseClockLine(string) {
+function parseClockLineDetailed(string) {
   if (typeof string !== "string")
-    return null;
+    return { ok: false, issue: null };
   const match = CLOCK_RE.exec(string);
-  if (!match)
-    return null;
+  if (!match) {
+    return CLOCK_LIKE_RE.test(string) ? {
+      ok: false,
+      issue: {
+        code: "malformed-clock",
+        message: "CLOCK record does not match the expected Org format."
+      }
+    } : { ok: false, issue: null };
+  }
   const start2 = parseTimestamp(match[1]);
-  if (!start2)
-    return null;
+  if (!start2) {
+    return {
+      ok: false,
+      issue: {
+        code: "invalid-timestamp",
+        field: "start",
+        raw: match[1],
+        message: `Start timestamp is invalid: ${match[1]}`
+      }
+    };
+  }
   const end = match[2] ? parseTimestamp(match[2]) : null;
-  if (match[2] && !end)
-    return null;
-  if (end && end.getTime() < start2.getTime())
-    return null;
-  const stated = match[3] ? parseDurationMinutes(match[3]) : null;
-  const minutes = end ? stated ?? durationMinutes(start2.getTime(), end.getTime()) : null;
-  return { start: start2, end, minutes, running: !end };
+  if (match[2] && !end) {
+    return {
+      ok: false,
+      issue: {
+        code: "invalid-timestamp",
+        field: "end",
+        raw: match[2],
+        message: `End timestamp is invalid: ${match[2]}`
+      }
+    };
+  }
+  if (end && end.getTime() < start2.getTime()) {
+    return {
+      ok: false,
+      issue: {
+        code: "negative-duration",
+        message: "End timestamp is earlier than the start timestamp."
+      }
+    };
+  }
+  const declaredMinutes = match[3] ? parseDurationMinutes(match[3]) : null;
+  if (match[3] && declaredMinutes === null) {
+    return {
+      ok: false,
+      issue: {
+        code: "invalid-declared-duration",
+        raw: match[3],
+        message: `Declared duration is invalid: ${match[3]}`
+      }
+    };
+  }
+  const computedMinutes = end ? durationMinutes(start2.getTime(), end.getTime()) : null;
+  const effectiveMinutes = end ? declaredMinutes ?? computedMinutes : null;
+  const issue = end && declaredMinutes !== null && declaredMinutes !== computedMinutes ? {
+    code: "declared-duration-mismatch",
+    message: `Declared ${match[3]} differs from the ${formatDurationMinutes(computedMinutes)} computed from timestamps.`
+  } : null;
+  return {
+    ok: true,
+    value: {
+      start: start2,
+      end,
+      computedMinutes,
+      declaredMinutes,
+      effectiveMinutes,
+      minutes: effectiveMinutes,
+      running: !end,
+      issue
+    }
+  };
 }
 function formatClockLine(start2, end) {
   if (!end)
@@ -328,9 +391,9 @@ var entriesQuery = (predicate) => `[:find ?clock-uid ?clock-string ?drawer-strin
   [?c :block/string ?clock-string]
   [?t :block/children ?d]
   [?t :block/uid ?task-uid]
-  [?t :block/string ?task-string]
-  [?t :block/page ?p]
-  [?p :node/title ?page-title]]`;
+  [(get-else $ ?t :block/string nil) ?task-string]
+  [(get-else $ ?t :block/page nil) ?p]
+  [(get-else $ ?p :node/title nil) ?page-title]]`;
 function queryEntryRows() {
   try {
     return queryOrThrow(entriesQuery("includes?"));
@@ -348,30 +411,54 @@ function readAllEntries() {
   const rows = validateQueryRows(
     queryEntryRows(),
     "logbook entry",
-    (row) => row.length >= 6 && typeof row[0] === "string" && typeof row[1] === "string" && typeof row[2] === "string" && typeof row[3] === "string" && typeof row[4] === "string" && (typeof row[5] === "string" || row[5] === null || row[5] === void 0)
+    (row) => row.length >= 6 && typeof row[0] === "string" && typeof row[1] === "string" && typeof row[2] === "string" && typeof row[3] === "string" && (typeof row[4] === "string" || row[4] === null || row[4] === void 0) && (typeof row[5] === "string" || row[5] === null || row[5] === void 0)
   );
   const entries = [];
   for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
     if (!isDrawerBlock(drawerString))
       continue;
-    const parsed = parseClockLine(clockString);
-    if (!parsed)
+    const parsed = parseClockLineDetailed(clockString);
+    if (!parsed.issue && !parsed.ok)
       continue;
+    const value = parsed.ok ? parsed.value : null;
+    const issues = [];
+    const timingIssue = parsed.ok ? parsed.value.issue : parsed.issue;
+    if (typeof taskString !== "string" || taskString.trim() === "") {
+      issues.push({
+        code: "orphan-task",
+        message: "Task metadata is missing; the Session is retained under Deleted task.",
+        rawClock: clockString
+      });
+    }
+    if (timingIssue)
+      issues.push({ ...timingIssue, rawClock: clockString });
+    const title = typeof taskString === "string" && taskString.trim() !== "" ? taskTitle(taskString) : `Deleted task \xB7 ${taskUid}`;
     entries.push({
       clockUid,
       taskUid,
-      taskString,
-      title: taskTitle(taskString),
-      status: taskStatus(taskString),
+      taskString: taskString ?? null,
+      title,
+      status: typeof taskString === "string" ? taskStatus(taskString) : null,
       pageTitle: pageTitle ?? null,
-      start: parsed.start,
-      end: parsed.end,
-      minutes: parsed.minutes,
-      running: parsed.running
+      rawClock: clockString,
+      start: value?.start ?? null,
+      end: value?.end ?? null,
+      minutes: value?.effectiveMinutes ?? null,
+      computedMinutes: value?.computedMinutes ?? null,
+      declaredMinutes: value?.declaredMinutes ?? null,
+      effectiveMinutes: value?.effectiveMinutes ?? null,
+      issue: issues[0] ?? null,
+      issues,
+      running: value?.running ?? false
     });
   }
-  entries.sort((a, b) => b.start.getTime() - a.start.getTime());
+  entries.sort((a, b) => (b.start?.getTime() ?? -Infinity) - (a.start?.getTime() ?? -Infinity));
   return entries;
+}
+function readDashboardSnapshot() {
+  const entries = readAllEntries();
+  const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
+  return { entries, hierarchy };
 }
 var MAX_ANCESTOR_DEPTH = 24;
 var PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
@@ -388,6 +475,28 @@ var MIRRORS_QUERY = `[:find ?target-uid ?mirror-uid ?mirror-string
   [?m :block/refs ?t]
   [?m :block/uid ?mirror-uid]
   [?m :block/string ?mirror-string]]`;
+var BLOCK_STRINGS_QUERY = `[:find ?uid ?string
+  :in $ [?uid ...]
+  :where
+  [?b :block/uid ?uid]
+  [?b :block/string ?string]]`;
+var readBlockStrings = (uids) => {
+  if (uids.length === 0)
+    return {};
+  const result = {};
+  try {
+    const rows = validateQueryRows(
+      queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+      "block string batch",
+      (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
+    );
+    for (const [uid, string] of rows)
+      result[uid] = string;
+  } catch (error) {
+    console.warn("[roam-logbook] referenced task strings unavailable for roll-up", error);
+  }
+  return result;
+};
 function readHierarchy(taskUids) {
   const parentOf = {};
   const stringOf = {};
@@ -418,10 +527,12 @@ function readHierarchy(taskUids) {
       "parent",
       (row) => row.length >= 3 && row.every((value) => typeof value === "string")
     );
+    const referencedTargets = parentRows.map(([, , rawParentString]) => referencedBlockUid(rawParentString)).filter(Boolean);
+    const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
     for (const [uid, rawParentUid, rawParentString] of parentRows) {
       const referenced = referencedBlockUid(rawParentString);
-      const parentUid = referenced ? resolveReferencedUid(rawParentUid) : rawParentUid;
-      const parentString = referenced ? getBlockString(parentUid) : rawParentString;
+      const parentUid = referenced || rawParentUid;
+      const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
       parentOf[uid] = parentUid;
       if (parentUid in stringOf)
         continue;
@@ -444,6 +555,14 @@ function resetMutationQueue() {
   tail = Promise.resolve();
 }
 
+// src/version.js
+var PLUGIN_VERSION = "0.9.0";
+var STATE_FORMATS = Object.freeze({
+  pauseBatch: 2,
+  pomodoroTargets: 1,
+  stateBackups: 1
+});
+
 // src/settings.js
 var SETTING_TOPBAR = "showTopbarWidget";
 var SETTING_MULTIPLE = "allowMultipleClocks";
@@ -452,6 +571,7 @@ var SETTING_STALE_HOURS = "staleHours";
 var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
 var SETTING_POMODORO_STATE = "pomodoroTargets";
 var SETTING_PAUSED_BATCH = "pausedBatch";
+var SETTING_STATE_BACKUPS = "stateBackups";
 var DEFAULTS = {
   [SETTING_TOPBAR]: true,
   [SETTING_MULTIPLE]: false,
@@ -504,6 +624,29 @@ function readSetting(key) {
 }
 function writeSetting(key, value) {
   extensionAPI?.settings?.set(key, value);
+}
+function preserveStateBackup(key, raw) {
+  try {
+    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
+    let stored = readSetting(SETTING_STATE_BACKUPS);
+    try {
+      stored = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
+    } catch {
+      stored = null;
+    }
+    const data = stored?.version === 1 && stored.data && typeof stored.data === "object" ? stored.data : {};
+    if (data[key]?.rawSignature === rawSignature)
+      return false;
+    data[key] = { rawSignature, raw };
+    writeSetting(
+      SETTING_STATE_BACKUPS,
+      JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
+    );
+    return true;
+  } catch (error) {
+    console.warn("[roam-logbook] could not preserve invalid state backup", error);
+    return true;
+  }
 }
 function normalizeChecked(event) {
   return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
@@ -558,10 +701,13 @@ function notify() {
     }
   }
 }
-function refresh() {
+function refresh({ entries } = {}) {
   let all;
   try {
-    all = readAllEntries();
+    if (entries !== void 0 && !Array.isArray(entries)) {
+      throw new GraphReadError("Clock refresh received an invalid entries snapshot");
+    }
+    all = entries ?? readAllEntries();
   } catch (error) {
     lastRefreshStatus = { ok: false, error };
     notice = GRAPH_UNCERTAIN;
@@ -780,8 +926,10 @@ function getRange(id) {
   return RANGES.find((range) => range.id === id) || RANGES[1];
 }
 function entryMinutes(entry, now) {
+  if (!entry?.start)
+    return 0;
   if (!entry.running)
-    return entry.minutes ?? 0;
+    return entry.effectiveMinutes ?? entry.minutes ?? 0;
   return Math.max(0, Math.floor((now.getTime() - entry.start.getTime()) / 6e4));
 }
 function filterByRange(entries, rangeId, now) {
@@ -789,7 +937,7 @@ function filterByRange(entries, rangeId, now) {
   if (days === null)
     return entries.slice();
   const from = days === 1 ? startOfDay(now) : startOfDaysAgo(now, days - 1);
-  return entries.filter((entry) => entry.start.getTime() >= from.getTime());
+  return entries.filter((entry) => entry.start && entry.start.getTime() >= from.getTime());
 }
 function totalMinutes(entries, now) {
   return entries.reduce((sum, entry) => sum + entryMinutes(entry, now), 0);
@@ -797,6 +945,8 @@ function totalMinutes(entries, now) {
 function summariseByTask(entries, now) {
   const byTask = /* @__PURE__ */ new Map();
   for (const entry of entries) {
+    if (!entry.start)
+      continue;
     let row = byTask.get(entry.taskUid);
     if (!row) {
       row = {
@@ -823,6 +973,8 @@ function summariseByTask(entries, now) {
 function summariseByDay(entries, now, days) {
   const buckets = /* @__PURE__ */ new Map();
   for (const entry of entries) {
+    if (!entry.start)
+      continue;
     const key = dateKey(entry.start);
     buckets.set(key, (buckets.get(key) || 0) + entryMinutes(entry, now));
   }
@@ -947,7 +1099,8 @@ function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) 
     tasks,
     tree: buildTaskForest(tasks, hierarchy),
     days: summariseByDay(inRange, now, getRange(rangeId).days ?? 30),
-    running: entries.filter((entry) => entry.running)
+    running: entries.filter((entry) => entry.running),
+    issues: entries.filter((entry) => entry.issue)
   };
 }
 function findStaleClocks(entries, now, staleHours2) {
@@ -1003,8 +1156,10 @@ function createDashboard({
       return;
     clearLiveTicker();
     const now = nowFn();
-    const entries = readAllEntries();
-    const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
+    const snapshot = readDashboardSnapshot();
+    const entries = snapshot.entries;
+    const hierarchy = snapshot.hierarchy;
+    refresh({ entries });
     const model = buildDashboard(entries, { now, rangeId, hierarchy });
     bodyNode.replaceChildren();
     const rangeLabel = getRange(rangeId).label;
@@ -1017,6 +1172,8 @@ function createDashboard({
         ["Tasks tracked", String(model.tasks.length)]
       ])
     );
+    if (model.issues.length > 0)
+      bodyNode.appendChild(dataIssuesSection(model.issues));
     if (model.running.length > 0) {
       bodyNode.appendChild(runningSection(model.running, now));
     }
@@ -1030,6 +1187,27 @@ function createDashboard({
     bodyNode.appendChild(daysSection(model.days, now));
     bodyNode.appendChild(tasksSection(model.tree));
     startLiveTicker();
+  };
+  const dataIssuesSection = (issues) => {
+    const details = el("details", "rlb-data-issues");
+    const summary = el(
+      "summary",
+      "rlb-data-issues__summary",
+      `${issues.length} timing record${issues.length === 1 ? "" : "s"} need review`
+    );
+    details.appendChild(summary);
+    const list = el("div", "rlb-data-issues__list");
+    for (const entry of issues) {
+      const issueText = (entry.issues || [entry.issue]).filter(Boolean).map((issue) => issue.message).join(" ");
+      const raw = entry.rawClock || "(CLOCK text unavailable)";
+      const label = `Task: ${entry.title} \xB7 CLOCK: ${raw} \xB7 Issue: ${issueText}`;
+      const item = el("div", "rlb-data-issues__item", label);
+      item.title = label;
+      item.setAttribute("aria-label", label);
+      list.appendChild(item);
+    }
+    details.appendChild(list);
+    return details;
   };
   const statsRow = (pairs) => {
     const wrapper = el("div", "rlb-stats");
@@ -1400,7 +1578,6 @@ function createDashboard({
     header.append(
       selectWrapper,
       button("bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button", "", () => {
-        refresh();
         render();
       }, { title: "Reload from the graph" }),
       button(
@@ -1438,7 +1615,6 @@ function createDashboard({
       root.classList.add("rlb-root--open");
       root.setAttribute("aria-hidden", "false");
       document.addEventListener("keydown", onKeyDown, true);
-      refresh();
       render();
       const dialog = root.querySelector(".rlb-dialog");
       const initial = dialogFocusables(dialog)[0];
@@ -1458,12 +1634,12 @@ function createDashboard({
 }
 
 // src/pomodoro.js
-var VERSION = 1;
+var VERSION = STATE_FORMATS.pomodoroTargets;
 var targets = /* @__PURE__ */ new Map();
 var notice2 = "";
 var unsupportedRaw = null;
 var isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
-var mapFromData = (data) => {
+var mapFromData = (data, { strict = false } = {}) => {
   if (!isRecord(data))
     throw new Error("pomodoro data must be an object");
   const next = /* @__PURE__ */ new Map();
@@ -1471,6 +1647,8 @@ var mapFromData = (data) => {
     const value = Number(minutes);
     if (Number.isFinite(value) && value >= 0)
       next.set(clockUid, value);
+    else if (strict)
+      throw new Error(`invalid Pomodoro target for ${clockUid}`);
   }
   return next;
 };
@@ -1495,7 +1673,7 @@ function load() {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     let next;
     if (isRecord(parsed) && parsed.version === VERSION && "data" in parsed) {
-      next = mapFromData(parsed.data);
+      next = mapFromData(parsed.data, { strict: true });
     } else if (isRecord(parsed) && !("version" in parsed)) {
       next = mapFromData(parsed);
     } else {
@@ -1510,8 +1688,10 @@ function load() {
     }
   } catch (error) {
     unsupportedRaw = raw;
-    notice2 = "Saved Pomodoro state uses an unsupported or invalid version and was kept.";
-    console.warn("[roam-logbook] could not read pomodoro state", error);
+    const firstWarning = preserveStateBackup(SETTING_POMODORO_STATE, raw);
+    notice2 = firstWarning ? "Saved Pomodoro state uses an unsupported or invalid version and was kept." : "";
+    if (firstWarning)
+      console.warn("[roam-logbook] could not read pomodoro state", error);
   }
 }
 function targetMinutes(clockUid) {
@@ -1589,7 +1769,7 @@ function reset2() {
 }
 
 // src/paused.js
-var VERSION2 = 2;
+var VERSION2 = STATE_FORMATS.pauseBatch;
 var LEGACY_VERSION = 1;
 var items = [];
 var pendingResume = [];
@@ -1687,8 +1867,10 @@ function load2() {
     throw new Error("unsupported paused-batch version");
   } catch (error) {
     unsupportedRaw2 = raw;
-    notice3 = "Saved paused-task state uses an unsupported or invalid version and was kept.";
-    console.warn("[roam-logbook] could not read paused task state", error);
+    const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
+    notice3 = firstWarning ? "Saved paused-task state uses an unsupported or invalid version and was kept." : "";
+    if (firstWarning)
+      console.warn("[roam-logbook] could not read paused task state", error);
     return getPaused();
   }
 }
@@ -2164,6 +2346,33 @@ var STYLES = `
     color: #8a4b08;
     background: rgba(217, 130, 43, 0.14);
     border-radius: 3px;
+}
+
+.rlb-data-issues {
+    margin: 14px 0 0;
+    border: 1px solid var(--rlb-border, rgba(16, 22, 26, 0.14));
+    border-radius: 3px;
+    color: var(--rlb-muted, #5c7080);
+}
+
+.rlb-data-issues__summary {
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.35px;
+}
+
+.rlb-data-issues__list {
+    display: grid;
+    gap: 6px;
+    padding: 0 10px 10px;
+}
+
+.rlb-data-issues__item {
+    overflow-wrap: anywhere;
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 .rlb-popover__footer {
@@ -2972,7 +3181,12 @@ var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
 var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
 var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
 var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
-function createTopbar({ onOpenDashboard }) {
+function createTopbar({
+  onOpenDashboard,
+  now: nowFn = () => /* @__PURE__ */ new Date(),
+  setIntervalFn = (callback, delay) => setInterval(callback, delay),
+  clearIntervalFn = (tickerId) => clearInterval(tickerId)
+}) {
   let container = null;
   let timeNode = null;
   let iconNode = null;
@@ -2981,6 +3195,10 @@ function createTopbar({ onOpenDashboard }) {
   let buttonNode = null;
   let popover = null;
   let observer = null;
+  let hostObserver = null;
+  let recoveryObserver = null;
+  let recoveryTarget = null;
+  let observedTopbar = null;
   let ticker = null;
   let unsubscribe = null;
   let unsubscribePaused = null;
@@ -2989,6 +3207,15 @@ function createTopbar({ onOpenDashboard }) {
   let clockOutAllConfirmTimer = null;
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
+  let attachQueued = false;
+  let attachTimer = null;
+  let attachCount = 0;
+  let tickCount = 0;
+  let layoutMode = null;
+  const nowDate = () => {
+    const value = nowFn();
+    return value instanceof Date ? value : new Date(value);
+  };
   const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
   const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
@@ -3045,8 +3272,7 @@ function createTopbar({ onOpenDashboard }) {
     const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
     return formatElapsed(elapsed) + (target ? ` \xB7 target ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
   };
-  const runningRow = (entry) => {
-    const now = Date.now();
+  const runningRow = (entry, now = nowDate()) => {
     const overrun = isOverrun(entry, now);
     const row = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
     const body = el("div", "rlb-run__body");
@@ -3143,7 +3369,7 @@ function createTopbar({ onOpenDashboard }) {
         )
       );
     } else {
-      const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours());
+      const stale = findStaleClocks(entries, nowDate(), staleHours());
       if (stale.length > 0) {
         popover.appendChild(
           el(
@@ -3154,7 +3380,7 @@ function createTopbar({ onOpenDashboard }) {
         );
       }
       for (const entry of entries)
-        popover.appendChild(runningRow(entry));
+        popover.appendChild(runningRow(entry, nowDate()));
     }
     if (pausedItems.length > 0) {
       if (entries.length > 0) {
@@ -3250,21 +3476,32 @@ function createTopbar({ onOpenDashboard }) {
     window.addEventListener("resize", closePopover);
     popover.querySelector("button")?.focus();
   };
-  const renderButton = () => {
+  const syncButtonLayout = (mode) => {
+    if (layoutMode === mode)
+      return;
+    if (mode === "idle")
+      buttonNode.replaceChildren(iconNode);
+    else if (mode === "parallel")
+      buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
+    else
+      buttonNode.replaceChildren(timeNode);
+    layoutMode = mode;
+  };
+  const renderButton = (entries = getRunning(), now = nowDate()) => {
     if (!buttonNode)
       return;
-    const entries = getRunning();
     const pausedItems = getPaused();
     const running2 = entries.length > 0;
-    const now = Date.now();
     const overrun = entries.some((entry) => isOverrun(entry, now));
-    const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
+    const stale = findStaleClocks(entries, now, staleHours()).length > 0;
     if (!running2) {
       buttonNode.classList.remove("rlb-topbar__button--parallel");
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
-      buttonNode.replaceChildren(iconNode);
+      parallelNode.textContent = "";
+      separatorNode.textContent = "";
+      syncButtonLayout("idle");
       buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
@@ -3278,10 +3515,12 @@ function createTopbar({ onOpenDashboard }) {
       buttonNode.classList.add("rlb-topbar__button--parallel");
       parallelNode.textContent = sessionCount(entries.length);
       separatorNode.textContent = "";
-      buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
+      syncButtonLayout("parallel");
     } else {
       buttonNode.classList.remove("rlb-topbar__button--parallel");
-      buttonNode.replaceChildren(timeNode);
+      parallelNode.textContent = "";
+      separatorNode.textContent = "";
+      syncButtonLayout("single");
     }
     if (entries.length > 1) {
       buttonNode.title = `${sessionCount(entries.length)} Running
@@ -3298,12 +3537,14 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     buttonNode.setAttribute("aria-label", buttonNode.title);
   };
   const tick = () => {
-    if (getRunning().length === 0)
+    tickCount += 1;
+    const entries = getRunning();
+    if (entries.length === 0)
       return;
-    renderButton();
+    const now = nowDate();
+    renderButton(entries, now);
     if (popover) {
-      const now = Date.now();
-      const byUid = new Map(getRunning().map((entry) => [entry.clockUid, entry]));
+      const byUid = new Map(entries.map((entry) => [entry.clockUid, entry]));
       for (const meta of popover.querySelectorAll(".rlb-run__meta")) {
         const entry = byUid.get(meta.dataset.clockUid);
         if (!entry)
@@ -3337,19 +3578,82 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
   const attach2 = () => {
     if (destroyed)
       return;
+    attachCount += 1;
     if (!showTopbarWidget()) {
+      observeRecoveryTarget(null);
       remove();
       return;
     }
     const topbar = document.querySelector(TOPBAR_SELECTOR);
+    observeRecoveryTarget(topbar);
     if (!topbar)
       return;
+    if (topbar !== observedTopbar)
+      observeTopbar(topbar);
     if (!container)
       build();
     const placement = afterNavigation(topbar);
     if (container.parentNode !== placement.parent || container.nextSibling !== placement.before) {
       placement.parent.insertBefore(container, placement.before);
     }
+  };
+  const isPluginNode = (node) => Boolean(
+    node && (node === container || node === popover || container?.contains(node) || popover?.contains(node))
+  );
+  const hasNonPluginMutation = (record) => {
+    if (isPluginNode(record.target))
+      return false;
+    const nodes = [...record.addedNodes, ...record.removedNodes];
+    return nodes.length === 0 || nodes.some((node) => !isPluginNode(node));
+  };
+  const touchesTopbar = (record) => {
+    if (isPluginNode(record.target))
+      return false;
+    const nodes = [...record.addedNodes, ...record.removedNodes];
+    if (nodes.length > 0 && nodes.every(isPluginNode))
+      return false;
+    if (record.target?.closest?.(TOPBAR_SELECTOR))
+      return true;
+    return nodes.some(
+      (node) => node?.matches?.(TOPBAR_SELECTOR) || node?.querySelector?.(TOPBAR_SELECTOR)
+    );
+  };
+  const scheduleAttach = () => {
+    if (destroyed || attachQueued)
+      return;
+    attachQueued = true;
+    const flush = () => {
+      attachQueued = false;
+      attachTimer = null;
+      attach2();
+    };
+    if (typeof queueMicrotask === "function")
+      queueMicrotask(flush);
+    else
+      attachTimer = setTimeout(flush, 0);
+  };
+  const observeTopbar = (topbar) => {
+    hostObserver?.disconnect();
+    observedTopbar = topbar;
+    hostObserver = new MutationObserver((records) => {
+      if (records.some(hasNonPluginMutation))
+        scheduleAttach();
+    });
+    hostObserver.observe(topbar, { childList: true, subtree: true });
+  };
+  const observeRecoveryTarget = (topbar) => {
+    const target = topbar?.parentElement || document.body;
+    const subtree = !topbar;
+    if (recoveryObserver && recoveryTarget === target)
+      return;
+    recoveryObserver?.disconnect();
+    recoveryObserver = new MutationObserver((records) => {
+      if (records.some(touchesTopbar))
+        scheduleAttach();
+    });
+    recoveryTarget = target;
+    recoveryObserver.observe(target, { childList: true, ...subtree ? { subtree: true } : {} });
+    observer = recoveryObserver;
   };
   const afterNavigation = (topbar) => {
     const descendants = [...topbar.querySelectorAll("*")].filter(
@@ -3415,12 +3719,13 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
         if (popover)
           renderPopover();
       });
-      ticker = setInterval(tick, 1e3);
-      observer = new MutationObserver(attach2);
-      observer.observe(document.body, { childList: true, subtree: true });
+      ticker = setIntervalFn(tick, 1e3);
       attach2();
     },
     refresh: attach2,
+    getPerformanceSnapshot() {
+      return { attachCount, tickCount };
+    },
     unmount() {
       destroyed = true;
       unsubscribe?.();
@@ -3428,10 +3733,20 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
       unsubscribePaused?.();
       unsubscribePaused = null;
       if (ticker)
-        clearInterval(ticker);
+        clearIntervalFn(ticker);
       ticker = null;
       observer?.disconnect();
       observer = null;
+      hostObserver?.disconnect();
+      hostObserver = null;
+      recoveryObserver?.disconnect();
+      recoveryObserver = null;
+      recoveryTarget = null;
+      observedTopbar = null;
+      attachQueued = false;
+      if (attachTimer)
+        clearTimeout(attachTimer);
+      attachTimer = null;
       remove();
       container = null;
     }
@@ -3632,6 +3947,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
 }
 var controller = null;
 var extension_default = {
+  version: PLUGIN_VERSION,
   onload: ({ extensionAPI: extensionAPI2 }) => {
     controller?.destroy();
     controller = createController({ extensionAPI: extensionAPI2 });

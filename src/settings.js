@@ -5,6 +5,8 @@
  * user has never touched, and the switch widget hands back a raw event.
  */
 
+import { STATE_FORMATS } from './version.js';
+
 export const SETTING_TOPBAR = 'showTopbarWidget';
 export const SETTING_MULTIPLE = 'allowMultipleClocks';
 export const SETTING_TODO_ONLY = 'todoBlocksOnly';
@@ -14,6 +16,8 @@ export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
 export const SETTING_POMODORO_STATE = 'pomodoroTargets';
 /** Internal, graph-scoped state for work deliberately paused as one batch. */
 export const SETTING_PAUSED_BATCH = 'pausedBatch';
+/** Internal, recoverable backups for unsupported or corrupt composite state. */
+export const SETTING_STATE_BACKUPS = 'stateBackups';
 
 const DEFAULTS = {
     [SETTING_TOPBAR]: true,
@@ -75,6 +79,38 @@ export function readSetting(key) {
 
 export function writeSetting(key, value) {
     extensionAPI?.settings?.set(key, value);
+}
+
+/**
+ * Preserve an unreadable internal state without repeatedly overwriting its source
+ * or warning on every reload. The backup itself is versioned composite state.
+ */
+export function preserveStateBackup(key, raw) {
+    try {
+        const rawSignature = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        let stored = readSetting(SETTING_STATE_BACKUPS);
+        try {
+            stored = stored ? (typeof stored === 'string' ? JSON.parse(stored) : stored) : null;
+        } catch {
+            stored = null;
+        }
+        const data =
+            stored?.version === 1 && stored.data && typeof stored.data === 'object'
+                ? stored.data
+                : {};
+        if (data[key]?.rawSignature === rawSignature) return false;
+        data[key] = { rawSignature, raw };
+        writeSetting(
+            SETTING_STATE_BACKUPS,
+            JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
+        );
+        return true;
+    } catch (error) {
+        // The original setting is still untouched, so a failed backup must not
+        // turn a safe read-only recovery path into a startup crash.
+        console.warn('[roam-logbook] could not preserve invalid state backup', error);
+        return true;
+    }
 }
 
 /** Blueprint switches call `onChange` with an event, the docs suggest a boolean. */

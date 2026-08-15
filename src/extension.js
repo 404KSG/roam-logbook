@@ -27,6 +27,7 @@ import {
 } from './settings.js';
 import { STYLES, STYLE_ID } from './styles.js';
 import { createTopbar } from './topbar.js';
+import { PLUGIN_VERSION } from './version.js';
 
 const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
 const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
@@ -244,6 +245,7 @@ function createController({ extensionAPI }) {
 let controller = null;
 
 export default {
+    version: PLUGIN_VERSION,
     onload: ({ extensionAPI }) => {
         controller?.destroy();
         controller = createController({ extensionAPI });

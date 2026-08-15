@@ -24,7 +24,8 @@ export function getRange(id) {
 
 /** Minutes an entry is worth right now — running clocks count up to `now`. */
 export function entryMinutes(entry, now) {
-    if (!entry.running) return entry.minutes ?? 0;
+    if (!entry?.start) return 0;
+    if (!entry.running) return entry.effectiveMinutes ?? entry.minutes ?? 0;
     return Math.max(0, Math.floor((now.getTime() - entry.start.getTime()) / 60000));
 }
 
@@ -33,7 +34,7 @@ export function filterByRange(entries, rangeId, now) {
     const { days } = getRange(rangeId);
     if (days === null) return entries.slice();
     const from = days === 1 ? startOfDay(now) : startOfDaysAgo(now, days - 1);
-    return entries.filter(entry => entry.start.getTime() >= from.getTime());
+    return entries.filter(entry => entry.start && entry.start.getTime() >= from.getTime());
 }
 
 function totalMinutes(entries, now) {
@@ -45,6 +46,7 @@ export function summariseByTask(entries, now) {
     const byTask = new Map();
 
     for (const entry of entries) {
+        if (!entry.start) continue;
         let row = byTask.get(entry.taskUid);
         if (!row) {
             row = {
@@ -73,6 +75,7 @@ export function summariseByTask(entries, now) {
 export function summariseByDay(entries, now, days) {
     const buckets = new Map();
     for (const entry of entries) {
+        if (!entry.start) continue;
         const key = dateKey(entry.start);
         buckets.set(key, (buckets.get(key) || 0) + entryMinutes(entry, now));
     }
@@ -241,6 +244,7 @@ export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERAR
         tree: buildTaskForest(tasks, hierarchy),
         days: summariseByDay(inRange, now, getRange(rangeId).days ?? 30),
         running: entries.filter(entry => entry.running),
+        issues: entries.filter(entry => entry.issue),
     };
 }
 

@@ -191,6 +191,33 @@ export const STYLES = `
     border-radius: 3px;
 }
 
+.rlb-data-issues {
+    margin: 14px 0 0;
+    border: 1px solid var(--rlb-border, rgba(16, 22, 26, 0.14));
+    border-radius: 3px;
+    color: var(--rlb-muted, #5c7080);
+}
+
+.rlb-data-issues__summary {
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.35px;
+}
+
+.rlb-data-issues__list {
+    display: grid;
+    gap: 6px;
+    padding: 0 10px 10px;
+}
+
+.rlb-data-issues__item {
+    overflow-wrap: anywhere;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
 .rlb-popover__footer {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

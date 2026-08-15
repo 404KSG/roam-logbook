@@ -7,14 +7,16 @@
  */
 
 import * as clock from './clock.js';
+import { STATE_FORMATS } from './version.js';
 import {
     pomodoroMinutes,
     readSetting,
     SETTING_POMODORO_STATE,
+    preserveStateBackup,
     writeSetting,
 } from './settings.js';
 
-const VERSION = 1;
+const VERSION = STATE_FORMATS.pomodoroTargets;
 /** @type {Map<string, number>} clock uid → positive minutes, or 0 when suppressed */
 let targets = new Map();
 let notice = '';
@@ -22,12 +24,13 @@ let unsupportedRaw = null;
 
 const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
 
-const mapFromData = data => {
+const mapFromData = (data, { strict = false } = {}) => {
     if (!isRecord(data)) throw new Error('pomodoro data must be an object');
     const next = new Map();
     for (const [clockUid, minutes] of Object.entries(data)) {
         const value = Number(minutes);
         if (Number.isFinite(value) && value >= 0) next.set(clockUid, value);
+        else if (strict) throw new Error(`invalid Pomodoro target for ${clockUid}`);
     }
     return next;
 };
@@ -57,7 +60,7 @@ export function load() {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         let next;
         if (isRecord(parsed) && parsed.version === VERSION && 'data' in parsed) {
-            next = mapFromData(parsed.data);
+            next = mapFromData(parsed.data, { strict: true });
         } else if (isRecord(parsed) && !('version' in parsed)) {
             next = mapFromData(parsed);
         } else {
@@ -75,8 +78,11 @@ export function load() {
         }
     } catch (error) {
         unsupportedRaw = raw;
-        notice = 'Saved Pomodoro state uses an unsupported or invalid version and was kept.';
-        console.warn('[roam-logbook] could not read pomodoro state', error);
+        const firstWarning = preserveStateBackup(SETTING_POMODORO_STATE, raw);
+        notice = firstWarning
+            ? 'Saved Pomodoro state uses an unsupported or invalid version and was kept.'
+            : '';
+        if (firstWarning) console.warn('[roam-logbook] could not read pomodoro state', error);
     }
 }
 
