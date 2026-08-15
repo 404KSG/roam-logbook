@@ -139,3 +139,28 @@ The beta.8 pure inline rail is deprecated as a visual structure, not as a data
 source: the same daily series now powers the selected-range panel chart. This
 keeps the dashboard compact and list-first while making the range activity
 legible at normal desktop and high-DPI sizes.
+
+## Beta.10 decision — compact cards and a shared Linear-style session surface
+
+Beta.10 keeps the beta.9 three-panel Overview, but removes the remaining
+vertical slack inside it. Each card is a content-dense, equal-height panel
+with a 144px desktop target; Today and Tasks tracked keep their label, value,
+and context in one compact heading row, while the selected-range card gives
+the real activity rail a 60px readable area. The quiet `0m / No active
+Sessions` state is intentionally muted rather than presented as a dominant
+metric. A small body inset keeps the next Running or By Task panel about
+18px below the cards without changing any statistics or range semantics.
+
+Popover and Current Sessions sidebar now share one `Current Sessions` group
+wrapper around their rows. The group provides the only low-contrast surface
+boundary; rows remain the existing two-line grid (status/title/actions, then
+metadata) with a hairline separator and hover surface instead of individual
+cards. Footer actions retain the existing two-by-two 32px grid, with a tighter
+gap to the session group and the Refresh icon in the lower-right cell. This is
+an information-density change only: actions, Shift+Click navigation, pause
+batch state, and graph-read behavior are unchanged.
+
+Beta.10 does not change Pomodoro state, graph formats, task rollups, version
+metadata, or release state. Browser geometry covers card height/chart fill,
+overview-to-list spacing, group borders, row alignment, and equal footer
+controls; DOM tests cover the shared accessible group and quiet zero state.

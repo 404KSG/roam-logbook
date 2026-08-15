@@ -262,19 +262,23 @@ export function createDashboard({
         for (const [index, [label, value, context]] of metrics.entries()) {
             const item = el('div', 'rlb-overview__item rlb-overview__panel');
             if (index === 1) item.classList.add('rlb-overview__item--selected');
-            const valueNode = el('dd', 'rlb-overview__value');
+            const heading = el('div', 'rlb-overview__heading');
+            const valueNode = el(
+                'dd',
+                `rlb-overview__value${
+                    index === 0 && value === '0m' && /No active Sessions/i.test(context)
+                        ? ' rlb-overview__value--quiet'
+                        : ''
+                }`
+            );
             valueNode.append(
                 el('span', 'rlb-overview__number', value),
                 el('span', 'rlb-overview__context', context)
             );
-            item.append(
-                el('dt', 'rlb-overview__label', label),
-                valueNode
-            );
+            heading.append(el('dt', 'rlb-overview__label', label), valueNode);
+            item.append(heading);
             if (index === 1) {
-                item.querySelector('.rlb-overview__value').appendChild(
-                    activityRail(activity, now, activityLabel, activityScope)
-                );
+                item.appendChild(activityRail(activity, now, activityLabel, activityScope));
             }
             wrapper.appendChild(item);
         }

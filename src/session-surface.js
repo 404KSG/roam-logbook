@@ -191,11 +191,18 @@ export function renderSessionSurface(root, model, options = {}) {
     }
     root.replaceChildren(header);
 
+    const sessionList = el('div', 'rlb-surface__list');
+    sessionList.setAttribute('role', 'group');
+    sessionList.setAttribute('aria-label', 'Current Sessions');
+    root.appendChild(sessionList);
+
     if (model.rows.length === 0) {
-        root.appendChild(el('div', 'rlb-popover__empty', options.emptyMessage || 'No Session is running.'));
+        sessionList.appendChild(
+            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Session is running.')
+        );
     } else {
         if (model.staleEntries.length > 0) {
-            root.appendChild(
+            sessionList.appendChild(
                 el(
                     'div',
                     'rlb-popover__empty bp3-text-small',
@@ -206,7 +213,7 @@ export function renderSessionSurface(root, model, options = {}) {
             );
         }
         for (const row of model.rows) {
-            root.appendChild(
+            sessionList.appendChild(
                 row.kind === 'running'
                     ? renderRunningRow(row, model.now, options)
                     : renderPausedRow(row, model.now, options)

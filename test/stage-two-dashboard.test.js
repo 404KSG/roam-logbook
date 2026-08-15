@@ -316,6 +316,44 @@ test('beta.9 exposes three semantic overview panels and keeps activity buckets a
     dashboard.destroy();
 });
 
+test('beta.10 Dashboard exposes compact-card structure and keeps the activity rail in the range card', async () => {
+    graph.store.set('compact-dashboard-task', {
+        uid: 'compact-dashboard-task',
+        string: '{{[[TODO]]}} Compact dashboard task',
+        parent: null,
+    });
+    await clock.clockIn('compact-dashboard-task', { now: new Date('2026-08-15T09:00:00') });
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
+    dashboard.open();
+
+    const overview = document.querySelector('.rlb-overview');
+    const panels = [...overview.querySelectorAll('.rlb-overview__panel')];
+    const rangePanel = panels[1];
+    const chart = rangePanel.querySelector('.rlb-activity-rail');
+
+    assert.equal(panels.length, 3);
+    assert.ok(panels.every(panel => panel.querySelector('.rlb-overview__heading')));
+    assert.ok(panels.every(panel => panel.querySelector('.rlb-overview__value')));
+    assert.ok(rangePanel.querySelector('.rlb-overview__heading'));
+    assert.equal(rangePanel.querySelector('.rlb-overview__value > .rlb-activity-rail'), null);
+    assert.equal(chart.querySelectorAll('.rlb-activity__bucket').length, 7);
+    assert.ok(document.querySelector('.rlb-by-task'));
+
+    dashboard.destroy();
+});
+
+test('beta.10 zero-time overview uses a quiet empty context instead of a primary visual', () => {
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
+    dashboard.open();
+
+    const today = document.querySelector('.rlb-overview__item');
+    assert.equal(today.querySelector('.rlb-overview__number').textContent, '0m');
+    assert.ok(today.querySelector('.rlb-overview__value--quiet'));
+    assert.match(today.querySelector('.rlb-overview__context').textContent, /No active Sessions/);
+
+    dashboard.destroy();
+});
+
 test('activity rail labels finite ranges and the All time fallback honestly', () => {
     graph = installGraph([
         { uid: 'range-task', string: '{{[[TODO]]}} Range activity', parent: null },

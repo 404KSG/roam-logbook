@@ -158,6 +158,38 @@ test('Session surfaces put one accessible Refresh action in the footer', async t
 
 });
 
+test('shared Session surfaces use one compact accessible list group for session rows', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second task',
+        parent: null,
+        page: 'Project Page',
+    });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
+
+    const surface = openPopover();
+    const list = surface.querySelector('.rlb-surface__list');
+    assert.ok(list, 'session rows are grouped in a shared surface list');
+    assert.equal(surface.querySelectorAll('.rlb-surface__list').length, 1);
+    assert.equal(list.getAttribute('role'), 'group');
+    assert.equal(list.getAttribute('aria-label'), 'Current Sessions');
+    const rows = [...list.querySelectorAll('.rlb-run')];
+    assert.equal(rows.length, 2);
+    assert.ok(
+        rows.every(
+            row =>
+                row.querySelector('.rlb-run__status') &&
+                row.querySelector('.rlb-run__title') &&
+                row.querySelector('.rlb-run__meta') &&
+                row.querySelector('.rlb-run__actions')
+        )
+    );
+    assert.equal(surface.querySelectorAll('.bp3-card.rlb-run').length, 0);
+});
+
 test('Check Out icon ends only its clicked Session in single and parallel mode', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
