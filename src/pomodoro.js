@@ -1,14 +1,9 @@
 /**
  * Automatic Pomodoro targets layered on top of running clocks.
  *
- * A target is an *intention*, not a record, and nothing about it belongs in the
- * LOGBOOK drawer, which stays a
- * faithful org clock log. So unlike clock state, this lives in extension
- * settings — keyed by clock uid, which is enough to survive a reload while a
- * session is still open.
- *
- * Overrunning never stops the clock. The target is a prompt to decide, not a
- * timer that decides for you; time keeps accruing until the user clocks out.
+ * A target is an intention, not a record, and nothing about it belongs in the
+ * LOGBOOK drawer. It lives in extension settings keyed by clock uid, while the
+ * graph remains the source of truth for the Session itself.
  */
 
 import * as clock from './clock.js';
@@ -19,29 +14,74 @@ import {
     writeSetting,
 } from './settings.js';
 
+const VERSION = 1;
 /** @type {Map<string, number>} clock uid → positive minutes, or 0 when suppressed */
 let targets = new Map();
+let notice = '';
+let unsupportedRaw = null;
 
-/** Read persisted targets. Bad state is discarded, never thrown. */
+const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
+
+const mapFromData = data => {
+    if (!isRecord(data)) throw new Error('pomodoro data must be an object');
+    const next = new Map();
+    for (const [clockUid, minutes] of Object.entries(data)) {
+        const value = Number(minutes);
+        if (Number.isFinite(value) && value >= 0) next.set(clockUid, value);
+    }
+    return next;
+};
+
+const serialized = values =>
+    JSON.stringify({ version: VERSION, data: Object.fromEntries(values) });
+
+function writeTargets(next) {
+    if (unsupportedRaw !== null) {
+        notice = 'Saved Pomodoro state uses an unsupported version and was kept.';
+        return false;
+    }
+    writeSetting(SETTING_POMODORO_STATE, serialized(next));
+    targets = next;
+    return true;
+}
+
+/** Read persisted targets, accepting the original flat map as a legacy format. */
 export function load() {
     targets = new Map();
+    notice = '';
+    unsupportedRaw = null;
     const raw = readSetting(SETTING_POMODORO_STATE);
     if (!raw) return;
+
     try {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        for (const [clockUid, minutes] of Object.entries(parsed || {})) {
-            const value = Number(minutes);
-            if (Number.isFinite(value) && value >= 0) targets.set(clockUid, value);
+        let next;
+        if (isRecord(parsed) && parsed.version === VERSION && 'data' in parsed) {
+            next = mapFromData(parsed.data);
+        } else if (isRecord(parsed) && !('version' in parsed)) {
+            next = mapFromData(parsed);
+        } else {
+            throw new Error('unsupported pomodoro state version');
+        }
+        try {
+            // This also upgrades the old flat map to the explicit version/data
+            // shape. If settings are temporarily read-only, keep the in-memory
+            // values and let the next successful write finish the migration.
+            writeTargets(next);
+        } catch (error) {
+            targets = next;
+            notice = 'Pomodoro state was read, but its migration could not be saved yet.';
+            console.warn('[roam-logbook] could not migrate pomodoro state', error);
         }
     } catch (error) {
+        unsupportedRaw = raw;
+        notice = 'Saved Pomodoro state uses an unsupported or invalid version and was kept.';
         console.warn('[roam-logbook] could not read pomodoro state', error);
     }
 }
 
-function persist() {
-    // Stringified rather than stored as an object: settings round-trip through
-    // Roam, and a plain string is the one shape guaranteed to come back intact.
-    writeSetting(SETTING_POMODORO_STATE, JSON.stringify(Object.fromEntries(targets)));
+export function getNotice() {
+    return notice;
 }
 
 export function targetMinutes(clockUid) {
@@ -66,9 +106,9 @@ export function isAssigned(clockUid) {
 
 export function start(clockUid, minutes = pomodoroMinutes()) {
     if (!clockUid || !(minutes > 0)) return false;
-    targets.set(clockUid, minutes);
-    persist();
-    return true;
+    const next = new Map(targets);
+    next.set(clockUid, minutes);
+    return writeTargets(next);
 }
 
 /** Start a target from an exact saved duration without exposing decimal minutes. */
@@ -80,49 +120,42 @@ export function startDurationMs(clockUid, durationMs) {
 /** Mark a Session as intentionally having no active target (used after overrun resume). */
 export function suppress(clockUid) {
     if (!clockUid) return false;
-    targets.set(clockUid, 0);
-    persist();
-    return true;
+    const next = new Map(targets);
+    next.set(clockUid, 0);
+    return writeTargets(next);
 }
 
 export function cancel(clockUid) {
-    if (!targets.delete(clockUid)) return false;
-    persist();
-    return true;
+    if (!targets.has(clockUid)) return false;
+    const next = new Map(targets);
+    next.delete(clockUid);
+    return writeTargets(next);
 }
 
 /** Assign new Sessions and forget assignments whose clock has closed. */
 export function reconcile(running) {
+    if (unsupportedRaw !== null) return false;
     const live = new Set(running.map(entry => entry.clockUid));
-    let changed = false;
-    for (const clockUid of [...targets.keys()]) {
-        if (!live.has(clockUid)) {
-            targets.delete(clockUid);
-            changed = true;
-        }
+    const next = new Map(targets);
+    for (const clockUid of [...next.keys()]) {
+        if (!live.has(clockUid)) next.delete(clockUid);
     }
     for (const entry of running) {
-        if (!targets.has(entry.clockUid)) {
-            targets.set(entry.clockUid, pomodoroMinutes());
-            changed = true;
-        }
+        if (!next.has(entry.clockUid)) next.set(entry.clockUid, pomodoroMinutes());
     }
-    if (changed) persist();
-    return changed;
+    if (next.size === targets.size && [...next].every(([uid, value]) => targets.get(uid) === value)) {
+        return false;
+    }
+    writeTargets(next);
+    return true;
 }
 
 /** Backward-compatible explicit pruning seam used by older integrations/tests. */
 export function prune(runningClockUids) {
     const live = new Set(runningClockUids);
-    let changed = false;
-    for (const clockUid of [...targets.keys()]) {
-        if (!live.has(clockUid)) {
-            targets.delete(clockUid);
-            changed = true;
-        }
-    }
-    if (changed) persist();
-    return changed;
+    const next = new Map([...targets].filter(([clockUid]) => live.has(clockUid)));
+    if (next.size === targets.size) return false;
+    return writeTargets(next);
 }
 
 /**
@@ -144,11 +177,8 @@ export function isOverrun(entry, now = Date.now()) {
 /**
  * Keep the stored targets in step with what is actually running.
  *
- * `clock.subscribe` replays the current list the moment a listener registers,
- * and at startup that list is empty — the graph has not been read yet. Pruning
- * against it would delete every target `load()` had just restored, and persist
- * the loss. So the replay is skipped; the first real prune arrives with the
- * refresh that follows.
+ * `clock.subscribe` replays the current list before the graph has been read. The
+ * replay is skipped so a reload cannot prune valid assignments prematurely.
  */
 export function attach() {
     let sawInitialReplay = false;
@@ -163,4 +193,6 @@ export function attach() {
 
 export function reset() {
     targets = new Map();
+    notice = '';
+    unsupportedRaw = null;
 }

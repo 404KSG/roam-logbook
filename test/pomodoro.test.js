@@ -90,10 +90,12 @@ test('targets survive a reload', () => {
     assert.equal(pomodoro.targetMinutes('c1'), 25);
 });
 
-test('corrupt stored state is discarded rather than thrown', () => {
-    useSettings({ [SETTING_POMODORO_STATE]: '{not json' });
+test('corrupt stored state is retained rather than silently discarded', () => {
+    const corruptStore = useSettings({ [SETTING_POMODORO_STATE]: '{not json' });
     pomodoro.load();
     assert.equal(pomodoro.targetMinutes('c1'), null);
+    assert.equal(corruptStore.get(SETTING_POMODORO_STATE), '{not json');
+    assert.match(pomodoro.getNotice(), /unsupported or invalid version and was kept/);
 
     useSettings({ [SETTING_POMODORO_STATE]: JSON.stringify({ c1: -5, c2: 'x', c3: 30 }) });
     pomodoro.load();

@@ -119,10 +119,10 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(footer.at(-1).textContent, '');
 
     const persisted = JSON.parse(settingsStore.get('pausedBatch'));
-    assert.equal(persisted.version, 1);
-    assert.equal(persisted.items.length, 2);
+    assert.equal(persisted.version, 2);
+    assert.equal(persisted.data.items.length, 2);
     assert.equal(
-        persisted.items.find(item => item.taskUid === 'pauseone1').pomodoroRemainingMs,
+        persisted.data.items.find(item => item.taskUid === 'pauseone1').pomodoroRemainingMs,
         24 * 60_000 + 43_000
     );
 
@@ -138,7 +138,7 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(clock.getRunning().length, 2);
     assert.equal(clockLines('pauseone1').length, 2);
     assert.equal(clockLines('pausetwo2').length, 2);
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
     const resumedFirst = clock.getRunning().find(entry => entry.taskUid === 'pauseone1');
     assert.equal(pomodoro.targetDurationMs(resumedFirst.clockUid), 24 * 60_000 + 43_000);
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Running');
@@ -164,7 +164,7 @@ test('a persisted string true setting permits an all-or-nothing multi-task resum
     await settle();
 
     assert.equal(clock.getRunning().length, 2);
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
 });
 
 test('Resume All explicitly enables multiple clocks and never leaves a partial one-clock result', async () => {
@@ -184,11 +184,11 @@ test('Resume All explicitly enables multiple clocks and never leaves a partial o
 
     assert.equal(settingsStore.get('allowMultipleClocks'), true);
     assert.equal(clock.getRunning().length, 2, 'the complete valid batch is restored');
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
     assert.match(popover().textContent, /Multiple clocks were enabled to resume 2 Tasks\./);
 });
 
-test('malformed paused state is discarded with a visible warning', t => {
+test('malformed paused state is retained with a visible warning', t => {
     t.mock.method(console, 'warn', () => {});
     extension.onunload();
     settingsStore.set('pausedBatch', '{not json');
@@ -196,8 +196,8 @@ test('malformed paused state is discarded with a visible warning', t => {
 
     click(topbarButton());
     assert.equal(action('Resume All'), undefined);
-    assert.match(popover().textContent, /invalid and has been discarded/);
-    assert.deepEqual(JSON.parse(settingsStore.get('pausedBatch')), { version: 1, items: [] });
+    assert.match(popover().textContent, /unsupported or invalid version and was kept/);
+    assert.equal(settingsStore.get('pausedBatch'), '{not json');
 });
 
 test('Resume All prunes missing Tasks and consumes a Task that is already running', async () => {
@@ -214,7 +214,7 @@ test('Resume All prunes missing Tasks and consumes a Task that is already runnin
 
     assert.equal(clock.getRunning().length, 1, 'the already-running Task is not duplicated');
     assert.equal(clockLines('pauseone1').length, 1);
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
     assert.match(popover().textContent, /1 missing Task was removed/);
 });
 
@@ -240,7 +240,7 @@ test('a failed resume retains only the failed Task for retry', async t => {
     }
 
     assert.equal(clock.getRunning().length, 1);
-    const retained = JSON.parse(settingsStore.get('pausedBatch')).items;
+    const retained = JSON.parse(settingsStore.get('pausedBatch')).data.items;
     assert.deepEqual(retained.map(item => item.taskUid), ['pausetwo2']);
     assert.match(popover().textContent, /1 Task could not be resumed/);
 });
@@ -252,7 +252,7 @@ test('an overrun Pomodoro is not restarted after pause and resume', async t => {
     click(topbarButton());
     click(action('Pause All'));
     await settle();
-    const pausedRecord = JSON.parse(settingsStore.get('pausedBatch')).items[0];
+    const pausedRecord = JSON.parse(settingsStore.get('pausedBatch')).data.items[0];
     assert.equal(pausedRecord.pomodoroRemainingMs, null);
     assert.equal(pausedRecord.pomodoroSuppressed, true);
 
@@ -265,7 +265,7 @@ test('an overrun Pomodoro is not restarted after pause and resume', async t => {
     assert.equal(pomodoro.targetMinutes(resumed.clockUid), null);
     assert.equal(pomodoro.isAssigned(resumed.clockUid), true);
     assert.equal(pomodoro.isActive(resumed.clockUid), false);
-    assert.equal(JSON.parse(settingsStore.get('pomodoroTargets'))[resumed.clockUid], 0);
+    assert.equal(JSON.parse(settingsStore.get('pomodoroTargets')).data[resumed.clockUid], 0);
 });
 
 test('Clock Out All permanently finishes running Tasks and clears an older paused batch', async () => {
@@ -279,10 +279,11 @@ test('Clock Out All permanently finishes running Tasks and clears an older pause
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pausetwo2' });
     assert.ok(action('Clock Out All'));
     click(action('Clock Out All'));
+    click(action('Confirm Clock Out All'));
     await settle();
 
     assert.equal(clock.getRunning().length, 0);
-    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
 });
 
 test('a later Pause All merges newly running Tasks into the older batch', async () => {
@@ -291,7 +292,7 @@ test('a later Pause All merges newly running Tasks into the older batch', async 
     click(action('Pause All'));
     await settle();
     assert.deepEqual(
-        JSON.parse(settingsStore.get('pausedBatch')).items.map(item => item.taskUid),
+        JSON.parse(settingsStore.get('pausedBatch')).data.items.map(item => item.taskUid),
         ['pauseone1']
     );
 
@@ -300,7 +301,7 @@ test('a later Pause All merges newly running Tasks into the older batch', async 
     await settle();
 
     assert.deepEqual(
-        JSON.parse(settingsStore.get('pausedBatch')).items.map(item => item.taskUid).sort(),
+        JSON.parse(settingsStore.get('pausedBatch')).data.items.map(item => item.taskUid).sort(),
         ['pauseone1', 'pausetwo2']
     );
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');

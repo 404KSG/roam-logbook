@@ -1,12 +1,19 @@
 /**
  * Thin wrapper around `window.roamAlphaAPI`.
  *
- * Every helper degrades to `null` / `[]` when the API (or a namespace within it)
- * is missing, so callers never have to guard, and the module stays importable in
- * a plain Node test process.
+ * Read helpers keep a successful empty result distinct from a failed graph read.
+ * The graph is the source of truth, so treating a temporary failure as an empty
+ * graph could make a caller write duplicate or destructive state.
  */
 
 import { referencedBlockUid } from './org.js';
+
+export class GraphReadError extends Error {
+    constructor(message, { cause } = {}) {
+        super(message, { cause });
+        this.name = 'GraphReadError';
+    }
+}
 
 export function getApi() {
     return (typeof window !== 'undefined' && window.roamAlphaAPI) || null;
@@ -37,28 +44,67 @@ function resolve(namespace, modernName, legacyName = modernName) {
     return null;
 }
 
-/** Run a datalog query, letting failures surface to the caller. */
-export function queryOrThrow(datalog, ...args) {
+/**
+ * Read one graph query at the adapter boundary.
+ *
+ * `ok: true, rows: []` is a valid empty graph result. `ok: false` means the
+ * caller cannot know what the graph contains and must not treat it as empty.
+ */
+export function queryResult(datalog, ...args) {
     const run = resolve(null, 'q');
-    if (!run) throw new Error('roamAlphaAPI q unavailable');
-    return run(datalog, ...args) || [];
+    if (!run) {
+        return {
+            ok: false,
+            rows: null,
+            error: new GraphReadError('roamAlphaAPI q unavailable'),
+        };
+    }
+    try {
+        const rows = run(datalog, ...args);
+        if (!Array.isArray(rows) || rows.some(row => !Array.isArray(row))) {
+            throw new GraphReadError('Graph query returned a non-array result', {
+                cause: new TypeError('query rows must be an array of rows'),
+            });
+        }
+        return { ok: true, rows, error: null };
+    } catch (error) {
+        const graphError =
+            error instanceof GraphReadError
+                ? error
+                : new GraphReadError(error?.message || 'Graph query failed', { cause: error });
+        return { ok: false, rows: null, error: graphError };
+    }
 }
 
-/** Run a datalog query. Returns `[]` rather than throwing on a bad graph state. */
-export function query(datalog, ...args) {
-    try {
-        return queryOrThrow(datalog, ...args);
-    } catch (error) {
-        console.error('[roam-logbook] query failed', error);
-        return [];
+/** Validate the shape of a successful query at the adapter boundary. */
+export function validateQueryRows(rows, label, predicate) {
+    if (rows.some(row => !predicate(row))) {
+        throw new GraphReadError(`Graph query returned malformed ${label} rows`);
     }
+    return rows;
+}
+
+/** Run a datalog query, letting the caller handle an uncertain graph state. */
+export function queryOrThrow(datalog, ...args) {
+    const result = queryResult(datalog, ...args);
+    if (!result.ok) throw result.error;
+    return result.rows;
+}
+
+/** Compatibility alias for callers that require a confirmed graph read. */
+export function query(datalog, ...args) {
+    return queryOrThrow(datalog, ...args);
 }
 
 export function getBlockString(uid) {
     if (!uid) return null;
-    const rows = query(
+    const rows = validateQueryRows(
+        queryOrThrow(
         '[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]',
         uid
+        ),
+        'block string',
+        row => row.length >= 1 && typeof row[0] === 'string'
     );
     return rows[0]?.[0] ?? null;
 }
@@ -88,8 +134,9 @@ export function resolveReferencedUid(uid) {
 /** Direct children of a block, in sibling order. */
 export function getChildren(uid) {
     if (!uid) return [];
-    const rows = query(
-        `[:find ?uid ?string ?order
+    const rows = validateQueryRows(
+        queryOrThrow(
+            `[:find ?uid ?string ?order
           :in $ ?parent
           :where
           [?p :block/uid ?parent]
@@ -97,7 +144,10 @@ export function getChildren(uid) {
           [?c :block/uid ?uid]
           [?c :block/string ?string]
           [?c :block/order ?order]]`,
-        uid
+            uid
+        ),
+        'children',
+        row => row.length >= 3 && typeof row[0] === 'string' && typeof row[1] === 'string' && Number.isFinite(row[2])
     );
     return rows
         .map(([childUid, string, order]) => ({ uid: childUid, string, order }))
@@ -106,10 +156,14 @@ export function getChildren(uid) {
 
 export function getPageTitleOfBlock(uid) {
     if (!uid) return null;
-    const rows = query(
-        `[:find ?title :in $ ?uid
+    const rows = validateQueryRows(
+        queryOrThrow(
+            `[:find ?title :in $ ?uid
           :where [?b :block/uid ?uid] [?b :block/page ?p] [?p :node/title ?title]]`,
-        uid
+            uid
+        ),
+        'page title',
+        row => row.length >= 1 && typeof row[0] === 'string'
     );
     return rows[0]?.[0] ?? null;
 }

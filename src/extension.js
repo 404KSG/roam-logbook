@@ -57,11 +57,21 @@ function createController({ extensionAPI }) {
         return todoBlocksOnly() ? isTaskBlock(targetString(context)) : true;
     };
 
+    const notifyUser = message => {
+        try {
+            const showToast = extensionAPI?.ui?.showToast || window.roamAlphaAPI?.ui?.showToast;
+            showToast?.({ content: message, intent: 'warning' });
+        } catch (error) {
+            console.warn('[roam-logbook] could not show notification', error);
+        }
+    };
+
     const guard = async action => {
         try {
             await action();
         } catch (error) {
             console.error('[roam-logbook]', error);
+            notifyUser(error?.message || 'Logbook could not complete that action.');
         }
     };
 
@@ -69,7 +79,7 @@ function createController({ extensionAPI }) {
         guard(async () => {
             const uid = getFocusedBlockUid();
             if (!uid) {
-                console.warn('[roam-logbook] no focused block to clock in');
+                notifyUser('No focused block. Select a block before clocking in.');
                 return;
             }
             await clock.clockIn(uid);
@@ -159,8 +169,11 @@ function createController({ extensionAPI }) {
         add(PALETTE_COMMANDS[1], () =>
             guard(async () => {
                 const uid = getFocusedBlockUid();
-                if (uid) await clock.clockOutBlock(uid);
-                else await paused.clockOutAll();
+                if (!uid) {
+                    notifyUser('No focused block. Select a block before clocking out.');
+                    return;
+                }
+                await clock.clockOutBlock(uid);
             })
         );
         add(PALETTE_COMMANDS[2], () => guard(() => paused.clockOutAll()));

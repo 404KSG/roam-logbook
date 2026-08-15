@@ -2,24 +2,34 @@
  * Clock in / clock out, and the observable list of running clocks.
  *
  * State is derived: every mutation writes to the graph and then re-reads it, so
- * what the UI shows is what a reload would show. That costs one query per action
- * and buys us crash safety and multi-device sanity for free.
+ * what the UI shows is what a reload would show. Mutations are serialized for this
+ * graph instance, and each queued action re-reads before it writes.
  */
 
 import { readAllEntries } from './entries.js';
-import { DRAWER_LABEL, formatClockLine, isDrawerBlock, parseClockLine } from './org.js';
-import {
-    createBlock,
-    deleteBlock,
-    getBlockString,
-    getChildren,
-    resolveReferencedUid,
-    updateBlock,
-} from './roam.js';
+import { DRAWER_LABEL, formatClockLine, isDrawerBlock } from './org.js';
+import { createBlock, deleteBlock, GraphReadError, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
+import { enqueueMutation, resetMutationQueue } from './mutations.js';
 import { allowMultipleClocks } from './settings.js';
 
 let running = [];
+let lastRefreshStatus = { ok: true, error: null };
+let notice = '';
 const listeners = new Set();
+
+const GRAPH_UNCERTAIN = 'Unable to read the graph; no changes were made. Please try again.';
+
+async function withGraphGuard(action) {
+    try {
+        return await action();
+    } catch (error) {
+        if (error instanceof GraphReadError) {
+            notice = GRAPH_UNCERTAIN;
+            throw new Error(GRAPH_UNCERTAIN, { cause: error });
+        }
+        throw error;
+    }
+}
 
 /** Subscribe to running-clock changes. Returns an unsubscribe function. */
 export function subscribe(listener) {
@@ -30,6 +40,14 @@ export function subscribe(listener) {
 
 export function getRunning() {
     return running;
+}
+
+export function getLastRefreshStatus() {
+    return { ...lastRefreshStatus };
+}
+
+export function getNotice() {
+    return notice;
 }
 
 function notify() {
@@ -46,11 +64,18 @@ function notify() {
  * Re-read the graph and publish the current set of open clocks.
  *
  * Each open clock is tagged with `priorMinutes`, the time already banked against
- * the same task. The topbar needs a running total every second, and deriving it
- * here — from a read we were making anyway — keeps that off the query path.
+ * the same task. A failed read leaves the last valid snapshot untouched.
  */
 export function refresh() {
-    const all = readAllEntries();
+    let all;
+    try {
+        all = readAllEntries();
+    } catch (error) {
+        lastRefreshStatus = { ok: false, error };
+        notice = GRAPH_UNCERTAIN;
+        console.error('[roam-logbook] could not refresh clocks', error);
+        return running;
+    }
 
     const bankedByTask = new Map();
     for (const entry of all) {
@@ -62,13 +87,18 @@ export function refresh() {
         .filter(entry => entry.running)
         .map(entry => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
 
+    lastRefreshStatus = { ok: true, error: null };
+    notice = '';
     notify();
     return running;
 }
 
 export function reset() {
     running = [];
+    lastRefreshStatus = { ok: true, error: null };
+    notice = '';
     listeners.clear();
+    resetMutationQueue();
 }
 
 /**
@@ -90,67 +120,159 @@ async function ensureDrawer(taskUid) {
     return createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
 }
 
+/** Rewrite one confirmed running entry into its closed form. */
+async function closeEntry(entry, end) {
+    if (!entry?.running) return false;
+    const string = formatClockLine(entry.start, end.getTime() < entry.start.getTime() ? entry.start : end);
+    await updateBlock({ uid: entry.clockUid, string });
+    return true;
+}
+
+/**
+ * Close a confirmed set of entries inside an already-queued mutation.
+ *
+ * Failed writes are returned per entry so Pause/Clock Out All can preserve the
+ * exact retry set. A read failure before this function is called is still thrown
+ * by the public action and therefore produces zero writes.
+ */
+async function closeEntriesNow(entries, clockUids, now) {
+    const byUid = new Map(entries.filter(entry => entry.running).map(entry => [entry.clockUid, entry]));
+    const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
+    const results = [];
+
+    for (const clockUid of ids) {
+        const entry = byUid.get(clockUid);
+        if (!entry) {
+            results.push({ clockUid, closed: false, reason: 'not-running' });
+            continue;
+        }
+        try {
+            const closed = await closeEntry(entry, now);
+            results.push({ clockUid, closed });
+        } catch (error) {
+            results.push({ clockUid, closed: false, error });
+        }
+    }
+
+    refresh();
+    return {
+        results,
+        closed: results.filter(result => result.closed).length,
+        failed: results.filter(result => result.error).length,
+    };
+}
+
 /**
  * Open a clock on `blockUid` (or the block it references).
  *
  * @returns {Promise<{clockUid: string, taskUid: string}>}
  */
 export async function clockIn(blockUid, { now = new Date() } = {}) {
-    const taskUid = resolveTaskUid(blockUid);
-    if (!taskUid) throw new Error('No block to clock in');
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const taskUid = resolveTaskUid(blockUid);
+            if (!taskUid) throw new Error('No block to clock in');
 
-    if (!allowMultipleClocks()) {
-        // Org allows one clock at a time; closing the others keeps totals honest.
-        for (const entry of readAllEntries().filter(item => item.running)) {
-            await closeClockBlock(entry.clockUid, now);
-        }
-    } else if (running.some(entry => entry.taskUid === taskUid)) {
-        throw new Error('This task already has a running clock');
-    }
+            // This read is deliberately inside the queue. It is the boundary that
+            // prevents two concurrent actions, or another instance's fresh write,
+            // from both deciding that the task is free.
+            const entries = readAllEntries();
+            const open = entries.filter(entry => entry.running);
+            if (allowMultipleClocks()) {
+                if (open.some(entry => entry.taskUid === taskUid)) {
+                    refresh();
+                    throw new Error('This task already has a running clock');
+                }
+            } else {
+                // Org allows one clock at a time; closing the others keeps totals honest.
+                if (open.length > 0) {
+                    const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now);
+                    if (outcome.failed > 0) throw outcome.results.find(result => result.error).error;
+                }
+            }
 
-    const drawerUid = await ensureDrawer(taskUid);
-    const order = getChildren(drawerUid).length;
-    const clockUid = await createBlock({
-        parentUid: drawerUid,
-        order,
-        string: formatClockLine(now),
-    });
+            const drawerUid = await ensureDrawer(taskUid);
+            const order = getChildren(drawerUid).length;
+            const clockUid = await createBlock({
+                parentUid: drawerUid,
+                order,
+                string: formatClockLine(now),
+            });
 
-    refresh();
-    return { clockUid, taskUid };
+            refresh();
+            return { clockUid, taskUid };
+        })
+    );
 }
 
-/** Rewrite a running `CLOCK::` block into its closed form. */
-async function closeClockBlock(clockUid, end) {
-    const string = getBlockString(clockUid);
-    const parsed = parseClockLine(string);
-    if (!parsed || !parsed.running) return false;
-    const endAt = end.getTime() < parsed.start.getTime() ? parsed.start : end;
-    await updateBlock({ uid: clockUid, string: formatClockLine(parsed.start, endAt) });
-    return true;
-}
-
+/** Close one confirmed clock and return whether it was still running. */
 export async function clockOut(clockUid, { now = new Date() } = {}) {
-    const closed = await closeClockBlock(clockUid, now);
-    refresh();
-    return closed;
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const entries = readAllEntries();
+            const outcome = await closeEntriesNow(entries, [clockUid], now);
+            const result = outcome.results[0];
+            if (result?.error) throw result.error;
+            return result?.closed === true;
+        })
+    );
 }
 
+/** Close a selected set, or every currently running clock when omitted. */
+export async function clockOutEntries(clockUids = null, { now = new Date() } = {}) {
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const entries = readAllEntries();
+            return closeEntriesNow(entries, clockUids, now);
+        })
+    );
+}
+
+/**
+ * Prepare and close the current running entries as one queued graph action.
+ *
+ * The preparation callback may persist extension state, but it cannot write the
+ * graph. This lets Pause All save its recovery record before the first CLOCK
+ * closes without allowing another local graph mutation to interleave.
+ */
+export async function pauseEntries({ now = new Date(), prepare } = {}) {
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const entries = readAllEntries().filter(entry => entry.running);
+            const records = prepare ? await prepare(entries.map(entry => ({ ...entry }))) : [];
+            const outcome = await closeEntriesNow(
+                entries,
+                records.map(record => record.clockUid),
+                now
+            );
+            return { entries, records, ...outcome };
+        })
+    );
+}
+
+/** Close all currently running clocks. The legacy return value is the count closed. */
 export async function clockOutAll({ now = new Date() } = {}) {
-    let count = 0;
-    for (const entry of running.slice()) {
-        if (await closeClockBlock(entry.clockUid, now)) count += 1;
+    const outcome = await clockOutEntries(null, { now });
+    if (outcome.failed > 0) {
+        notice = `${outcome.failed} Session${outcome.failed === 1 ? '' : 's'} could not be closed.`;
     }
-    refresh();
-    return count;
+    return outcome.closed;
 }
 
 /** Close whichever clock belongs to this block, if any. */
-export async function clockOutBlock(blockUid, options) {
-    const taskUid = resolveTaskUid(blockUid);
-    const entry = running.find(item => item.taskUid === taskUid);
-    if (!entry) return false;
-    return clockOut(entry.clockUid, options);
+export async function clockOutBlock(blockUid, { now = new Date() } = {}) {
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const taskUid = resolveTaskUid(blockUid);
+            const entries = readAllEntries();
+            const entry = entries.find(item => item.running && item.taskUid === taskUid);
+            if (!entry) return false;
+            const outcome = await closeEntriesNow(entries, [entry.clockUid], now);
+            const result = outcome.results[0];
+            if (result?.error) throw result.error;
+            return result?.closed === true;
+        })
+    );
 }
 
 /**
@@ -158,16 +280,21 @@ export async function clockOutBlock(blockUid, options) {
  * The drawer goes too once it is empty, so abandoned tasks stay clean.
  */
 export async function discardClock(clockUid) {
-    const entry = readAllEntries().find(item => item.clockUid === clockUid);
-    await deleteBlock(clockUid);
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            const entries = readAllEntries();
+            const entry = entries.find(item => item.clockUid === clockUid);
+            await deleteBlock(clockUid);
 
-    if (entry) {
-        const drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
-        if (drawer && getChildren(drawer.uid).length === 0) await deleteBlock(drawer.uid);
-    }
+            if (entry) {
+                const drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
+                if (drawer && getChildren(drawer.uid).length === 0) await deleteBlock(drawer.uid);
+            }
 
-    refresh();
-    return true;
+            refresh();
+            return true;
+        })
+    );
 }
 
 /** True when this block (or the one it references) has an open clock. */

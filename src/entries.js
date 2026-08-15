@@ -7,7 +7,13 @@
  */
 
 import { isDrawerBlock, parseClockLine, referencedBlockUid, taskStatus, taskTitle } from './org.js';
-import { getBlockString, query, queryOrThrow, resolveReferencedUid } from './roam.js';
+import {
+    getBlockString,
+    query,
+    queryOrThrow,
+    resolveReferencedUid,
+    validateQueryRows,
+} from './roam.js';
 
 // Filter on the drawer rather than on `CLOCK:` so that hand-written entries with
 // odd spacing still come back; the JS parser is the real gate.
@@ -39,7 +45,7 @@ function queryEntryRows() {
         return queryOrThrow(entriesQuery('starts-with?'));
     } catch (error) {
         console.error('[roam-logbook] could not read logbook entries', error);
-        return [];
+        throw error;
     }
 }
 
@@ -59,7 +65,18 @@ function queryEntryRows() {
 
 /** Every parseable clock entry in the graph, newest start first. */
 export function readAllEntries() {
-    const rows = queryEntryRows();
+    const rows = validateQueryRows(
+        queryEntryRows(),
+        'logbook entry',
+        row =>
+            row.length >= 6 &&
+            typeof row[0] === 'string' &&
+            typeof row[1] === 'string' &&
+            typeof row[2] === 'string' &&
+            typeof row[3] === 'string' &&
+            typeof row[4] === 'string' &&
+            (typeof row[5] === 'string' || row[5] === null || row[5] === undefined)
+    );
     const entries = [];
 
     for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
@@ -135,7 +152,12 @@ export function readHierarchy(taskUids) {
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf };
 
     try {
-        for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...seeds])) {
+        const mirrorRows = validateQueryRows(
+            queryOrThrow(MIRRORS_QUERY, [...seeds]),
+            'mirror',
+            row => row.length >= 3 && row.every(value => typeof value === 'string')
+        );
+        for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
             // `:block/refs` also fires for a block that merely mentions the task
             // in passing; only a block that is *nothing but* the reference counts.
             if (referencedBlockUid(mirrorString) !== targetUid) continue;
@@ -150,7 +172,12 @@ export function readHierarchy(taskUids) {
     let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
     for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
         const next = [];
-        for (const [uid, rawParentUid, rawParentString] of query(PARENTS_QUERY, frontier)) {
+        const parentRows = validateQueryRows(
+            query(PARENTS_QUERY, frontier),
+            'parent',
+            row => row.length >= 3 && row.every(value => typeof value === 'string')
+        );
+        for (const [uid, rawParentUid, rawParentString] of parentRows) {
             // Sub-tasks are routinely written under a `((reference))` to a task
             // rather than under the task itself — pulling a task into a daily note
             // and working beneath it. The reference stands for what it points at,

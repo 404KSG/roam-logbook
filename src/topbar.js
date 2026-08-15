@@ -43,6 +43,8 @@ export function createTopbar({ onOpenDashboard }) {
     let unsubscribe = null;
     let unsubscribePaused = null;
     let destroyed = false;
+    let clockOutAllConfirm = false;
+    let clockOutAllConfirmTimer = null;
 
     const isStale = entry =>
         findStaleClocks([entry], new Date(), staleHours()).length > 0;
@@ -54,10 +56,18 @@ export function createTopbar({ onOpenDashboard }) {
 
     // ---- popover ----
 
+    const resetClockOutConfirmation = () => {
+        clockOutAllConfirm = false;
+        if (clockOutAllConfirmTimer) clearTimeout(clockOutAllConfirmTimer);
+        clockOutAllConfirmTimer = null;
+    };
+
     const closePopover = () => {
+        resetClockOutConfirmation();
         popover?.remove();
         popover = null;
         document.removeEventListener('mousedown', onDocumentMouseDown, true);
+        document.removeEventListener('keydown', onPopoverKeyDown, true);
         window.removeEventListener('resize', closePopover);
     };
 
@@ -65,6 +75,10 @@ export function createTopbar({ onOpenDashboard }) {
         if (!popover) return;
         if (container?.contains(event.target) || popover.contains(event.target)) return;
         closePopover();
+    }
+
+    function onPopoverKeyDown(event) {
+        if (event.key === 'Escape') closePopover();
     }
 
     /**
@@ -155,6 +169,7 @@ export function createTopbar({ onOpenDashboard }) {
         if (!popover) return;
         const entries = clock.getRunning();
         const pausedItems = paused.getPaused();
+        if (entries.length <= 1 && clockOutAllConfirm) resetClockOutConfirmation();
         popover.replaceChildren();
 
         popover.appendChild(
@@ -205,9 +220,10 @@ export function createTopbar({ onOpenDashboard }) {
             popover.appendChild(list);
         }
 
-        if (paused.getNotice()) {
+        const notices = [clock.getNotice(), paused.getNotice()].filter(Boolean);
+        for (const notice of notices) {
             popover.appendChild(
-                el('div', 'rlb-popover__notice bp3-text-small', paused.getNotice())
+                el('div', 'rlb-popover__notice bp3-text-small', notice)
             );
         }
 
@@ -226,9 +242,28 @@ export function createTopbar({ onOpenDashboard }) {
             );
         }
         if (entries.length > 1) {
+            const confirmLabel = clockOutAllConfirm ? 'Confirm Clock Out All' : 'Clock Out All';
+            const confirmTitle = clockOutAllConfirm
+                ? 'Confirm permanent Clock Out All'
+                : 'Permanently close all running Sessions';
             footer.appendChild(
-                button('bp3-button bp3-small', 'Clock Out All', () =>
-                    run(() => paused.clockOutAll())
+                button(
+                    `bp3-button bp3-small${clockOutAllConfirm ? ' bp3-intent-danger' : ''}`,
+                    confirmLabel,
+                    () => {
+                        if (!clockOutAllConfirm) {
+                            clockOutAllConfirm = true;
+                            clockOutAllConfirmTimer = setTimeout(() => {
+                                resetClockOutConfirmation();
+                                renderPopover();
+                            }, 5000);
+                            renderPopover();
+                            return;
+                        }
+                        resetClockOutConfirmation();
+                        void run(() => paused.clockOutAll());
+                    },
+                    { title: confirmTitle }
                 )
             );
         }
@@ -259,6 +294,7 @@ export function createTopbar({ onOpenDashboard }) {
         renderPopover();
         positionPopover();
         document.addEventListener('mousedown', onDocumentMouseDown, true);
+        document.addEventListener('keydown', onPopoverKeyDown, true);
         window.addEventListener('resize', closePopover);
     };
 

@@ -162,6 +162,12 @@ function taskTitle(string, { maxLength = Infinity } = {}) {
 }
 
 // src/roam.js
+var GraphReadError = class extends Error {
+  constructor(message, { cause } = {}) {
+    super(message, { cause });
+    this.name = "GraphReadError";
+  }
+};
 function getApi() {
   return typeof window !== "undefined" && window.roamAlphaAPI || null;
 }
@@ -183,26 +189,53 @@ function resolve(namespace, modernName, legacyName = modernName) {
     return api[legacyName].bind(api);
   return null;
 }
-function queryOrThrow(datalog, ...args) {
+function queryResult(datalog, ...args) {
   const run = resolve(null, "q");
-  if (!run)
-    throw new Error("roamAlphaAPI q unavailable");
-  return run(datalog, ...args) || [];
+  if (!run) {
+    return {
+      ok: false,
+      rows: null,
+      error: new GraphReadError("roamAlphaAPI q unavailable")
+    };
+  }
+  try {
+    const rows = run(datalog, ...args);
+    if (!Array.isArray(rows) || rows.some((row) => !Array.isArray(row))) {
+      throw new GraphReadError("Graph query returned a non-array result", {
+        cause: new TypeError("query rows must be an array of rows")
+      });
+    }
+    return { ok: true, rows, error: null };
+  } catch (error) {
+    const graphError = error instanceof GraphReadError ? error : new GraphReadError(error?.message || "Graph query failed", { cause: error });
+    return { ok: false, rows: null, error: graphError };
+  }
+}
+function validateQueryRows(rows, label, predicate) {
+  if (rows.some((row) => !predicate(row))) {
+    throw new GraphReadError(`Graph query returned malformed ${label} rows`);
+  }
+  return rows;
+}
+function queryOrThrow(datalog, ...args) {
+  const result = queryResult(datalog, ...args);
+  if (!result.ok)
+    throw result.error;
+  return result.rows;
 }
 function query(datalog, ...args) {
-  try {
-    return queryOrThrow(datalog, ...args);
-  } catch (error) {
-    console.error("[roam-logbook] query failed", error);
-    return [];
-  }
+  return queryOrThrow(datalog, ...args);
 }
 function getBlockString(uid) {
   if (!uid)
     return null;
-  const rows = query(
-    "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
-    uid
+  const rows = validateQueryRows(
+    queryOrThrow(
+      "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
+      uid
+    ),
+    "block string",
+    (row) => row.length >= 1 && typeof row[0] === "string"
   );
   return rows[0]?.[0] ?? null;
 }
@@ -221,8 +254,9 @@ function resolveReferencedUid(uid) {
 function getChildren(uid) {
   if (!uid)
     return [];
-  const rows = query(
-    `[:find ?uid ?string ?order
+  const rows = validateQueryRows(
+    queryOrThrow(
+      `[:find ?uid ?string ?order
           :in $ ?parent
           :where
           [?p :block/uid ?parent]
@@ -230,7 +264,10 @@ function getChildren(uid) {
           [?c :block/uid ?uid]
           [?c :block/string ?string]
           [?c :block/order ?order]]`,
-    uid
+      uid
+    ),
+    "children",
+    (row) => row.length >= 3 && typeof row[0] === "string" && typeof row[1] === "string" && Number.isFinite(row[2])
   );
   return rows.map(([childUid, string, order]) => ({ uid: childUid, string, order })).sort((a, b) => a.order - b.order);
 }
@@ -297,11 +334,15 @@ function queryEntryRows() {
     return queryOrThrow(entriesQuery("starts-with?"));
   } catch (error) {
     console.error("[roam-logbook] could not read logbook entries", error);
-    return [];
+    throw error;
   }
 }
 function readAllEntries() {
-  const rows = queryEntryRows();
+  const rows = validateQueryRows(
+    queryEntryRows(),
+    "logbook entry",
+    (row) => row.length >= 6 && typeof row[0] === "string" && typeof row[1] === "string" && typeof row[2] === "string" && typeof row[3] === "string" && typeof row[4] === "string" && (typeof row[5] === "string" || row[5] === null || row[5] === void 0)
+  );
   const entries = [];
   for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
     if (!isDrawerBlock(drawerString))
@@ -348,7 +389,12 @@ function readHierarchy(taskUids) {
   if (seeds.size === 0)
     return { parentOf, stringOf, mirrorsOf };
   try {
-    for (const [targetUid, mirrorUid, mirrorString] of queryOrThrow(MIRRORS_QUERY, [...seeds])) {
+    const mirrorRows = validateQueryRows(
+      queryOrThrow(MIRRORS_QUERY, [...seeds]),
+      "mirror",
+      (row) => row.length >= 3 && row.every((value) => typeof value === "string")
+    );
+    for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
       if (referencedBlockUid(mirrorString) !== targetUid)
         continue;
       (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
@@ -360,7 +406,12 @@ function readHierarchy(taskUids) {
   let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
     const next = [];
-    for (const [uid, rawParentUid, rawParentString] of query(PARENTS_QUERY, frontier)) {
+    const parentRows = validateQueryRows(
+      query(PARENTS_QUERY, frontier),
+      "parent",
+      (row) => row.length >= 3 && row.every((value) => typeof value === "string")
+    );
+    for (const [uid, rawParentUid, rawParentString] of parentRows) {
       const referenced = referencedBlockUid(rawParentString);
       const parentUid = referenced ? resolveReferencedUid(rawParentUid) : rawParentUid;
       const parentString = referenced ? getBlockString(parentUid) : rawParentString;
@@ -373,6 +424,17 @@ function readHierarchy(taskUids) {
     frontier = next;
   }
   return { parentOf, stringOf, mirrorsOf };
+}
+
+// src/mutations.js
+var tail = Promise.resolve();
+function enqueueMutation(action) {
+  const result = tail.then(action, action);
+  tail = result.catch(() => void 0);
+  return result;
+}
+function resetMutationQueue() {
+  tail = Promise.resolve();
 }
 
 // src/settings.js
@@ -451,7 +513,21 @@ function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
 
 // src/clock.js
 var running = [];
+var lastRefreshStatus = { ok: true, error: null };
+var notice = "";
 var listeners = /* @__PURE__ */ new Set();
+var GRAPH_UNCERTAIN = "Unable to read the graph; no changes were made. Please try again.";
+async function withGraphGuard(action) {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof GraphReadError) {
+      notice = GRAPH_UNCERTAIN;
+      throw new Error(GRAPH_UNCERTAIN, { cause: error });
+    }
+    throw error;
+  }
+}
 function subscribe(listener) {
   listeners.add(listener);
   listener(running);
@@ -459,6 +535,12 @@ function subscribe(listener) {
 }
 function getRunning() {
   return running;
+}
+function getLastRefreshStatus() {
+  return { ...lastRefreshStatus };
+}
+function getNotice() {
+  return notice;
 }
 function notify() {
   for (const listener of listeners) {
@@ -470,7 +552,15 @@ function notify() {
   }
 }
 function refresh() {
-  const all = readAllEntries();
+  let all;
+  try {
+    all = readAllEntries();
+  } catch (error) {
+    lastRefreshStatus = { ok: false, error };
+    notice = GRAPH_UNCERTAIN;
+    console.error("[roam-logbook] could not refresh clocks", error);
+    return running;
+  }
   const bankedByTask = /* @__PURE__ */ new Map();
   for (const entry of all) {
     if (entry.running)
@@ -478,12 +568,17 @@ function refresh() {
     bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
   }
   running = all.filter((entry) => entry.running).map((entry) => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
+  lastRefreshStatus = { ok: true, error: null };
+  notice = "";
   notify();
   return running;
 }
 function reset() {
   running = [];
+  lastRefreshStatus = { ok: true, error: null };
+  notice = "";
   listeners.clear();
+  resetMutationQueue();
 }
 function resolveTaskUid(uid) {
   return resolveReferencedUid(uid);
@@ -495,67 +590,134 @@ async function ensureDrawer(taskUid) {
     return existing.uid;
   return createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
 }
-async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
-  const taskUid = resolveTaskUid(blockUid);
-  if (!taskUid)
-    throw new Error("No block to clock in");
-  if (!allowMultipleClocks()) {
-    for (const entry of readAllEntries().filter((item) => item.running)) {
-      await closeClockBlock(entry.clockUid, now);
-    }
-  } else if (running.some((entry) => entry.taskUid === taskUid)) {
-    throw new Error("This task already has a running clock");
-  }
-  const drawerUid = await ensureDrawer(taskUid);
-  const order = getChildren(drawerUid).length;
-  const clockUid = await createBlock({
-    parentUid: drawerUid,
-    order,
-    string: formatClockLine(now)
-  });
-  refresh();
-  return { clockUid, taskUid };
-}
-async function closeClockBlock(clockUid, end) {
-  const string = getBlockString(clockUid);
-  const parsed = parseClockLine(string);
-  if (!parsed || !parsed.running)
+async function closeEntry(entry, end) {
+  if (!entry?.running)
     return false;
-  const endAt = end.getTime() < parsed.start.getTime() ? parsed.start : end;
-  await updateBlock({ uid: clockUid, string: formatClockLine(parsed.start, endAt) });
+  const string = formatClockLine(entry.start, end.getTime() < entry.start.getTime() ? entry.start : end);
+  await updateBlock({ uid: entry.clockUid, string });
   return true;
+}
+async function closeEntriesNow(entries, clockUids, now) {
+  const byUid = new Map(entries.filter((entry) => entry.running).map((entry) => [entry.clockUid, entry]));
+  const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
+  const results = [];
+  for (const clockUid of ids) {
+    const entry = byUid.get(clockUid);
+    if (!entry) {
+      results.push({ clockUid, closed: false, reason: "not-running" });
+      continue;
+    }
+    try {
+      const closed = await closeEntry(entry, now);
+      results.push({ clockUid, closed });
+    } catch (error) {
+      results.push({ clockUid, closed: false, error });
+    }
+  }
+  refresh();
+  return {
+    results,
+    closed: results.filter((result) => result.closed).length,
+    failed: results.filter((result) => result.error).length
+  };
+}
+async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const taskUid = resolveTaskUid(blockUid);
+      if (!taskUid)
+        throw new Error("No block to clock in");
+      const entries = readAllEntries();
+      const open = entries.filter((entry) => entry.running);
+      if (allowMultipleClocks()) {
+        if (open.some((entry) => entry.taskUid === taskUid)) {
+          refresh();
+          throw new Error("This task already has a running clock");
+        }
+      } else {
+        if (open.length > 0) {
+          const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now);
+          if (outcome.failed > 0)
+            throw outcome.results.find((result) => result.error).error;
+        }
+      }
+      const drawerUid = await ensureDrawer(taskUid);
+      const order = getChildren(drawerUid).length;
+      const clockUid = await createBlock({
+        parentUid: drawerUid,
+        order,
+        string: formatClockLine(now)
+      });
+      refresh();
+      return { clockUid, taskUid };
+    })
+  );
 }
 async function clockOut(clockUid, { now = /* @__PURE__ */ new Date() } = {}) {
-  const closed = await closeClockBlock(clockUid, now);
-  refresh();
-  return closed;
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const entries = readAllEntries();
+      const outcome = await closeEntriesNow(entries, [clockUid], now);
+      const result = outcome.results[0];
+      if (result?.error)
+        throw result.error;
+      return result?.closed === true;
+    })
+  );
 }
-async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
-  let count = 0;
-  for (const entry of running.slice()) {
-    if (await closeClockBlock(entry.clockUid, now))
-      count += 1;
-  }
-  refresh();
-  return count;
+async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date() } = {}) {
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const entries = readAllEntries();
+      return closeEntriesNow(entries, clockUids, now);
+    })
+  );
 }
-async function clockOutBlock(blockUid, options) {
-  const taskUid = resolveTaskUid(blockUid);
-  const entry = running.find((item) => item.taskUid === taskUid);
-  if (!entry)
-    return false;
-  return clockOut(entry.clockUid, options);
+async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) {
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const entries = readAllEntries().filter((entry) => entry.running);
+      const records = prepare ? await prepare(entries.map((entry) => ({ ...entry }))) : [];
+      const outcome = await closeEntriesNow(
+        entries,
+        records.map((record) => record.clockUid),
+        now
+      );
+      return { entries, records, ...outcome };
+    })
+  );
+}
+async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const taskUid = resolveTaskUid(blockUid);
+      const entries = readAllEntries();
+      const entry = entries.find((item) => item.running && item.taskUid === taskUid);
+      if (!entry)
+        return false;
+      const outcome = await closeEntriesNow(entries, [entry.clockUid], now);
+      const result = outcome.results[0];
+      if (result?.error)
+        throw result.error;
+      return result?.closed === true;
+    })
+  );
 }
 async function discardClock(clockUid) {
-  const entry = readAllEntries().find((item) => item.clockUid === clockUid);
-  await deleteBlock(clockUid);
-  if (entry) {
-    const drawer = getChildren(entry.taskUid).find((child) => isDrawerBlock(child.string));
-    if (drawer && getChildren(drawer.uid).length === 0)
-      await deleteBlock(drawer.uid);
-  }
-  refresh();
-  return true;
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      const entries = readAllEntries();
+      const entry = entries.find((item) => item.clockUid === clockUid);
+      await deleteBlock(clockUid);
+      if (entry) {
+        const drawer = getChildren(entry.taskUid).find((child) => isDrawerBlock(child.string));
+        if (drawer && getChildren(drawer.uid).length === 0)
+          await deleteBlock(drawer.uid);
+      }
+      refresh();
+      return true;
+    })
+  );
 }
 function isBlockRunning(blockUid) {
   const taskUid = resolveTaskUid(blockUid);
@@ -1174,25 +1336,61 @@ function createDashboard() {
 }
 
 // src/pomodoro.js
+var VERSION = 1;
 var targets = /* @__PURE__ */ new Map();
+var notice2 = "";
+var unsupportedRaw = null;
+var isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
+var mapFromData = (data) => {
+  if (!isRecord(data))
+    throw new Error("pomodoro data must be an object");
+  const next = /* @__PURE__ */ new Map();
+  for (const [clockUid, minutes] of Object.entries(data)) {
+    const value = Number(minutes);
+    if (Number.isFinite(value) && value >= 0)
+      next.set(clockUid, value);
+  }
+  return next;
+};
+var serialized = (values) => JSON.stringify({ version: VERSION, data: Object.fromEntries(values) });
+function writeTargets(next) {
+  if (unsupportedRaw !== null) {
+    notice2 = "Saved Pomodoro state uses an unsupported version and was kept.";
+    return false;
+  }
+  writeSetting(SETTING_POMODORO_STATE, serialized(next));
+  targets = next;
+  return true;
+}
 function load() {
   targets = /* @__PURE__ */ new Map();
+  notice2 = "";
+  unsupportedRaw = null;
   const raw = readSetting(SETTING_POMODORO_STATE);
   if (!raw)
     return;
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    for (const [clockUid, minutes] of Object.entries(parsed || {})) {
-      const value = Number(minutes);
-      if (Number.isFinite(value) && value >= 0)
-        targets.set(clockUid, value);
+    let next;
+    if (isRecord(parsed) && parsed.version === VERSION && "data" in parsed) {
+      next = mapFromData(parsed.data);
+    } else if (isRecord(parsed) && !("version" in parsed)) {
+      next = mapFromData(parsed);
+    } else {
+      throw new Error("unsupported pomodoro state version");
+    }
+    try {
+      writeTargets(next);
+    } catch (error) {
+      targets = next;
+      notice2 = "Pomodoro state was read, but its migration could not be saved yet.";
+      console.warn("[roam-logbook] could not migrate pomodoro state", error);
     }
   } catch (error) {
+    unsupportedRaw = raw;
+    notice2 = "Saved Pomodoro state uses an unsupported or invalid version and was kept.";
     console.warn("[roam-logbook] could not read pomodoro state", error);
   }
-}
-function persist() {
-  writeSetting(SETTING_POMODORO_STATE, JSON.stringify(Object.fromEntries(targets)));
 }
 function targetMinutes(clockUid) {
   const minutes = targets.get(clockUid);
@@ -1208,9 +1406,9 @@ function isAssigned(clockUid) {
 function start(clockUid, minutes = pomodoroMinutes()) {
   if (!clockUid || !(minutes > 0))
     return false;
-  targets.set(clockUid, minutes);
-  persist();
-  return true;
+  const next = new Map(targets);
+  next.set(clockUid, minutes);
+  return writeTargets(next);
 }
 function startDurationMs(clockUid, durationMs) {
   if (!Number.isFinite(durationMs) || durationMs <= 0)
@@ -1220,28 +1418,28 @@ function startDurationMs(clockUid, durationMs) {
 function suppress(clockUid) {
   if (!clockUid)
     return false;
-  targets.set(clockUid, 0);
-  persist();
-  return true;
+  const next = new Map(targets);
+  next.set(clockUid, 0);
+  return writeTargets(next);
 }
 function reconcile(running2) {
+  if (unsupportedRaw !== null)
+    return false;
   const live = new Set(running2.map((entry) => entry.clockUid));
-  let changed = false;
-  for (const clockUid of [...targets.keys()]) {
-    if (!live.has(clockUid)) {
-      targets.delete(clockUid);
-      changed = true;
-    }
+  const next = new Map(targets);
+  for (const clockUid of [...next.keys()]) {
+    if (!live.has(clockUid))
+      next.delete(clockUid);
   }
   for (const entry of running2) {
-    if (!targets.has(entry.clockUid)) {
-      targets.set(entry.clockUid, pomodoroMinutes());
-      changed = true;
-    }
+    if (!next.has(entry.clockUid))
+      next.set(entry.clockUid, pomodoroMinutes());
   }
-  if (changed)
-    persist();
-  return changed;
+  if (next.size === targets.size && [...next].every(([uid, value]) => targets.get(uid) === value)) {
+    return false;
+  }
+  writeTargets(next);
+  return true;
 }
 function overrunMs(entry, now = Date.now()) {
   const minutes = entry && targets.get(entry.clockUid);
@@ -1264,12 +1462,17 @@ function attach() {
 }
 function reset2() {
   targets = /* @__PURE__ */ new Map();
+  notice2 = "";
+  unsupportedRaw = null;
 }
 
 // src/paused.js
-var VERSION = 1;
+var VERSION2 = 2;
+var LEGACY_VERSION = 1;
 var items = [];
-var notice = "";
+var pendingResume = [];
+var notice3 = "";
+var unsupportedRaw2 = null;
 var listeners2 = /* @__PURE__ */ new Set();
 var cleanRecord = (value) => {
   if (!value || typeof value !== "object")
@@ -1280,16 +1483,33 @@ var cleanRecord = (value) => {
   const remaining = value.pomodoroRemainingMs;
   const pomodoroRemainingMs = remaining === null || remaining === void 0 ? null : Number(remaining);
   const pomodoroSuppressed = value.pomodoroSuppressed === true;
+  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
   if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
     return null;
   if (pomodoroRemainingMs !== null && (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)) {
     return null;
   }
-  return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed };
+  return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed, ...clockUid ? { clockUid } : {} };
 };
-var serialized = () => JSON.stringify({ version: VERSION, items });
-function persist2() {
-  writeSetting(SETTING_PAUSED_BATCH, serialized());
+var cleanPending = (value) => {
+  const record = cleanRecord(value);
+  if (!record)
+    return null;
+  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
+  return { ...record, clockUid };
+};
+var serialized2 = () => JSON.stringify({
+  version: VERSION2,
+  data: {
+    items,
+    pendingResume
+  }
+});
+function persist() {
+  if (unsupportedRaw2 !== null)
+    return false;
+  writeSetting(SETTING_PAUSED_BATCH, serialized2());
+  return true;
 }
 function notify2() {
   for (const listener of listeners2) {
@@ -1308,34 +1528,47 @@ function subscribe2(listener) {
 function getPaused() {
   return items.map((item) => ({ ...item }));
 }
-function getNotice() {
-  return notice;
+function getNotice2() {
+  return notice3;
 }
 function load2() {
   items = [];
-  notice = "";
+  pendingResume = [];
+  notice3 = "";
+  unsupportedRaw2 = null;
   const raw = readSetting(SETTING_PAUSED_BATCH);
   if (!raw)
-    return items;
+    return getPaused();
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (!parsed || parsed.version !== VERSION || !Array.isArray(parsed.items)) {
-      throw new Error("unsupported paused-batch shape");
+    if (parsed?.version === VERSION2 && parsed.data && Array.isArray(parsed.data.items)) {
+      const loadedItems = parsed.data.items.map(cleanRecord);
+      const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map(cleanPending) : [];
+      if (loadedItems.some((item) => !item) || loadedPending.some((item) => !item)) {
+        throw new Error("invalid paused-task record");
+      }
+      const byTask = new Map(loadedItems.map((item) => [item.taskUid, item]));
+      const pendingByTask = new Map(loadedPending.map((item) => [item.taskUid, item]));
+      items = [...byTask.values()];
+      pendingResume = [...pendingByTask.values()];
+      return getPaused();
     }
-    const byTask = /* @__PURE__ */ new Map();
-    for (const value of parsed.items) {
-      const record = cleanRecord(value);
-      if (!record)
-        throw new Error("invalid paused task record");
-      byTask.set(record.taskUid, record);
+    if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
+      const loaded = parsed.items.map(cleanRecord);
+      if (loaded.some((item) => !item))
+        throw new Error("invalid legacy paused-task record");
+      items = [...new Map(loaded.map((item) => [item.taskUid, item])).values()];
+      pendingResume = [];
+      persist();
+      return getPaused();
     }
-    items = [...byTask.values()];
+    throw new Error("unsupported paused-batch version");
   } catch (error) {
-    notice = "Saved paused-task state was invalid and has been discarded.";
+    unsupportedRaw2 = raw;
+    notice3 = "Saved paused-task state uses an unsupported or invalid version and was kept.";
     console.warn("[roam-logbook] could not read paused task state", error);
-    persist2();
+    return getPaused();
   }
-  return getPaused();
 }
 var pomodoroSnapshot = (entry, nowMs) => {
   const targetMs = targetDurationMs(entry.clockUid);
@@ -1352,75 +1585,182 @@ var pomodoroSnapshot = (entry, nowMs) => {
   };
 };
 async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
-  const running2 = getRunning().slice();
-  if (running2.length === 0)
-    return { paused: 0, failed: 0 };
-  notice = "";
-  const previous = new Map(
-    items.map((item) => {
-      const taskUid = resolveTaskUid(item.taskUid) || item.taskUid;
-      return [taskUid, { ...item, taskUid }];
-    })
-  );
-  const merged = new Map(previous);
-  const snapshots = running2.map((entry) => ({
-    taskUid: entry.taskUid,
-    title: entry.title,
-    pausedAtMs: now.getTime(),
-    ...pomodoroSnapshot(entry, now.getTime()),
-    clockUid: entry.clockUid
-  }));
-  for (const { clockUid: _clockUid, ...record } of snapshots) {
-    merged.set(record.taskUid, record);
+  if (unsupportedRaw2 !== null) {
+    notice3 = "Saved paused-task state is unsupported; no Tasks were paused.";
+    notify2();
+    return { paused: 0, failed: 0, uncertain: true };
   }
-  items = [...merged.values()];
-  persist2();
-  let paused = 0;
-  let failed = 0;
-  for (const snapshot of snapshots) {
-    try {
-      if (await clockOut(snapshot.clockUid, { now })) {
-        paused += 1;
-      } else {
-        failed += 1;
-        if (previous.has(snapshot.taskUid))
-          merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
-        else
-          merged.delete(snapshot.taskUid);
+  notice3 = "";
+  const originalItems = items.map((item) => ({ ...item }));
+  let previous;
+  try {
+    previous = new Map(
+      items.map((item) => {
+        const taskUid = resolveTaskUid(item.taskUid) || item.taskUid;
+        return [taskUid, { ...item, taskUid }];
+      })
+    );
+  } catch {
+    notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
+    notify2();
+    return { paused: 0, failed: 0, uncertain: true };
+  }
+  const merged = new Map(previous);
+  let outcome;
+  try {
+    outcome = await pauseEntries({
+      now,
+      prepare: (entries) => {
+        const snapshots = entries.map((entry) => ({
+          taskUid: entry.taskUid,
+          title: entry.title,
+          pausedAtMs: now.getTime(),
+          ...pomodoroSnapshot(entry, now.getTime()),
+          clockUid: entry.clockUid
+        }));
+        for (const snapshot of snapshots) {
+          const { clockUid: _clockUid, ...record } = snapshot;
+          merged.set(record.taskUid, record);
+        }
+        items = [...merged.values()];
+        persist();
+        return snapshots;
       }
-    } catch (error) {
-      failed += 1;
-      if (previous.has(snapshot.taskUid))
-        merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
-      else
-        merged.delete(snapshot.taskUid);
-      console.error("[roam-logbook] could not pause task", snapshot.taskUid, error);
-    }
+    });
+  } catch {
+    items = originalItems;
+    notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
+    notify2();
+    return { paused: 0, failed: 0, uncertain: true };
+  }
+  let failed = 0;
+  const byClockUid = new Map(outcome.results.map((result) => [result.clockUid, result]));
+  for (const snapshot of outcome.records) {
+    const result = byClockUid.get(snapshot.clockUid);
+    if (result?.closed)
+      continue;
+    failed += 1;
+    if (previous.has(snapshot.taskUid))
+      merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
+    else
+      merged.delete(snapshot.taskUid);
+    console.error("[roam-logbook] could not pause task", snapshot.taskUid, result?.error);
   }
   items = [...merged.values()];
   if (failed > 0)
-    notice = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
-  persist2();
+    notice3 = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
+  persist();
   notify2();
-  return { paused, failed };
+  return { paused: outcome.closed, failed };
 }
 var existingTask = (record) => {
-  const taskUid = resolveTaskUid(record.taskUid);
-  const string = getBlockString(taskUid);
-  return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
+  try {
+    const taskUid = resolveTaskUid(record.taskUid);
+    const string = getBlockString(taskUid);
+    return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
+  } catch (error) {
+    if (error instanceof GraphReadError)
+      return { uncertain: true, error };
+    throw error;
+  }
 };
+var applyPomodoro = (record) => {
+  if (record.pomodoroRemainingMs) {
+    if (!startDurationMs(record.clockUid, record.pomodoroRemainingMs)) {
+      throw new Error("Pomodoro remainder could not be saved.");
+    }
+  } else if (record.pomodoroSuppressed) {
+    if (!suppress(record.clockUid))
+      throw new Error("Pomodoro suppression could not be saved.");
+  }
+};
+var removeTask = (taskUid) => {
+  items = items.filter((item) => item.taskUid !== taskUid);
+};
+async function recoverPending({ now = /* @__PURE__ */ new Date() } = {}) {
+  let recovered = 0;
+  let failed = 0;
+  for (const pending of [...pendingResume]) {
+    let entry = getRunning().find((item) => item.taskUid === pending.taskUid);
+    if (!entry) {
+      refresh();
+      if (!getLastRefreshStatus().ok) {
+        failed += 1;
+        continue;
+      }
+      entry = getRunning().find((item) => item.taskUid === pending.taskUid);
+    }
+    try {
+      if (!entry) {
+        const result = await clockIn(pending.taskUid, { now });
+        entry = getRunning().find((item) => item.clockUid === result.clockUid) || result;
+      }
+      if (pending.clockUid !== entry.clockUid) {
+        pending.clockUid = entry.clockUid;
+        persist();
+      }
+      applyPomodoro({ ...pending, clockUid: entry.clockUid });
+      pendingResume = pendingResume.filter((item) => item.taskUid !== pending.taskUid);
+      removeTask(pending.taskUid);
+      persist();
+      recovered += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("[roam-logbook] could not recover paused task", pending.taskUid, error);
+    }
+  }
+  return { recovered, failed };
+}
+var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
+async function resumeRecord(record, now) {
+  let pending = pendingResume.find((item) => item.taskUid === record.taskUid);
+  if (!pending) {
+    pending = { ...record, clockUid: null };
+    pendingResume.push(pending);
+    persist();
+  }
+  let entry = getRunning().find((item) => item.taskUid === record.taskUid);
+  if (!entry) {
+    const result = await clockIn(record.taskUid, { now });
+    entry = getRunning().find((item) => item.clockUid === result.clockUid) || result;
+  }
+  pending.clockUid = entry.clockUid;
+  persist();
+  applyPomodoro({ ...record, clockUid: entry.clockUid });
+  pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
+  removeTask(record.taskUid);
+  persist();
+  return entry;
+}
 async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
-  notice = "";
+  if (unsupportedRaw2 !== null) {
+    notice3 = "Saved paused-task state is unsupported; no Tasks were resumed.";
+    notify2();
+    return { resumed: 0, failed: 0, pruned: 0, satisfied: 0, blocked: true };
+  }
+  notice3 = "";
+  const recovered = await recoverPending({ now });
   const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
   const retained = [];
   const ready = [];
   const plannedTasks = /* @__PURE__ */ new Set();
+  const blockedPending = pendingTasks();
   let pruned = 0;
   let satisfied = 0;
-  for (const record of items) {
+  let uncertain = 0;
+  for (const record of [...items]) {
     const valid = existingTask(record);
+    if (valid?.uncertain) {
+      uncertain += 1;
+      retained.push(record);
+      continue;
+    }
     if (!valid) {
       pruned += 1;
+      continue;
+    }
+    if (blockedPending.has(valid.taskUid)) {
+      retained.push(valid);
       continue;
     }
     if (runningTasks.has(valid.taskUid) || plannedTasks.has(valid.taskUid)) {
@@ -1435,24 +1775,19 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   if (needsMultiple && !allowMultipleClocks()) {
     writeSetting(SETTING_MULTIPLE, true);
     if (!allowMultipleClocks()) {
-      notice = "Multiple clocks could not be enabled; no paused Tasks were resumed.";
-      items = [...ready];
-      persist2();
+      notice3 = "Multiple clocks could not be enabled; no paused Tasks were resumed.";
+      items = [...retained, ...ready];
+      persist();
       notify2();
-      return { resumed: 0, failed: 0, pruned, satisfied, blocked: true };
+      return { resumed: recovered.recovered, failed: recovered.failed, pruned, satisfied, blocked: true };
     }
     enabledMultiple = true;
   }
-  let resumed = 0;
-  let failed = 0;
+  let resumed = recovered.recovered;
+  let failed = recovered.failed + uncertain;
   for (const record of ready) {
     try {
-      const result = await clockIn(record.taskUid, { now });
-      if (record.pomodoroRemainingMs) {
-        startDurationMs(result.clockUid, record.pomodoroRemainingMs);
-      } else if (record.pomodoroSuppressed) {
-        suppress(result.clockUid);
-      }
+      await resumeRecord(record, now);
       resumed += 1;
     } catch (error) {
       failed += 1;
@@ -1462,31 +1797,64 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   items = retained;
   const messages = [];
-  if (enabledMultiple) {
+  if (enabledMultiple)
     messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
-  }
   if (pruned > 0)
     messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
   if (failed > 0)
     messages.push(`${failed} Task${failed === 1 ? "" : "s"} could not be resumed.`);
-  notice = messages.join(" ");
-  persist2();
+  if (uncertain > 0) {
+    messages.push(
+      `${uncertain} Task${uncertain === 1 ? "" : "s"} could not be confirmed because the graph is unavailable.`
+    );
+  }
+  notice3 = messages.join(" ");
+  persist();
   notify2();
   return { resumed, failed, pruned, satisfied, blocked: false };
 }
-function clear() {
-  items = [];
-  notice = "";
-  persist2();
+async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
+  let outcome;
+  try {
+    outcome = await clockOutEntries(null, { now });
+  } catch {
+    notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
+    notify2();
+    return 0;
+  }
+  const stillRunning = getRunning();
+  if (outcome.failed === 0 && stillRunning.length === 0) {
+    items = [];
+    pendingResume = [];
+    notice3 = "";
+    persist();
+    notify2();
+    return outcome.closed;
+  }
+  const retained = new Map(
+    items.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid)).map((item) => [item.taskUid, item])
+  );
+  for (const entry of stillRunning) {
+    retained.set(entry.taskUid, {
+      taskUid: entry.taskUid,
+      title: entry.title,
+      pausedAtMs: now.getTime(),
+      ...pomodoroSnapshot(entry, now.getTime()),
+      clockUid: entry.clockUid
+    });
+  }
+  items = [...retained.values()];
+  pendingResume = pendingResume.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid));
+  notice3 = `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
+  persist();
   notify2();
-}
-async function clockOutAll2({ now = /* @__PURE__ */ new Date() } = {}) {
-  clear();
-  return clockOutAll({ now });
+  return outcome.closed;
 }
 function reset3() {
   items = [];
-  notice = "";
+  pendingResume = [];
+  notice3 = "";
+  unsupportedRaw2 = null;
   listeners2.clear();
 }
 
@@ -2423,14 +2791,24 @@ function createTopbar({ onOpenDashboard }) {
   let unsubscribe = null;
   let unsubscribePaused = null;
   let destroyed = false;
+  let clockOutAllConfirm = false;
+  let clockOutAllConfirmTimer = null;
   const isStale = (entry) => findStaleClocks([entry], /* @__PURE__ */ new Date(), staleHours()).length > 0;
   const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
   const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
+  const resetClockOutConfirmation = () => {
+    clockOutAllConfirm = false;
+    if (clockOutAllConfirmTimer)
+      clearTimeout(clockOutAllConfirmTimer);
+    clockOutAllConfirmTimer = null;
+  };
   const closePopover = () => {
+    resetClockOutConfirmation();
     popover?.remove();
     popover = null;
     document.removeEventListener("mousedown", onDocumentMouseDown, true);
+    document.removeEventListener("keydown", onPopoverKeyDown, true);
     window.removeEventListener("resize", closePopover);
   };
   function onDocumentMouseDown(event) {
@@ -2439,6 +2817,10 @@ function createTopbar({ onOpenDashboard }) {
     if (container?.contains(event.target) || popover.contains(event.target))
       return;
     closePopover();
+  }
+  function onPopoverKeyDown(event) {
+    if (event.key === "Escape")
+      closePopover();
   }
   const positionPopover = () => {
     const anchor = buttonNode?.getBoundingClientRect();
@@ -2509,6 +2891,8 @@ function createTopbar({ onOpenDashboard }) {
       return;
     const entries = getRunning();
     const pausedItems = getPaused();
+    if (entries.length <= 1 && clockOutAllConfirm)
+      resetClockOutConfirmation();
     popover.replaceChildren();
     popover.appendChild(
       el(
@@ -2551,9 +2935,10 @@ function createTopbar({ onOpenDashboard }) {
       }
       popover.appendChild(list);
     }
-    if (getNotice()) {
+    const notices = [getNotice(), getNotice2()].filter(Boolean);
+    for (const notice4 of notices) {
       popover.appendChild(
-        el("div", "rlb-popover__notice bp3-text-small", getNotice())
+        el("div", "rlb-popover__notice bp3-text-small", notice4)
       );
     }
     const footer = el("div", "rlb-popover__footer");
@@ -2573,11 +2958,26 @@ function createTopbar({ onOpenDashboard }) {
       );
     }
     if (entries.length > 1) {
+      const confirmLabel = clockOutAllConfirm ? "Confirm Clock Out All" : "Clock Out All";
+      const confirmTitle = clockOutAllConfirm ? "Confirm permanent Clock Out All" : "Permanently close all running Sessions";
       footer.appendChild(
         button(
-          "bp3-button bp3-small",
-          "Clock Out All",
-          () => run(() => clockOutAll2())
+          `bp3-button bp3-small${clockOutAllConfirm ? " bp3-intent-danger" : ""}`,
+          confirmLabel,
+          () => {
+            if (!clockOutAllConfirm) {
+              clockOutAllConfirm = true;
+              clockOutAllConfirmTimer = setTimeout(() => {
+                resetClockOutConfirmation();
+                renderPopover();
+              }, 5e3);
+              renderPopover();
+              return;
+            }
+            resetClockOutConfirmation();
+            void run(() => clockOutAll());
+          },
+          { title: confirmTitle }
         )
       );
     }
@@ -2607,6 +3007,7 @@ function createTopbar({ onOpenDashboard }) {
     renderPopover();
     positionPopover();
     document.addEventListener("mousedown", onDocumentMouseDown, true);
+    document.addEventListener("keydown", onPopoverKeyDown, true);
     window.addEventListener("resize", closePopover);
   };
   const renderButton = () => {
@@ -2817,17 +3218,26 @@ function createController({ extensionAPI: extensionAPI2 }) {
       return false;
     return todoBlocksOnly() ? isTaskBlock(targetString(context)) : true;
   };
+  const notifyUser = (message) => {
+    try {
+      const showToast = extensionAPI2?.ui?.showToast || window.roamAlphaAPI?.ui?.showToast;
+      showToast?.({ content: message, intent: "warning" });
+    } catch (error) {
+      console.warn("[roam-logbook] could not show notification", error);
+    }
+  };
   const guard = async (action) => {
     try {
       await action();
     } catch (error) {
       console.error("[roam-logbook]", error);
+      notifyUser(error?.message || "Logbook could not complete that action.");
     }
   };
   const clockInFocused = () => guard(async () => {
     const uid = getFocusedBlockUid();
     if (!uid) {
-      console.warn("[roam-logbook] no focused block to clock in");
+      notifyUser("No focused block. Select a block before clocking in.");
       return;
     }
     await clockIn(uid);
@@ -2910,13 +3320,14 @@ function createController({ extensionAPI: extensionAPI2 }) {
       PALETTE_COMMANDS[1],
       () => guard(async () => {
         const uid = getFocusedBlockUid();
-        if (uid)
-          await clockOutBlock(uid);
-        else
-          await clockOutAll2();
+        if (!uid) {
+          notifyUser("No focused block. Select a block before clocking out.");
+          return;
+        }
+        await clockOutBlock(uid);
       })
     );
-    add(PALETTE_COMMANDS[2], () => guard(() => clockOutAll2()));
+    add(PALETTE_COMMANDS[2], () => guard(() => clockOutAll()));
     add(PALETTE_COMMANDS[3], () => dashboard.open());
     add(PALETTE_COMMANDS[4], () => {
       refresh();
