@@ -32,9 +32,9 @@ const entriesQuery = predicate =>
   [?c :block/string ?clock-string]
   [?t :block/children ?d]
   [?t :block/uid ?task-uid]
-  [(get-else $ ?t :block/string nil) ?task-string]
-  [(get-else $ ?t :block/page nil) ?p]
-  [(get-else $ ?p :node/title nil) ?page-title]]`;
+  [(get-else $ ?t :block/string "") ?task-string]
+  [(get-else $ ?t :block/page "") ?p]
+  [(get-else $ ?p :node/title "") ?page-title]]`;
 
 /**
  * `includes?` also catches org's own `:LOGBOOK:` spelling, but it is the less

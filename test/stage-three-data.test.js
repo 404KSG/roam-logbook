@@ -125,22 +125,27 @@ test('readAllEntries preserves orphan and malformed CLOCK records for recovery a
     assert.equal(model.issues.length, 3);
 });
 
-test('optional task and page metadata uses Roam-valid get-else clauses', () => {
+test('optional task and page metadata uses Roam-compatible empty defaults', () => {
     const graph = seed(true);
     const queries = [];
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (datalog, ...args) => {
-        queries.push(String(datalog));
+        const query = String(datalog);
+        queries.push(query);
+        if (/\(get-else[\s\S]+\bnil\)/.test(query)) {
+            throw new Error('get-else: nil default value is not supported');
+        }
         return originalQuery(datalog, ...args);
     };
 
-    readAllEntries();
+    const entries = readAllEntries();
 
     const entryQuery = queries.find(query => query.includes('LOGBOOK:'));
     assert.ok(entryQuery);
-    assert.match(entryQuery, /\[\(get-else \$ \?t :block\/string nil\) \?task-string\]/);
-    assert.match(entryQuery, /\[\(get-else \$ \?t :block\/page nil\) \?p\]/);
-    assert.match(entryQuery, /\[\(get-else \$ \?p :node\/title nil\) \?page-title\]/);
+    assert.match(entryQuery, /\[\(get-else \$ \?t :block\/string ""\) \?task-string\]/);
+    assert.match(entryQuery, /\[\(get-else \$ \?t :block\/page ""\) \?p\]/);
+    assert.match(entryQuery, /\[\(get-else \$ \?p :node\/title ""\) \?page-title\]/);
+    assert.ok(entries.some(entry => entry.title === 'Deleted task · health-orphan'));
 });
 
 test('Data issues is absent for a clean graph and exposes exact details only when needed', () => {
@@ -297,6 +302,29 @@ test('Dashboard exposes a structured issue when the first snapshot cannot be rea
     assert.ok(issues);
     assert.match(issues.textContent, /parent query unavailable/i);
     assert.equal(issues.querySelector('[aria-label]')?.getAttribute('aria-label').includes('parent'), true);
+    dashboard.destroy();
+});
+
+test('Dashboard labels a graph read failure separately and clears it after recovery', () => {
+    const graph = seed(false);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes('LOGBOOK:')) throw new Error('entries query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const issues = document.querySelector('.rlb-data-issues');
+    assert.ok(issues);
+    assert.match(issues.querySelector('summary').textContent, /1 graph read issue needs review/);
+    assert.doesNotMatch(issues.querySelector('summary').textContent, /timing record/);
+    assert.match(issues.textContent, /entries query unavailable/);
+
+    graph.api.data.q = originalQuery;
+    document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    assert.equal(document.querySelector('.rlb-data-issues'), null);
     dashboard.destroy();
 });
 

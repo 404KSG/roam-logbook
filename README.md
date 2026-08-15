@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.1**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.2**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -158,13 +158,14 @@ check; GitHub Actions additionally runs the real pinned Docker image
   only a static contract and is not a substitute for that CI execution.
 - Depot build output is inspected before release; the Depot PR test count is updated
   at final publication time.
-- Run the real Roam live smoke manually (`npm run verify:live`) against a disposable
-  graph. Automated tests use a fake adapter and must not be described as a live
-  Roam verification.
+- Run the real Roam live smoke manually (`npm run verify:live`) against the
+  configured graph after reading its guidelines. The verifier is read-only;
+  automated tests use a fake adapter and must not be described as live Roam
+  verification.
 
 The performance tests are synthetic query-count and complexity-regression stubs,
-not benchmarks of a real Roam graph. The final live verification still requires
-manual testing in a disposable Roam graph.
+not benchmarks of a real Roam graph. The final live verification reads the
+configured graph through the official Datalog CLI and never creates test data.
 
 ## Attribution
 

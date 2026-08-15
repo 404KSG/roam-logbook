@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.2
+
+- Fixed Roam Datalog compatibility for optional Task and page metadata by using
+  supported empty defaults instead of `nil`.
+- Dashboard graph-read failures are now classified as graph read issues rather
+  than timing records, and the Topbar no longer presents an uncertain read as a
+  confirmed empty Session list.
+- Added a read-only official CLI Datalog live verifier and regression coverage
+  for the real query boundary.
+
 ## 0.9.0-beta.1
 
 - Final-review safety fixes: post-write graph uncertainty stops follow-up writes,

@@ -115,6 +115,43 @@ test('running rows expose compact explicit target metadata and complete accessib
     await settle();
 });
 
+test('topbar does not present a confirmed empty state when graph refresh fails', () => {
+    clock.reset();
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('graph refresh unavailable');
+    };
+
+    const popover = openPopover();
+    assert.doesNotMatch(popover.textContent, /No Session is running/);
+    assert.match(popover.textContent, /Graph state could not be confirmed/i);
+
+    graph.api.data.q = originalQuery;
+});
+
+test('topbar shows a running Session for a confirmed open CLOCK', () => {
+    install([
+        {
+            uid: 'popover-task-01',
+            string: '{{[[TODO]]}} Graph Engineering: confirmed running task',
+            parent: null,
+            page: 'Project Page',
+        },
+        { uid: 'popover-drawer-01', string: 'LOGBOOK::', parent: 'popover-task-01' },
+        {
+            uid: 'popover-clock-01',
+            string: 'CLOCK:: [2026-08-15 Sat 12:38]',
+            parent: 'popover-drawer-01',
+        },
+    ]);
+    clock.reset();
+
+    const popover = openPopover();
+    assert.match(popover.querySelector('.rlb-popover__title').textContent, /1 Session Running/);
+    assert.ok(popover.querySelector('.rlb-run'));
+    assert.doesNotMatch(popover.textContent, /No Session is running/);
+});
+
 test('discarding a CLOCK entry is a two-step low-level cleanup action', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });

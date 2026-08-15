@@ -266,6 +266,7 @@ export function createTopbar({
         if (!popover) return;
         const entries = clock.getRunning();
         const pausedItems = paused.getPaused();
+        const refreshStatus = clock.getLastRefreshStatus();
         if (entries.length <= 1 && confirmation?.isArmed('clock-out-all', 'popover')) {
             resetClockOutConfirmation();
         }
@@ -285,7 +286,9 @@ export function createTopbar({
                 el(
                     'div',
                     'rlb-popover__empty',
-                    'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                    refreshStatus.ok
+                        ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                        : 'Session state could not be confirmed. Retry after Roam finishes syncing.'
                 )
             );
         } else {

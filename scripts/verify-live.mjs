@@ -1,5 +1,5 @@
 /**
- * Run the extension's read path against a real graph, via the `roam` CLI.
+ * Run the extension's read path against a real graph, via the official Roam CLI.
  *
  * The test suite's graph stub answers queries by *shape* — it never runs datalog,
  * so a query it happily satisfies can still be wrong or empty against Roam. This
@@ -7,7 +7,8 @@
  * CLI, then runs the real `entries.js` / `stats.js` and prints what the dashboard
  * would show.
  *
- * Requires the `roam` CLI on PATH, configured with a graph and token.
+ * Uses `@roam-research/roam-cli@0.10.0 datalog-query`, which executes the same
+ * Datalog language as Roam's `roamAlphaAPI.data.q`. No graph writes are made.
  *
  *   npm run verify:live
  */
@@ -17,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const graph = process.env.RLB_ROAM_GRAPH || 'exuberantia';
+const roamCli = '@roam-research/roam-cli@0.10.0';
 let queryCount = 0;
 
 globalThis.window = {
@@ -24,10 +27,11 @@ globalThis.window = {
         data: {
             q(datalog, ...args) {
                 queryCount += 1;
-                const argv = ['query', datalog];
-                if (args.length > 0) argv.push('--args-json', JSON.stringify(args));
-                const output = execFileSync('roam', argv, { encoding: 'utf8', maxBuffer: 64e6 });
-                return JSON.parse(output).result;
+                const argv = ['-y', roamCli, 'datalog-query', '--query', datalog];
+                if (args.length > 0) argv.push('--inputs', JSON.stringify(args));
+                argv.push('--graph', graph);
+                const output = execFileSync('npx', argv, { encoding: 'utf8', maxBuffer: 64e6 });
+                return JSON.parse(output);
             },
         },
     },

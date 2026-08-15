@@ -421,9 +421,9 @@ var entriesQuery = (predicate) => `[:find ?clock-uid ?clock-string ?drawer-strin
   [?c :block/string ?clock-string]
   [?t :block/children ?d]
   [?t :block/uid ?task-uid]
-  [(get-else $ ?t :block/string nil) ?task-string]
-  [(get-else $ ?t :block/page nil) ?p]
-  [(get-else $ ?p :node/title nil) ?page-title]]`;
+  [(get-else $ ?t :block/string "") ?task-string]
+  [(get-else $ ?t :block/page "") ?p]
+  [(get-else $ ?p :node/title "") ?page-title]]`;
 function queryEntryRows() {
   try {
     return queryOrThrow(entriesQuery("includes?"));
@@ -610,7 +610,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.1";
+var PLUGIN_VERSION = "0.9.0-beta.2";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -739,6 +739,9 @@ function subscribe(listener) {
 }
 function getRunning() {
   return running;
+}
+function getLastRefreshStatus() {
+  return { ...lastRefreshStatus };
 }
 function getNotice() {
   return notice;
@@ -1497,10 +1500,26 @@ function createDashboard({
   });
   const dataIssuesSection = (issues) => {
     const details = el("details", "rlb-data-issues");
+    const issueGroups = issues.map((entry) => (entry.issues || [entry.issue]).filter(Boolean));
+    const graphReadCount = issueGroups.filter(
+      (group) => group.some((issue) => issue.kind === "graph-read")
+    ).length;
+    const timingCount = issueGroups.length - graphReadCount;
+    const summaryParts = [];
+    if (timingCount > 0) {
+      summaryParts.push(
+        `${timingCount} timing record${timingCount === 1 ? "" : "s"} ${timingCount === 1 ? "needs" : "need"} review`
+      );
+    }
+    if (graphReadCount > 0) {
+      summaryParts.push(
+        `${graphReadCount} graph read issue${graphReadCount === 1 ? "" : "s"} ${graphReadCount === 1 ? "needs" : "need"} review`
+      );
+    }
     const summary = el(
       "summary",
       "rlb-data-issues__summary",
-      `${issues.length} timing record${issues.length === 1 ? "" : "s"} need review`
+      summaryParts.join(" \xB7 ")
     );
     details.appendChild(summary);
     const list = el("div", "rlb-data-issues__list");
@@ -4078,6 +4097,7 @@ function createTopbar({
       return;
     const entries = getRunning();
     const pausedItems = getPaused();
+    const refreshStatus = getLastRefreshStatus();
     if (entries.length <= 1 && confirmation?.isArmed("clock-out-all", "popover")) {
       resetClockOutConfirmation();
     }
@@ -4091,7 +4111,7 @@ function createTopbar({
         el(
           "div",
           "rlb-popover__empty",
-          "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in."
+          refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing."
         )
       );
     } else {

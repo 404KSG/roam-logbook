@@ -152,10 +152,30 @@ export function createDashboard({
 
     const dataIssuesSection = issues => {
         const details = el('details', 'rlb-data-issues');
+        const issueGroups = issues.map(entry => (entry.issues || [entry.issue]).filter(Boolean));
+        const graphReadCount = issueGroups.filter(group =>
+            group.some(issue => issue.kind === 'graph-read')
+        ).length;
+        const timingCount = issueGroups.length - graphReadCount;
+        const summaryParts = [];
+        if (timingCount > 0) {
+            summaryParts.push(
+                `${timingCount} timing record${timingCount === 1 ? '' : 's'} ${
+                    timingCount === 1 ? 'needs' : 'need'
+                } review`
+            );
+        }
+        if (graphReadCount > 0) {
+            summaryParts.push(
+                `${graphReadCount} graph read issue${graphReadCount === 1 ? '' : 's'} ${
+                    graphReadCount === 1 ? 'needs' : 'need'
+                } review`
+            );
+        }
         const summary = el(
             'summary',
             'rlb-data-issues__summary',
-            `${issues.length} timing record${issues.length === 1 ? '' : 's'} need review`
+            summaryParts.join(' · ')
         );
         details.appendChild(summary);
         const list = el('div', 'rlb-data-issues__list');

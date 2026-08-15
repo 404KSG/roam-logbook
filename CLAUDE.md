@@ -74,16 +74,16 @@ teach the stub about it or it will throw.
 `test/lifecycle.test.js` drives the real onload → interact → onunload path under
 jsdom. It is the only thing that catches mount-path errors, so keep it passing.
 
-Nothing in `npm test` validates datalog — the stub answers by query *shape*, so a
-query it happily satisfies can still return nothing against Roam. Run
+Nothing in `npm test` executes Roam's Datalog engine — the stub answers by query
+*shape*, so a query it happily satisfies can still fail against Roam. Run
 
 ```bash
-npm run verify:live    # needs the `roam` CLI on PATH, configured
+npm run verify:live    # official @roam-research/roam-cli datalog-query, read-only
 ```
 
 after touching any query. It swaps a CLI-backed `q` into the real read path and
-prints what the dashboard would show. This exists because the roll-up shipped
-broken once and the whole suite stayed green.
+prints what the dashboard would show. It never writes graph data. This exists
+because the roll-up shipped broken once and the whole suite stayed green.
 
 Two things that walk-the-graph code keeps getting wrong, both verified against a
 real graph:
@@ -106,5 +106,5 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release.
-- Run `npm run verify:live` manually against a disposable real graph; do not call
-  fake-adapter lifecycle coverage a live Roam test.
+- Run `npm run verify:live` manually against the configured graph after reading
+  its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.
