@@ -12,6 +12,8 @@ const CANDIDATES = [
     '/usr/bin/chromium-browser',
 ].filter(Boolean);
 
+export const CHROMIUM_DEBUGGER_TIMEOUT_MS = 30_000;
+
 export async function findChromium() {
     for (const candidate of CANDIDATES) {
         try {
@@ -61,7 +63,10 @@ function createClient(url) {
 
 async function waitForDebugger(process) {
     return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Chromium did not expose a debugger endpoint')), 10_000);
+        const timeout = setTimeout(
+            () => reject(new Error('Chromium did not expose a debugger endpoint')),
+            CHROMIUM_DEBUGGER_TIMEOUT_MS
+        );
         let output = '';
         process.stderr.on('data', chunk => {
             output += chunk;
