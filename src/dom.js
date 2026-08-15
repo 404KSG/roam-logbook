@@ -19,13 +19,18 @@ export function button(className, text, onClick, { title } = {}) {
 }
 
 export function injectStyles(id, css) {
-    if (document.getElementById(id)) return;
-    const style = el('style');
-    style.id = id;
+    const matches = [...document.querySelectorAll('style')].filter(style => style.id === id);
+    const style = matches.shift() ?? el('style');
+    if (!style.isConnected) {
+        style.id = id;
+        document.head.appendChild(style);
+    }
     style.textContent = css;
-    document.head.appendChild(style);
+    for (const duplicate of matches) duplicate.remove();
 }
 
 export function removeStyles(id) {
-    document.getElementById(id)?.remove();
+    for (const style of document.querySelectorAll('style')) {
+        if (style.id === id) style.remove();
+    }
 }

@@ -21,7 +21,6 @@ export const STYLES = `
 .rlb-topbar__button {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
     justify-content: center;
     min-width: 30px;
     height: 30px;
@@ -30,6 +29,24 @@ export const STYLES = `
     overflow: visible;
     background: transparent;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-topbar__button--parallel {
+    display: inline-grid;
+    grid-template-columns: max-content 3px max-content;
+    align-items: center;
+    column-gap: 5px;
+    row-gap: 0;
+}
+
+.rlb-topbar__button > .rlb-topbar__time,
+.rlb-topbar__button > .rlb-topbar__separator,
+.rlb-topbar__button > .rlb-topbar__parallel {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .rlb-topbar__icon {
@@ -70,7 +87,7 @@ export const STYLES = `
     font-size: 14px;
     font-weight: 500;
     line-height: 1;
-    letter-spacing: 0.01em;
+    letter-spacing: -0.015em;
     font-variant-numeric: tabular-nums;
     text-align: center;
     white-space: nowrap;
@@ -400,10 +417,15 @@ export const STYLES = `
 }
 
 .rlb-tree__cell {
+    min-width: 0;
+}
+
+.rlb-tree__layout {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: start;
     column-gap: 8px;
+    width: 100%;
     min-width: 0;
 }
 
@@ -417,6 +439,8 @@ export const STYLES = `
 .rlb-tree__content {
     display: flex;
     align-items: baseline;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
     flex-wrap: wrap;
     gap: 4px;
@@ -495,6 +519,7 @@ export const STYLES = `
 .rlb-tree__hidden {
     grid-column: 3;
     flex: 0 0 auto;
+    margin: 0;
     font-size: 11px;
     white-space: nowrap;
 }
@@ -544,17 +569,29 @@ export const STYLES = `
 
 .rlb-task-table .rlb-task-link {
     flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    justify-content: flex-start;
+    text-align: left;
     white-space: normal;
     overflow: visible;
     overflow-wrap: anywhere;
     text-overflow: initial;
 }
 
-.rlb-task-table .rlb-task-link__text {
+.rlb-task-table .rlb-task-link > .rlb-task-link__text {
+    display: block;
+    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .rlb-muted {

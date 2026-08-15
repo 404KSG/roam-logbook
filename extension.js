@@ -552,15 +552,21 @@ function button(className, text, onClick, { title } = {}) {
   return node;
 }
 function injectStyles(id, css) {
-  if (document.getElementById(id))
-    return;
-  const style = el("style");
-  style.id = id;
+  const matches = [...document.querySelectorAll("style")].filter((style2) => style2.id === id);
+  const style = matches.shift() ?? el("style");
+  if (!style.isConnected) {
+    style.id = id;
+    document.head.appendChild(style);
+  }
   style.textContent = css;
-  document.head.appendChild(style);
+  for (const duplicate of matches)
+    duplicate.remove();
 }
 function removeStyles(id) {
-  document.getElementById(id)?.remove();
+  for (const style of document.querySelectorAll("style")) {
+    if (style.id === id)
+      style.remove();
+  }
 }
 
 // src/stats.js
@@ -920,6 +926,7 @@ function createDashboard() {
       for (const node of rows) {
         const row = el("tr");
         const name = el("td", "rlb-tree__cell");
+        const layout = el("div", "rlb-tree__layout");
         const leading = el("div", "rlb-tree__leading");
         const content = el("div", "rlb-tree__content");
         name.style.paddingLeft = `${8 + node.depth * 20}px`;
@@ -955,13 +962,14 @@ function createDashboard() {
         if (node.truncated) {
           content.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
         }
-        name.append(leading, content);
+        layout.append(leading, content);
         if (node.collapsed) {
           const hidden = countDescendants(node);
-          name.appendChild(
+          layout.appendChild(
             el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
           );
         }
+        name.appendChild(layout);
         row.append(
           name,
           el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
@@ -1452,7 +1460,6 @@ var STYLES = `
 .rlb-topbar__button {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
     justify-content: center;
     min-width: 30px;
     height: 30px;
@@ -1461,6 +1468,24 @@ var STYLES = `
     overflow: visible;
     background: transparent;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-topbar__button--parallel {
+    display: inline-grid;
+    grid-template-columns: max-content 3px max-content;
+    align-items: center;
+    column-gap: 5px;
+    row-gap: 0;
+}
+
+.rlb-topbar__button > .rlb-topbar__time,
+.rlb-topbar__button > .rlb-topbar__separator,
+.rlb-topbar__button > .rlb-topbar__parallel {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .rlb-topbar__icon {
@@ -1501,7 +1526,7 @@ var STYLES = `
     font-size: 14px;
     font-weight: 500;
     line-height: 1;
-    letter-spacing: 0.01em;
+    letter-spacing: -0.015em;
     font-variant-numeric: tabular-nums;
     text-align: center;
     white-space: nowrap;
@@ -1831,10 +1856,15 @@ var STYLES = `
 }
 
 .rlb-tree__cell {
+    min-width: 0;
+}
+
+.rlb-tree__layout {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: start;
     column-gap: 8px;
+    width: 100%;
     min-width: 0;
 }
 
@@ -1848,6 +1878,8 @@ var STYLES = `
 .rlb-tree__content {
     display: flex;
     align-items: baseline;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
     flex-wrap: wrap;
     gap: 4px;
@@ -1926,6 +1958,7 @@ var STYLES = `
 .rlb-tree__hidden {
     grid-column: 3;
     flex: 0 0 auto;
+    margin: 0;
     font-size: 11px;
     white-space: nowrap;
 }
@@ -1975,17 +2008,29 @@ var STYLES = `
 
 .rlb-task-table .rlb-task-link {
     flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    justify-content: flex-start;
+    text-align: left;
     white-space: normal;
     overflow: visible;
     overflow-wrap: anywhere;
     text-overflow: initial;
 }
 
-.rlb-task-table .rlb-task-link__text {
+.rlb-task-table .rlb-task-link > .rlb-task-link__text {
+    display: block;
+    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .rlb-muted {
@@ -2470,6 +2515,7 @@ function createTopbar({ onOpenDashboard }) {
     const overrun = entries.some((entry) => isOverrun(entry, now));
     const stale = findStaleClocks(entries, /* @__PURE__ */ new Date(), staleHours()).length > 0;
     if (!running2) {
+      buttonNode.classList.remove("rlb-topbar__button--parallel");
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
@@ -2484,10 +2530,12 @@ function createTopbar({ onOpenDashboard }) {
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(elapsed);
     if (entries.length > 1) {
+      buttonNode.classList.add("rlb-topbar__button--parallel");
       parallelNode.textContent = taskCount(entries.length);
       separatorNode.textContent = "";
       buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     } else {
+      buttonNode.classList.remove("rlb-topbar__button--parallel");
       buttonNode.replaceChildren(timeNode);
     }
     if (entries.length > 1) {

@@ -62,7 +62,13 @@ const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 const dialog = () => document.getElementById('roam-logbook-dashboard');
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 
-test.before(() => extension.onload({ extensionAPI }));
+test.before(() => {
+    const stale = document.createElement('style');
+    stale.id = 'roam-logbook-styles';
+    stale.textContent = '.rlb-topbar__time { min-width: 4ch; }';
+    document.head.appendChild(stale);
+    extension.onload({ extensionAPI });
+});
 test.after(() => extension.onunload());
 
 test('onload mounts the topbar widget and registers every command', () => {
@@ -87,6 +93,7 @@ test('onload mounts the topbar widget and registers every command', () => {
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
+    assert.equal(document.querySelectorAll('#roam-logbook-styles').length, 1);
     assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 62px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
@@ -99,7 +106,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-topbar__time[^}]*font-size: 14px/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-weight: 500/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-variant-numeric: tabular-nums/s);
-    assert.match(css, /\.rlb-topbar__button[^}]*display: inline-flex[^}]*align-items: center[^}]*gap: 5px/s);
+    assert.match(css, /\.rlb-topbar__button--parallel[^}]*display: inline-grid[^}]*grid-template-columns: max-content 3px max-content[^}]*column-gap: 5px/s);
+    assert.match(css, /\.rlb-topbar__button > \.rlb-topbar__time,[^}]*flex: 0 0 auto[^}]*width: auto[^}]*min-width: 0[^}]*margin: 0[^}]*padding: 0/s);
     const timeRule = css.match(/\.rlb-topbar__time\s*\{([^}]*)\}/)?.[1] ?? '';
     assert.doesNotMatch(timeRule, /min-width:/, 'elapsed text has no invisible width reservation');
     assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*flex: 0 0 auto[^}]*margin: 0/s);
@@ -397,7 +405,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.equal(longLink.querySelector('.rlb-task-link__text').textContent, fullTitle);
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.match(css, /\.rlb-task-table \.rlb-task-link[^}]*overflow: visible/s);
-    assert.match(css, /\.rlb-task-table \.rlb-task-link__text[^}]*white-space: normal/s);
+    assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text[^}]*white-space: normal/s);
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     click(dialog().querySelector('.rlb-header .bp3-icon-refresh'));
@@ -452,8 +460,10 @@ test('the task tree collapses and expands from the caret', () => {
     assert.match(taskRows()[0], /\+1 sub-task/);
     assert.equal(dialog().querySelector('.rlb-tree__toggle').getAttribute('aria-expanded'), 'false');
     const collapsedCell = dialog().querySelector('.rlb-tree__cell');
+    const collapsedLayout = collapsedCell.querySelector('.rlb-tree__layout');
+    assert.deepEqual([...collapsedCell.children].map(child => child.className), ['rlb-tree__layout']);
     assert.deepEqual(
-        [...collapsedCell.children].map(child => child.className.split(' ')[0]),
+        [...collapsedLayout.children].map(child => child.className.split(' ')[0]),
         ['rlb-tree__leading', 'rlb-tree__content', 'rlb-muted'],
         'leading controls, wrapping title, and summary are independent layout items'
     );
@@ -465,9 +475,10 @@ test('the task tree collapses and expands from the caret', () => {
         'the fixed summary cannot overlap inside the wrapping title box'
     );
     const css = document.getElementById('roam-logbook-styles').textContent;
-    assert.match(css, /\.rlb-tree__cell\s*{[^}]*display: grid[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto[^}]*column-gap: 8px/s);
+    assert.match(css, /\.rlb-tree__layout\s*{[^}]*display: grid[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto[^}]*column-gap: 8px[^}]*width: 100%/s);
     assert.match(css, /\.rlb-tree__content\s*{[^}]*min-width: 0[^}]*flex-wrap: wrap/s);
     assert.match(css, /\.rlb-tree__hidden\s*{[^}]*white-space: nowrap/s);
+    assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text\s*{[^}]*flex: 1 1 0[^}]*width: 100%[^}]*min-width: 0[^}]*max-width: 100%[^}]*white-space: normal[^}]*overflow-wrap: anywhere[^}]*word-break: break-word/s);
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     dialog().querySelector('.rlb-tree__toggle').dispatchEvent(

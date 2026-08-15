@@ -273,6 +273,7 @@ export function createTopbar({ onOpenDashboard }) {
         const stale = findStaleClocks(entries, new Date(), staleHours()).length > 0;
 
         if (!running) {
+            buttonNode.classList.remove('rlb-topbar__button--parallel');
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
@@ -293,10 +294,12 @@ export function createTopbar({ onOpenDashboard }) {
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(elapsed);
         if (entries.length > 1) {
+            buttonNode.classList.add('rlb-topbar__button--parallel');
             parallelNode.textContent = taskCount(entries.length);
             separatorNode.textContent = '';
             buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         } else {
+            buttonNode.classList.remove('rlb-topbar__button--parallel');
             buttonNode.replaceChildren(timeNode);
         }
 

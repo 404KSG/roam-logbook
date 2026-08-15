@@ -20,7 +20,7 @@ The dashboard uses the calm, analytical structure of Contribution Graph as a ref
 - Roam/Blueprint system typography is inherited. Numeric counters use tabular figures.
 - Theme tokens use the `--rlb-*` namespace with light and `.bp3-dark` values.
 
-The compact, content-driven toolbar header has a 62px minimum rather than a fixed height. It contains “Logbook” at 18px/1.35, its complete 12px/1.4 description, range selection, a 32px refresh control, and close control. Dashboard-scoped selectors explicitly override Blueprint heading defaults, keep overflow visible, and prevent descenders from being clipped. It has no decorative hero icon. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses a dedicated column contract: leading controls, a complete flexible wrapping Task title (including titles longer than 80 characters), and a separate non-shrinking collapsed sub-task summary, followed by stable Sessions, Own, and Total rails.
+The compact, content-driven toolbar header has a 62px minimum rather than a fixed height. It contains “Logbook” at 18px/1.35, its complete 12px/1.4 description, range selection, a 32px refresh control, and close control. Dashboard-scoped selectors explicitly override Blueprint heading defaults, keep overflow visible, and prevent descenders from being clipped. It has no decorative hero icon. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses an inner grid inside the table cell: leading controls, a complete flexible wrapping Task title (including titles longer than 80 characters), and a separate non-shrinking collapsed sub-task summary, followed by stable Sessions, Own, and Total rails. The title span explicitly restores shrinking and wrapping because Blueprint 3 otherwise applies `flex-shrink: 0` to every direct button child.
 
 ## Icon map
 
@@ -40,7 +40,7 @@ The running topbar has no icon or status-dot DOM. Emoji, external icons, and cus
 ## Interaction and accessibility
 
 - The topbar widget belongs to Roam's left navigation cluster immediately after Back/Forward, before the main and right action controls. Descendant navigation signals and conservative left-side fallbacks keep placement stable across Roam rerenders without relying on one class name.
-- The topbar is a minimal timing-state entry: idle is a neutral-gray `history` icon; one running task visibly shows only the existing primary session's elapsed time; parallel timing shows `elapsed · N Tasks` without aggregating session time or exposing task titles. The separator is an aria-hidden, CSS-drawn 3px circle rather than a text glyph; a uniform 5px flex gap runs directly from the visible elapsed glyphs to the circle and count, with tabular numerals but no invisible timer-width reservation.
+- The topbar is a minimal timing-state entry: idle is a neutral-gray `history` icon; one running task visibly shows only the existing primary session's elapsed time; parallel timing shows `elapsed · N Tasks` without aggregating session time or exposing task titles. The separator is an aria-hidden, CSS-drawn 3px circle in a `max-content / 3px / max-content` grid. Scoped child resets defeat Blueprint 3's inherited 7px button-child margins and non-shrinking flex rule; measured glyph spacing, rather than a CSS-string assertion alone, is the acceptance boundary.
 - The active-task count and separator remain neutral in light and dark themes. Normal, Pomodoro-overrun, and stale colors apply only to the elapsed-time element.
 - Task context, totals, Pomodoro targets, parallel-task details, and actions remain available through the rich tooltip and running-task popover. Count language is `1 Task Running` / `N Tasks Running`; clock action names remain unchanged.
 - Normal elapsed text uses Roam/Blueprint's neutral foreground family. Pomodoro overrun and stale states color only the elapsed text red or amber; the button has no status background or green treatment.
@@ -87,8 +87,9 @@ Tests mock only Roam, time, and jsdom boundaries. Existing clock, parser, hierar
 
 1. Pin the upstream baseline and record baseline checks.
 2. Add observable presentation regressions, then implement each topbar and dashboard slice.
-3. Add build and installation documentation and run the complete local verification matrix.
-4. Rebuild from a clean clone of the exact source commit.
-5. Publish the fork and submit a Draft Roam Depot entry for live preview.
+3. Run the Chromium geometry fixture against the production stylesheet: visible Topbar gaps may differ by at most 1px; a long collapsed title must wrap, remain at least 8px from its summary, and increase row height.
+4. Add build and installation documentation and run the complete local verification matrix.
+5. Rebuild from a clean clone of the exact source commit.
+6. Publish the fork and submit a Draft Roam Depot entry for live preview.
 
 The Draft remains unmerged until a real Roam graph smoke test confirms left-navigation placement, Blueprint `history` availability, light/dark appearance, parallel-task labeling, context menus, hotkey customization, and dashboard behavior with existing `LOGBOOK::` data.

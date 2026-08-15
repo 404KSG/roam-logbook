@@ -201,6 +201,7 @@ export function createDashboard() {
             for (const node of rows) {
                 const row = el('tr');
                 const name = el('td', 'rlb-tree__cell');
+                const layout = el('div', 'rlb-tree__layout');
                 const leading = el('div', 'rlb-tree__leading');
                 const content = el('div', 'rlb-tree__content');
                 name.style.paddingLeft = `${8 + node.depth * 20}px`;
@@ -239,13 +240,14 @@ export function createDashboard() {
                 if (node.truncated) {
                     content.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
                 }
-                name.append(leading, content);
+                layout.append(leading, content);
                 if (node.collapsed) {
                     const hidden = countDescendants(node);
-                    name.appendChild(
+                    layout.appendChild(
                         el('span', 'rlb-muted rlb-tree__hidden', `+${hidden} sub-task${hidden > 1 ? 's' : ''}`)
                     );
                 }
+                name.appendChild(layout);
 
                 row.append(
                     name,
