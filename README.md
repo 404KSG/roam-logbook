@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.10**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.11**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -45,7 +45,7 @@ With parallel timing enabled, it follows the stable elapsed timer with only the 
 0:28 · 2 Sessions
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Shift+Clicking a Session task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API, while ordinary click keeps the main-window navigation. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is one icon-only footer action in each surface, aligned to the same 32px action height. Current-session rows use a shared title/metadata grid so the status point, task title, and actions stay aligned in both surfaces.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Shift+Clicking a Session task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API, while ordinary click keeps the main-window navigation. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is one icon-only footer action in each surface, aligned to the same 32px action height. Refresh is a read-only graph re-read with loading/success/error feedback, keeps the surface open, coalesces fast clicks, and retains the last valid snapshot on failure. Current-session task titles are native keyboard-accessible buttons with a restrained link cue; the shared title/metadata grid keeps the status point, task title, and actions aligned in both surfaces.
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 

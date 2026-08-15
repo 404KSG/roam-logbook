@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0-beta.11 — 2026-08-16
+
+- Made Current Sessions Refresh an explicitly read-only graph re-read with coalesced fast clicks, loading spin/`aria-busy`, transient inline success feedback, and an accessible retryable error state that retains the last valid snapshot and keeps the popover/sidebar open.
+- Kept Refresh in the bottom footer without changing CLOCK data, pause state, or the shared Pomodoro cycle, and avoided duplicate subscriber/explicit rerenders.
+- Replaced the leading Session title document glyph with a native keyboard-accessible restrained link target while preserving ordinary click navigation and Shift+Click right-sidebar behavior.
+- Added regression coverage for unchanged/external graph refreshes, coalescing, failure retention, read-only state safety, live labels, popover lifecycle, and title-link accessibility.
+
 ## 0.9.0-beta.10 — 2026-08-16
 
 - Replaced per-clock Pomodoro colouring with one persisted shared cycle: the first confirmed running Session freezes the threshold and action start instant, parallel Session changes retain it, exact threshold time turns red without stopping, and an empty state/Pause All/Clock Out All/final Check Out resets it.

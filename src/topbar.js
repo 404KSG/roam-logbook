@@ -14,7 +14,7 @@ import { formatElapsed, formatMinutesHuman } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
 import { openBlock, openBlockInRightSidebar } from './roam.js';
-import { mutationResultNotice } from './action-result.js';
+import { GRAPH_SYNC_RETRY_NOTICE, mutationResultNotice } from './action-result.js';
 import {
     buildSessionSurfaceModel,
     renderSessionSurface,
@@ -27,6 +27,10 @@ const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
 const SIDEBAR_ID = 'roam-logbook-current-sessions';
 const SIDEBAR_TITLE_ID = 'roam-logbook-current-sessions-title';
 const TOPBAR_SELECTOR = '.rm-topbar';
+const REFRESH_SUCCESS_DURATION = 1800;
+const REFRESH_LOADING_MESSAGE = 'Refreshing Sessions from graph…';
+const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
+const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
 
 /**
  * Where Roam's own left-hand navigation ends.
@@ -77,6 +81,9 @@ export function createTopbar({
     let tickCount = 0;
     let layoutMode = null;
     let actionNotice = '';
+    let refreshInFlight = null;
+    let refreshClearTimer = null;
+    let refreshState = { state: 'idle', message: '' };
     const layoutHosts = new Set();
     const searchHosts = new Set();
 
@@ -186,6 +193,67 @@ export function createTopbar({
         if (sidebar) renderSidebar();
     };
 
+    const renderRefreshState = () => {
+        if (destroyed) return;
+        renderButton(clock.getRunning(), nowDate(), { reconcile: false });
+        renderSurfaces();
+    };
+
+    const setRefreshState = (state, message, { clearAfter = false } = {}) => {
+        if (refreshClearTimer) clearTimeout(refreshClearTimer);
+        refreshClearTimer = null;
+        refreshState = { state, message };
+        renderRefreshState();
+        if (clearAfter && !destroyed) {
+            refreshClearTimer = setTimeout(() => {
+                refreshClearTimer = null;
+                if (refreshState.state !== 'success') return;
+                refreshState = { state: 'idle', message: '' };
+                renderRefreshState();
+            }, REFRESH_SUCCESS_DURATION);
+        }
+    };
+
+    const refreshSessions = () => {
+        if (refreshInFlight) return refreshInFlight;
+
+        const request = Promise.resolve()
+            .then(() => clock.refreshResult({ notify: false }))
+            .then(
+                result => {
+                    if (result?.ok) {
+                        actionNotice = '';
+                        setRefreshState('success', REFRESH_SUCCESS_MESSAGE, { clearAfter: true });
+                    } else {
+                        actionNotice =
+                            mutationResultNotice(result) ||
+                            clock.getNotice() ||
+                            GRAPH_SYNC_RETRY_NOTICE;
+                        setRefreshState('error', REFRESH_ERROR_MESSAGE);
+                    }
+                    return result;
+                },
+                error => {
+                    console.error('[roam-logbook] could not refresh Session surface', error);
+                    actionNotice =
+                        mutationResultNotice(error) || clock.getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+                    setRefreshState('error', REFRESH_ERROR_MESSAGE);
+                    return {
+                        ok: false,
+                        uncertain: true,
+                        running: clock.getRunning(),
+                        error,
+                    };
+                }
+            );
+        refreshInFlight = request.finally(() => {
+            refreshInFlight = null;
+        });
+        actionNotice = '';
+        setRefreshState('loading', REFRESH_LOADING_MESSAGE);
+        return refreshInFlight;
+    };
+
     const run = async action => {
         try {
             const result = await action();
@@ -208,7 +276,8 @@ export function createTopbar({
             staleHours: staleHours(),
             notices: surfaceNotices(),
             clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
-            onRefresh: () => run(() => clock.refreshResult()),
+            refreshState,
+            onRefresh: refreshSessions,
             onOpenTask: (taskUid, event) => {
                 if (event?.shiftKey) {
                     event.preventDefault();
@@ -407,11 +476,15 @@ export function createTopbar({
         layoutMode = mode;
     };
 
-    const renderButton = (entries = clock.getRunning(), now = nowDate()) => {
+    const renderButton = (
+        entries = clock.getRunning(),
+        now = nowDate(),
+        { reconcile = true } = {}
+    ) => {
         if (!buttonNode) return;
         const pausedItems = paused.getPaused();
         const running = entries.length > 0;
-        if (running) pomodoro.reconcileCycle(entries, { now });
+        if (running && reconcile) pomodoro.reconcileCycle(entries, { now });
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
         const overrun = pomodoro.isCycleOverrun(now);
         const stale = findStaleClocks(entries, now, staleHours()).length > 0;
@@ -771,6 +844,9 @@ export function createTopbar({
         },
         unmount() {
             destroyed = true;
+            if (refreshClearTimer) clearTimeout(refreshClearTimer);
+            refreshClearTimer = null;
+            refreshInFlight = null;
             unsubscribe?.();
             unsubscribe = null;
             unsubscribePaused?.();

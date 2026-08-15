@@ -20,11 +20,12 @@ const rowFigures = (entry, now) => {
 };
 
 const fullTaskLabel = title => `Open this block: ${title}`;
+const refreshLabel = 'Refresh Sessions from graph';
 
 const renderTitle = (row, onOpenTask) => {
     const title = row.title || row.taskUid;
     const taskButton = button(
-        'bp3-button bp3-minimal bp3-icon-document-open rlb-run__title',
+        'bp3-button bp3-minimal rlb-run__title',
         title,
         event => onOpenTask?.(row.taskUid, event),
         { title: fullTaskLabel(title) }
@@ -258,15 +259,33 @@ export function renderSessionSurface(root, model, options = {}) {
         }
     }
     if (options.onRefresh) {
-        footer.appendChild(
-            button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh',
-                '',
-                () => void options.onRefresh(),
-                { title: 'Refresh' }
-            )
+        const refreshState = options.refreshState || {};
+        const state = ['idle', 'loading', 'success', 'error'].includes(refreshState.state)
+            ? refreshState.state
+            : 'idle';
+        const refreshCell = el('div', 'rlb-surface__refresh-cell');
+        refreshCell.dataset.refreshState = state;
+        const refresh = button(
+            `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--${state}`,
+            '',
+            () => void options.onRefresh(),
+            { title: refreshLabel }
         );
-        footer.lastElementChild.dataset.action = 'refresh';
+        refresh.dataset.action = 'refresh';
+        if (state === 'loading') {
+            refresh.disabled = true;
+            refresh.setAttribute('aria-busy', 'true');
+        }
+        const refreshStatus = el(
+            'span',
+            `rlb-surface__refresh-status rlb-surface__refresh-status--${state}`,
+            refreshState.message || ''
+        );
+        refreshStatus.setAttribute('role', 'status');
+        refreshStatus.setAttribute('aria-live', 'polite');
+        refreshStatus.setAttribute('aria-atomic', 'true');
+        refreshCell.append(refresh, refreshStatus);
+        footer.appendChild(refreshCell);
     }
     root.appendChild(footer);
     return root;

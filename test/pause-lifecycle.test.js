@@ -119,8 +119,8 @@ test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cy
     const refresh = popover().querySelector('.rlb-popover__footer [data-action="refresh"]');
     assert.ok(refresh);
     assert.equal(popover().querySelector('.rlb-surface__header [data-action="refresh"]'), null);
-    assert.equal(refresh.title, 'Refresh');
-    assert.equal(refresh.getAttribute('aria-label'), 'Refresh');
+    assert.equal(refresh.title, 'Refresh Sessions from graph');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh Sessions from graph');
     click(refresh);
     await settle();
     assert.equal(popover().querySelectorAll('[data-session-state="paused"]').length, 2);

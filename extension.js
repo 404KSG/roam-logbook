@@ -655,7 +655,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.10";
+var PLUGIN_VERSION = "0.9.0-beta.11";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -3550,6 +3550,8 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
+    --rlb-surface-link: var(--roam-accent-color, #2d72d2);
+    --rlb-surface-link-underline: rgba(45, 114, 210, 0.42);
     position: fixed;
     z-index: 30;
     width: min(340px, calc(100vw - 16px));
@@ -3604,6 +3606,8 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
+    --rlb-surface-link: var(--roam-accent-color, #2d72d2);
+    --rlb-surface-link-underline: rgba(45, 114, 210, 0.42);
     width: min(360px, 100%);
     max-width: 100%;
     max-height: 100%;
@@ -3758,6 +3762,75 @@ var STYLES = `
     color: #5c7080;
 }
 
+@keyframes rlb-surface-refresh-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.rlb-popover__footer .rlb-surface__refresh-cell {
+    grid-column: 2;
+    grid-row: 2;
+    position: relative;
+    min-width: 0;
+    width: 100%;
+    height: var(--rlb-surface-action-height);
+    min-height: var(--rlb-surface-action-height);
+    max-height: var(--rlb-surface-action-height);
+}
+
+.rlb-popover__footer .rlb-surface__refresh-cell .rlb-surface__refresh {
+    grid-column: auto;
+    grid-row: auto;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    justify-self: stretch;
+}
+
+.rlb-surface__refresh--loading::before {
+    animation: rlb-surface-refresh-spin 900ms linear infinite;
+}
+
+.rlb-surface__refresh-status {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    z-index: 1;
+    max-width: calc(50% - 4px);
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(-50%);
+    color: #5c7080;
+    font-size: 10px;
+    line-height: 1;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-surface__refresh-status--loading {
+    opacity: 0.72;
+}
+
+.rlb-surface__refresh-status--error {
+    color: #8a4b08;
+}
+
+.bp3-dark .rlb-surface__refresh-status {
+    color: #a7b6c2;
+}
+
+.bp3-dark .rlb-surface__refresh-status--error {
+    color: #f29d49;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rlb-surface__refresh--loading::before {
+        animation: none;
+    }
+}
+
 .rlb-popover__footer .rlb-surface__refresh:hover,
 .rlb-popover__footer .rlb-surface__refresh:focus-visible {
     color: #3f596b;
@@ -3774,6 +3847,8 @@ var STYLES = `
     --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-hover: rgba(167, 182, 194, 0.18);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
+    --rlb-surface-link: var(--roam-accent-color, #48aff0);
+    --rlb-surface-link-underline: rgba(72, 175, 240, 0.55);
 }
 
 .rlb-run {
@@ -3820,7 +3895,7 @@ var STYLES = `
     background: #8a9ba8;
 }
 
-.rlb-run__title {
+.bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 2;
     grid-row: 1;
     display: block;
@@ -3830,8 +3905,30 @@ var STYLES = `
     white-space: nowrap;
     text-align: left;
     padding: 0;
+    color: var(--rlb-surface-link);
     font-size: var(--rlb-surface-task-size, 15px);
+    font-weight: 500;
     line-height: 1.25;
+    text-decoration: underline;
+    text-decoration-color: var(--rlb-surface-link-underline);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    border-radius: 2px;
+}
+
+.bp3-button.bp3-minimal.rlb-run__title::before {
+    display: none !important;
+    content: none !important;
+}
+
+.bp3-button.bp3-minimal.rlb-run__title:hover,
+.bp3-button.bp3-minimal.rlb-run__title:focus-visible {
+    text-decoration-color: currentColor;
+}
+
+.bp3-button.bp3-minimal.rlb-run__title:focus-visible {
+    outline: 2px solid var(--rlb-surface-link);
+    outline-offset: 2px;
 }
 
 .rlb-run__meta {
@@ -4744,10 +4841,11 @@ var rowFigures = (entry, now) => {
   return `${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(total)} total`;
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
+var refreshLabel = "Refresh Sessions from graph";
 var renderTitle = (row, onOpenTask) => {
   const title = row.title || row.taskUid;
   const taskButton = button(
-    "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
+    "bp3-button bp3-minimal rlb-run__title",
     title,
     (event) => onOpenTask?.(row.taskUid, event),
     { title: fullTaskLabel(title) }
@@ -4953,15 +5051,31 @@ function renderSessionSurface(root, model, options = {}) {
     }
   }
   if (options.onRefresh) {
-    footer.appendChild(
-      button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh",
-        "",
-        () => void options.onRefresh(),
-        { title: "Refresh" }
-      )
+    const refreshState = options.refreshState || {};
+    const state = ["idle", "loading", "success", "error"].includes(refreshState.state) ? refreshState.state : "idle";
+    const refreshCell = el("div", "rlb-surface__refresh-cell");
+    refreshCell.dataset.refreshState = state;
+    const refresh2 = button(
+      `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--${state}`,
+      "",
+      () => void options.onRefresh(),
+      { title: refreshLabel }
     );
-    footer.lastElementChild.dataset.action = "refresh";
+    refresh2.dataset.action = "refresh";
+    if (state === "loading") {
+      refresh2.disabled = true;
+      refresh2.setAttribute("aria-busy", "true");
+    }
+    const refreshStatus = el(
+      "span",
+      `rlb-surface__refresh-status rlb-surface__refresh-status--${state}`,
+      refreshState.message || ""
+    );
+    refreshStatus.setAttribute("role", "status");
+    refreshStatus.setAttribute("aria-live", "polite");
+    refreshStatus.setAttribute("aria-atomic", "true");
+    refreshCell.append(refresh2, refreshStatus);
+    footer.appendChild(refreshCell);
   }
   root.appendChild(footer);
   return root;
@@ -4991,6 +5105,10 @@ var POPOVER_TITLE_ID = "roam-logbook-popover-title";
 var SIDEBAR_ID = "roam-logbook-current-sessions";
 var SIDEBAR_TITLE_ID = "roam-logbook-current-sessions-title";
 var TOPBAR_SELECTOR = ".rm-topbar";
+var REFRESH_SUCCESS_DURATION = 1800;
+var REFRESH_LOADING_MESSAGE = "Refreshing Sessions from graph\u2026";
+var REFRESH_SUCCESS_MESSAGE = "Updated just now";
+var REFRESH_ERROR_MESSAGE = "Refresh failed; last valid snapshot kept. Retry.";
 var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
 var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
 var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
@@ -5032,6 +5150,9 @@ function createTopbar({
   let tickCount = 0;
   let layoutMode = null;
   let actionNotice = "";
+  let refreshInFlight = null;
+  let refreshClearTimer = null;
+  let refreshState = { state: "idle", message: "" };
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
   const nowDate = () => {
@@ -5126,6 +5247,61 @@ function createTopbar({
     if (sidebar)
       renderSidebar();
   };
+  const renderRefreshState = () => {
+    if (destroyed)
+      return;
+    renderButton(getRunning(), nowDate(), { reconcile: false });
+    renderSurfaces();
+  };
+  const setRefreshState = (state, message, { clearAfter = false } = {}) => {
+    if (refreshClearTimer)
+      clearTimeout(refreshClearTimer);
+    refreshClearTimer = null;
+    refreshState = { state, message };
+    renderRefreshState();
+    if (clearAfter && !destroyed) {
+      refreshClearTimer = setTimeout(() => {
+        refreshClearTimer = null;
+        if (refreshState.state !== "success")
+          return;
+        refreshState = { state: "idle", message: "" };
+        renderRefreshState();
+      }, REFRESH_SUCCESS_DURATION);
+    }
+  };
+  const refreshSessions = () => {
+    if (refreshInFlight)
+      return refreshInFlight;
+    const request = Promise.resolve().then(() => refreshResult({ notify: false })).then(
+      (result) => {
+        if (result?.ok) {
+          actionNotice = "";
+          setRefreshState("success", REFRESH_SUCCESS_MESSAGE, { clearAfter: true });
+        } else {
+          actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+          setRefreshState("error", REFRESH_ERROR_MESSAGE);
+        }
+        return result;
+      },
+      (error) => {
+        console.error("[roam-logbook] could not refresh Session surface", error);
+        actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+        setRefreshState("error", REFRESH_ERROR_MESSAGE);
+        return {
+          ok: false,
+          uncertain: true,
+          running: getRunning(),
+          error
+        };
+      }
+    );
+    refreshInFlight = request.finally(() => {
+      refreshInFlight = null;
+    });
+    actionNotice = "";
+    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
+    return refreshInFlight;
+  };
   const run = async (action) => {
     try {
       const result = await action();
@@ -5147,7 +5323,8 @@ function createTopbar({
       staleHours: staleHours(),
       notices: surfaceNotices(),
       clockOutAllConfirm: confirmation?.isArmed("clock-out-all", scope),
-      onRefresh: () => run(() => refreshResult()),
+      refreshState,
+      onRefresh: refreshSessions,
       onOpenTask: (taskUid, event) => {
         if (event?.shiftKey) {
           event.preventDefault();
@@ -5336,12 +5513,12 @@ function createTopbar({
       buttonNode.replaceChildren(timeNode);
     layoutMode = mode;
   };
-  const renderButton = (entries = getRunning(), now = nowDate()) => {
+  const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true } = {}) => {
     if (!buttonNode)
       return;
     const pausedItems = getPaused();
     const running2 = entries.length > 0;
-    if (running2)
+    if (running2 && reconcile2)
       reconcileCycle(entries, { now });
     const cycleElapsed = cycleElapsedMs(now);
     const overrun = isCycleOverrun(now);
@@ -5611,6 +5788,10 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     },
     unmount() {
       destroyed = true;
+      if (refreshClearTimer)
+        clearTimeout(refreshClearTimer);
+      refreshClearTimer = null;
+      refreshInFlight = null;
       unsubscribe?.();
       unsubscribe = null;
       unsubscribePaused?.();
