@@ -81,7 +81,7 @@ test('onload mounts the topbar widget and registers every command', () => {
     );
     assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.equal(settingsPanel.tabTitle, 'Logbook');
+    assert.equal(settingsPanel.tabTitle, 'Roam Logbook');
     assert.equal(paletteCommands.size, 5);
     assert.equal(paletteCommands.has('Logbook: Start pomodoro on current block'), false);
     assert.deepEqual(
@@ -106,8 +106,14 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
     assert.match(css, /\.rlb-visually-hidden\s*{[^}]*position: absolute/s);
     assert.match(css, /\.rlb-overview\s*{/);
+    assert.match(css, /\.rlb-overview--strip\s*{/);
+    assert.match(css, /\.rlb-overview\s*{[^}]*height: 80px[^}]*border: 1px solid[^}]*border-radius: 8px/s);
+    assert.match(css, /\.rlb-overview__item\s*{[^}]*padding: 9px 14px[^}]*border: 0[^}]*background: transparent/s);
+    assert.match(css, /\.rlb-overview__item \+ \.rlb-overview__item\s*{[^}]*border-left: 1px solid/s);
     assert.match(css, /\.rlb-overview__label\s*{/);
     assert.match(css, /\.rlb-overview__value\s*{/);
+    assert.match(css, /\.rlb-activity-rail\s*{[^}]*gap: 6px[^}]*height: 28px/s);
+    assert.match(css, /\.rlb-activity__fill\s*{[^}]*width: min\(10px, 100%\)/s);
     assert.doesNotMatch(css, /\.rlb-stats\s*{/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
@@ -135,8 +141,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /\.rlb-topbar__button--running\s*{/);
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
     assert.match(css, /\.rlb-surface__refresh-cell[^}]*grid-column: 2[^}]*grid-row: 2/s);
+    assert.match(css, /\.rlb-surface__refresh-cell \.rlb-surface__refresh[^}]*min-width: var\(--rlb-surface-action-height\)[^}]*min-height: var\(--rlb-surface-action-height\)/s);
     assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
-    assert.match(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
+    assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
 });
 
 test('clock commands leave shortcut selection to Roam Hotkeys', () => {
@@ -406,7 +413,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.ok(dialog().classList.contains('rlb-dashboard'), 'dashboard styles have a host-scoped root');
     const shell = dialog().querySelector('.rlb-dialog');
     assert.equal(shell.getAttribute('aria-modal'), 'true');
-    assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Logbook');
+    assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Roam Logbook');
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').textContent,
         'Focus sessions, activity, and task rollups'
@@ -417,7 +424,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     );
     assert.equal(dialog().querySelector('.rlb-header .bp3-icon'), null, 'header has no decorative icon');
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
-    assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Logbook overview');
+    assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Roam Logbook overview');
     assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 3);
     assert.ok(dialog().querySelector('.rlb-body__scroll'));
     for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {

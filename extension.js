@@ -655,7 +655,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.11";
+var PLUGIN_VERSION = "0.9.0-beta.12";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -1506,6 +1506,7 @@ function findStaleClocks(entries, now, staleHours2) {
 
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
+var DASHBOARD_TITLE = "Roam Logbook";
 function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -1715,8 +1716,8 @@ function createDashboard({
     tasksContext,
     now
   }) => {
-    const wrapper = el("dl", "rlb-overview");
-    wrapper.setAttribute("aria-label", "Logbook overview");
+    const wrapper = el("dl", "rlb-overview rlb-overview--strip");
+    wrapper.setAttribute("aria-label", `${DASHBOARD_TITLE} overview`);
     const metrics = [
       ["Today", today, todayContext],
       [selectedLabel, selected, selectedContext],
@@ -2068,7 +2069,7 @@ function createDashboard({
     dialog.setAttribute("aria-labelledby", "roam-logbook-dashboard-title");
     const header = el("header", "bp3-dialog-header rlb-header");
     const heading = el("div", "rlb-header__heading");
-    const title = el("h2", "bp3-heading rlb-header__title", "Logbook");
+    const title = el("h2", "bp3-heading rlb-header__title", DASHBOARD_TITLE);
     title.id = "roam-logbook-dashboard-title";
     const subtitle = el(
       "p",
@@ -3769,6 +3770,9 @@ var STYLES = `
 }
 
 .rlb-popover__footer .rlb-surface__refresh-cell {
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
     grid-column: 2;
     grid-row: 2;
     position: relative;
@@ -3782,47 +3786,19 @@ var STYLES = `
 .rlb-popover__footer .rlb-surface__refresh-cell .rlb-surface__refresh {
     grid-column: auto;
     grid-row: auto;
+    box-sizing: border-box;
+    flex: 1 1 auto;
     width: 100%;
-    min-width: 0;
+    min-width: var(--rlb-surface-action-height);
+    height: var(--rlb-surface-action-height);
+    min-height: var(--rlb-surface-action-height);
+    max-height: var(--rlb-surface-action-height);
     max-width: none;
     justify-self: stretch;
 }
 
 .rlb-surface__refresh--loading::before {
     animation: rlb-surface-refresh-spin 900ms linear infinite;
-}
-
-.rlb-surface__refresh-status {
-    position: absolute;
-    top: 50%;
-    right: 4px;
-    z-index: 1;
-    max-width: calc(50% - 4px);
-    overflow: hidden;
-    pointer-events: none;
-    transform: translateY(-50%);
-    color: #5c7080;
-    font-size: 10px;
-    line-height: 1;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.rlb-surface__refresh-status--loading {
-    opacity: 0.72;
-}
-
-.rlb-surface__refresh-status--error {
-    color: #8a4b08;
-}
-
-.bp3-dark .rlb-surface__refresh-status {
-    color: #a7b6c2;
-}
-
-.bp3-dark .rlb-surface__refresh-status--error {
-    color: #f29d49;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4464,33 +4440,47 @@ var STYLES = `
 .rlb-summary {
     flex: 0 0 auto;
     min-width: 0;
-    padding: 12px 20px 14px;
+    padding: 10px 20px;
+    overflow-x: hidden;
     background: var(--rlb-surface);
 }
 
 .rlb-overview {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr) minmax(0, 1fr);
+    grid-template-columns: minmax(160px, 0.9fr) minmax(300px, 1.6fr) minmax(160px, 0.9fr);
     align-items: stretch;
-    gap: 10px;
+    height: 80px;
+    min-height: 80px;
     margin: 0;
     padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--rlb-border-light);
+    border-radius: 8px;
+    background: var(--rlb-surface-subtle);
+}
+
+.rlb-overview--strip {
+    --rlb-overview-divider: var(--rlb-border-light);
 }
 
 .rlb-overview__item {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 7px;
+    align-items: stretch;
+    gap: 4px;
     min-width: 0;
-    height: 116px;
-    min-height: 116px;
+    height: 100%;
+    min-height: 0;
     box-sizing: border-box;
     justify-content: center;
-    padding: 10px 12px;
-    border: 1px solid var(--rlb-border-light);
-    border-radius: 7px;
-    background: var(--rlb-surface-subtle);
+    padding: 9px 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.rlb-overview__item + .rlb-overview__item {
+    border-left: 1px solid var(--rlb-overview-divider, var(--rlb-border-light));
 }
 
 .rlb-overview__item--selected {
@@ -4532,9 +4522,9 @@ var STYLES = `
     min-width: 0;
     margin: 0;
     color: var(--rlb-text);
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.1;
     font-variant-numeric: tabular-nums;
 }
 
@@ -4548,13 +4538,13 @@ var STYLES = `
     color: var(--rlb-muted);
     font-size: 10px;
     font-weight: 500;
-    line-height: 1.25;
+    line-height: 1.2;
     white-space: nowrap;
 }
 
 .rlb-overview__value--quiet .rlb-overview__number {
     color: var(--rlb-muted);
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 500;
 }
 
@@ -4566,9 +4556,9 @@ var STYLES = `
     display: grid;
     grid-template-columns: repeat(var(--rlb-activity-count, 7), minmax(0, 1fr));
     align-items: end;
-    gap: 4px;
+    gap: 6px;
     width: 100%;
-    height: 52px;
+    height: 28px;
     min-width: 0;
     margin: 0;
     overflow: hidden;
@@ -4580,7 +4570,7 @@ var STYLES = `
     align-items: end;
     width: 100%;
     min-width: 0;
-    height: 52px;
+    height: 28px;
     margin: 0 !important;
     padding: 0 !important;
     border: 0;
@@ -4607,7 +4597,7 @@ var STYLES = `
 
 .rlb-activity__fill {
     display: block;
-    width: min(20px, 100%);
+    width: min(10px, 100%);
     height: 100%;
     min-height: 0;
     justify-self: center;
@@ -4624,7 +4614,7 @@ var STYLES = `
 }
 
 .rlb-activity__bucket--empty .rlb-activity__fill {
-    width: min(14px, 80%);
+    width: min(8px, 80%);
     height: 4px !important;
     background: var(--rlb-activity-zero, rgba(167, 182, 194, 0.22));
 }
@@ -4634,7 +4624,7 @@ var STYLES = `
     flex: 0 1 auto;
     min-height: 0;
     max-height: calc(84vh - 72px);
-    padding: 4px 20px 24px;
+    padding: 10px 20px 24px;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
@@ -4791,36 +4781,56 @@ var STYLES = `
     }
 
     .rlb-summary {
-        padding: 12px;
+        padding: 8px 12px;
         overflow: hidden;
     }
 
     .rlb-overview {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 8px 14px;
+        grid-template-rows: 50px minmax(0, 1fr);
+        height: 122px;
+        min-height: 122px;
     }
 
     .rlb-overview__item--selected {
         grid-column: 1 / -1;
+        grid-row: 2;
+        border-top: 1px solid var(--rlb-overview-divider, var(--rlb-border-light));
+        border-left: 0;
+    }
+
+    .rlb-overview__item:nth-child(3) {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .rlb-overview__item {
+        padding: 9px 10px;
+    }
+
+    .rlb-overview__label {
+        font-size: 10px;
     }
 
     .rlb-overview__value {
         min-width: 0;
+        gap: 4px;
+        font-size: 18px;
     }
 
     .rlb-overview__context {
-        white-space: normal;
+        white-space: nowrap;
     }
 
     .rlb-activity-rail,
     .rlb-activity__bucket {
-        height: 56px;
+        height: 28px;
     }
 
     .rlb-body,
     .rlb-body__scroll {
         max-height: calc(100vh - 150px);
-        padding: 0 12px 20px;
+        padding: 10px 12px 20px;
     }
 
     .rlb-dashboard-section {
@@ -4831,10 +4841,54 @@ var STYLES = `
         min-width: 560px;
     }
 }
+
+@media (min-width: 600px) and (max-width: 719px) {
+    .rlb-summary {
+        padding: 9px 12px;
+    }
+
+    .rlb-overview {
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr) minmax(0, 0.9fr);
+        height: 78px;
+        min-height: 78px;
+    }
+
+    .rlb-overview__item {
+        padding: 8px 9px;
+    }
+
+    .rlb-overview__label {
+        font-size: 10px;
+    }
+
+    .rlb-overview__heading,
+    .rlb-overview__value {
+        gap: 4px;
+    }
+
+    .rlb-overview__value {
+        font-size: 18px;
+    }
+
+    .rlb-overview__context {
+        font-size: 10px;
+    }
+
+    .rlb-activity-rail,
+    .rlb-activity__bucket {
+        height: 28px;
+    }
+
+    .rlb-body,
+    .rlb-body__scroll {
+        padding: 10px 12px 20px;
+    }
+}
 `;
 
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var SURFACE_TITLE = "Roam Logbook";
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
   const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
@@ -4968,7 +5022,7 @@ function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, staleHo
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${sessionCount(model.pausedCount)} Paused` : "Logbook";
+var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${sessionCount(model.pausedCount)} Paused` : SURFACE_TITLE;
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
   if (options.titleId)
@@ -5018,7 +5072,7 @@ function renderSessionSurface(root, model, options = {}) {
   const footer = el("div", "rlb-popover__footer");
   footer.appendChild(
     button("bp3-button bp3-small", "Dashboard", () => options.onOpenDashboard?.(), {
-      title: "Open Logbook Dashboard"
+      title: "Open Roam Logbook Dashboard"
     })
   );
   if (model.runningCount > 0 || model.pausedCount > 0) {
@@ -5068,7 +5122,7 @@ function renderSessionSurface(root, model, options = {}) {
     }
     const refreshStatus = el(
       "span",
-      `rlb-surface__refresh-status rlb-surface__refresh-status--${state}`,
+      `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
       refreshState.message || ""
     );
     refreshStatus.setAttribute("role", "status");
@@ -5533,7 +5587,7 @@ function createTopbar({
       parallelNode.textContent = "";
       separatorNode.textContent = "";
       syncButtonLayout(pausedItems.length > 0 ? "paused" : "idle");
-      buttonNode.title = pausedItems.length ? `${sessionCount2(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
+      buttonNode.title = pausedItems.length ? `${sessionCount2(pausedItems.length)} Paused \u2014 click to resume or review.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -5823,6 +5877,7 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
 // src/extension.js
 var CONTEXT_CLOCK_IN = "Logbook: Clock in";
 var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
+var BRAND_NAME = "Roam Logbook";
 var PALETTE_COMMANDS = [
   "Logbook: Clock in current block",
   "Logbook: Clock out current block",
@@ -5865,7 +5920,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
     } catch (error) {
       console.error("[roam-logbook]", error);
       notifyUser(
-        mutationResultNotice(error) || error?.message || "Logbook could not complete that action."
+        mutationResultNotice(error) || error?.message || `${BRAND_NAME} could not complete that action.`
       );
     }
   };
@@ -5879,7 +5934,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
   });
   const registerSettings = () => {
     extensionAPI2.settings.panel.create({
-      tabTitle: "Logbook",
+      tabTitle: BRAND_NAME,
       settings: [
         {
           id: SETTING_TOPBAR,

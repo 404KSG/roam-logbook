@@ -33,6 +33,7 @@ import { PLUGIN_VERSION } from './version.js';
 
 const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
 const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
+const BRAND_NAME = 'Roam Logbook';
 
 const PALETTE_COMMANDS = [
     'Logbook: Clock in current block',
@@ -83,7 +84,7 @@ function createController({ extensionAPI }) {
             notifyUser(
                 mutationResultNotice(error) ||
                     error?.message ||
-                    'Logbook could not complete that action.'
+                    `${BRAND_NAME} could not complete that action.`
             );
         }
     };
@@ -100,7 +101,7 @@ function createController({ extensionAPI }) {
 
     const registerSettings = () => {
         extensionAPI.settings.panel.create({
-            tabTitle: 'Logbook',
+            tabTitle: BRAND_NAME,
             settings: [
                 {
                     id: SETTING_TOPBAR,

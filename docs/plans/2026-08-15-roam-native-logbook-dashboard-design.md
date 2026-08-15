@@ -9,6 +9,12 @@ This fork preserves Roam Logbook's existing data model and core time-tracking be
 
 This release does not add inline TODO controls, global keyboard listeners, new graph queries, analytics, network access, or code from Roam Focus Logbook.
 
+## Beta.12 integration notes
+
+- The user-visible Dashboard heading and semantic overview label are exactly `Roam Logbook`; internal IDs, command labels, graph formats, and Depot identity remain unchanged.
+- The overview is one `dl`-based strip rather than three visual cards: one subtle outer frame, transparent metric cells with vertical dividers, an 80px desktop/78px compact target, and a compact 28px activity rail. At mobile widths Today and Tasks share the first row while Last 7 days spans the second row.
+- Refresh keeps one stable 32px footer hit area. Loading and success copy stay in the accessible `status` live region but are visually hidden; the icon alone rotates, and failures use the existing visible retry notice. Refresh remains a read-only graph query and does not mutate CLOCK, pause, or Pomodoro state.
+
 ## Visual direction
 
 The dashboard uses the calm, analytical structure of Contribution Graph as a reference without copying its product content:
@@ -20,7 +26,7 @@ The dashboard uses the calm, analytical structure of Contribution Graph as a ref
 - Roam/Blueprint system typography is inherited. Numeric counters use tabular figures.
 - Theme tokens use the `--rlb-*` namespace with light and `.bp3-dark` values.
 
-The compact, content-driven toolbar header has a 62px minimum rather than a fixed height. It contains “Logbook” at 18px/1.35, its complete 12px/1.4 description, range selection, a 32px refresh control, and close control. Dashboard-scoped selectors explicitly override Blueprint heading defaults, keep overflow visible, and prevent descenders from being clipped. It has no decorative hero icon. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses an inner grid inside the table cell: leading controls, a complete flexible wrapping Task title (including titles longer than 80 characters), and a separate non-shrinking collapsed sub-task summary, followed by stable Sessions, Own, and Total rails. The title span explicitly restores shrinking and wrapping because Blueprint 3 otherwise applies `flex-shrink: 0` to every direct button child.
+The compact, content-driven toolbar header has a 62px minimum rather than a fixed height. It contains “Roam Logbook” at 18px/1.35, its complete 12px/1.4 description, range selection, a 32px refresh control, and close control. Dashboard-scoped selectors explicitly override Blueprint heading defaults, keep overflow visible, and prevent descenders from being clipped. It has no decorative hero icon. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses an inner grid inside the table cell: leading controls, a complete flexible wrapping Task title (including titles longer than 80 characters), and a separate non-shrinking collapsed sub-task summary, followed by stable Sessions, Own, and Total rails. The title span explicitly restores shrinking and wrapping because Blueprint 3 otherwise applies `flex-shrink: 0` to every direct button child.
 
 ## Icon map
 

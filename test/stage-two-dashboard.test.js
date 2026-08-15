@@ -277,7 +277,7 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
     dashboard.destroy();
 });
 
-test('beta.9 exposes three semantic overview panels and keeps activity buckets accessible without a visible axis', () => {
+test('beta.12 exposes one semantic summary strip with three metrics and accessible activity buckets', () => {
     graph = installGraph([
         { uid: 'compact-task', string: '{{[[TODO]]}} Compact dashboard task', parent: null },
         { uid: 'compact-drawer', string: 'LOGBOOK::', parent: 'compact-task' },
@@ -293,7 +293,8 @@ test('beta.9 exposes three semantic overview panels and keeps activity buckets a
     const overview = document.querySelector('.rlb-overview');
     assert.ok(overview, 'Dashboard exposes a single semantic overview bar');
     assert.equal(overview.tagName, 'DL');
-    assert.equal(overview.getAttribute('aria-label'), 'Logbook overview');
+    assert.ok(overview.classList.contains('rlb-overview--strip'));
+    assert.equal(overview.getAttribute('aria-label'), 'Roam Logbook overview');
     assert.equal(overview.querySelectorAll('.rlb-overview__item').length, 3);
     assert.equal(overview.querySelectorAll('dt').length, 3);
     assert.equal(overview.querySelectorAll('dd').length, 3);
@@ -316,7 +317,7 @@ test('beta.9 exposes three semantic overview panels and keeps activity buckets a
     dashboard.destroy();
 });
 
-test('beta.10 Dashboard exposes compact-card structure and keeps the activity rail in the range card', async () => {
+test('beta.12 Dashboard keeps the activity rail in the compact summary strip', async () => {
     graph.store.set('compact-dashboard-task', {
         uid: 'compact-dashboard-task',
         string: '{{[[TODO]]}} Compact dashboard task',

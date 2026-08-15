@@ -1,8 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.12 — 2026-08-16
+
+- Renamed the user-visible Dashboard heading and overview label to **Roam Logbook** without changing internal extension IDs, commands, or Depot identity.
+- Rebuilt the Dashboard overview as one compact Linear-style summary strip: a single subtle frame, transparent metric cells, three responsive columns, a 26–30px seven-day activity rail, and a mobile Today/Tasks plus Last 7 days layout that stays content-fit.
+- Kept Refresh feedback in the accessible live region while making it visually hidden for idle, loading, success, and failure; only the icon rotates during loading, while retryable failure remains visible through the existing notice.
+- Added beta.12 browser geometry, responsive overflow, refresh-state stability, title, and accessibility coverage while preserving Session links, graph-read-only Refresh behavior, Pomodoro state, pause state, and CLOCK data.
+
 ## 0.9.0-beta.11 — 2026-08-16
 
-- Made Current Sessions Refresh an explicitly read-only graph re-read with coalesced fast clicks, loading spin/`aria-busy`, transient inline success feedback, and an accessible retryable error state that retains the last valid snapshot and keeps the popover/sidebar open.
+- Made Current Sessions Refresh an explicitly read-only graph re-read with coalesced fast clicks, a loading spin/`aria-busy`, visually hidden live success status, and an accessible retryable error state that retains the last valid snapshot and keeps the popover/sidebar open.
 - Kept Refresh in the bottom footer without changing CLOCK data, pause state, or the shared Pomodoro cycle, and avoided duplicate subscriber/explicit rerenders.
 - Replaced the leading Session title document glyph with a native keyboard-accessible restrained link target while preserving ordinary click navigation and Shift+Click right-sidebar behavior.
 - Added regression coverage for unchanged/external graph refreshes, coalescing, failure retention, read-only state safety, live labels, popover lifecycle, and title-link accessibility.
@@ -66,7 +73,7 @@
 
 ## 0.9.0-beta.3 — 2026-08-15
 
-- Kept the Logbook topbar unit stable while Roam Search expands or the window narrows.
+- Kept the Roam Logbook topbar unit stable while Roam Search expands or the window narrows.
 - Added a singleton Shift+Click **Current Sessions** panel in Roam's right sidebar, using the same view model and renderer as the popover.
 - Moved Refresh into each surface header and replaced the ambiguous per-row stop icon with an explicit **Check Out** action.
 - Preserved paused batch rows in place, added deterministic reconciliation for explicit clock-in/out during a pause, and kept retryable partial results visible.

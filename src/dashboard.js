@@ -16,6 +16,7 @@ import { staleHours } from './settings.js';
 import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
+const DASHBOARD_TITLE = 'Roam Logbook';
 
 export function createDashboard({
     now: nowFn = () => new Date(),
@@ -252,8 +253,8 @@ export function createDashboard({
         tasksContext,
         now,
     }) => {
-        const wrapper = el('dl', 'rlb-overview');
-        wrapper.setAttribute('aria-label', 'Logbook overview');
+        const wrapper = el('dl', 'rlb-overview rlb-overview--strip');
+        wrapper.setAttribute('aria-label', `${DASHBOARD_TITLE} overview`);
         const metrics = [
             ['Today', today, todayContext],
             [selectedLabel, selected, selectedContext],
@@ -634,7 +635,7 @@ export function createDashboard({
 
         const header = el('header', 'bp3-dialog-header rlb-header');
         const heading = el('div', 'rlb-header__heading');
-        const title = el('h2', 'bp3-heading rlb-header__title', 'Logbook');
+        const title = el('h2', 'bp3-heading rlb-header__title', DASHBOARD_TITLE);
         title.id = 'roam-logbook-dashboard-title';
         const subtitle = el(
             'p',

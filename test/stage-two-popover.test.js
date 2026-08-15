@@ -197,7 +197,7 @@ test('topbar uses one shared cycle across parallel Sessions and ignores Roam syn
     assert.equal(pomodoro.getCycle(), null);
 });
 
-test('Session surfaces put one accessible Refresh action in the footer with visible success feedback', async t => {
+test('Session surfaces keep Refresh copy hidden while preserving accessible state feedback', async t => {
     t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -224,6 +224,7 @@ test('Session surfaces put one accessible Refresh action in the footer with visi
     assert.equal(live.getAttribute('role'), 'status');
     assert.equal(live.getAttribute('aria-live'), 'polite');
     assert.equal(live.getAttribute('aria-atomic'), 'true');
+    assert.ok(live.classList.contains('rlb-visually-hidden'));
     assert.deepEqual(
         [...popover.querySelectorAll('.rlb-popover__footer button')].map(node => node.textContent),
         ['Dashboard', 'Pause All', 'Clock Out All', '']
@@ -238,6 +239,12 @@ test('Session surfaces put one accessible Refresh action in the footer with visi
     assert.equal(loading.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
     assert.equal(loading.disabled, true);
     assert.equal(loading.getAttribute('aria-busy'), 'true');
+    assert.ok(
+        loading
+            .closest('.rlb-surface__refresh-cell')
+            .querySelector('.rlb-surface__refresh-status')
+            .classList.contains('rlb-visually-hidden')
+    );
     assert.match(
         loading.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
         /refreshing/i
@@ -248,6 +255,12 @@ test('Session surfaces put one accessible Refresh action in the footer with visi
     const success = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
     assert.equal(success.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'success');
     assert.equal(success.getAttribute('aria-busy'), null);
+    assert.ok(
+        success
+            .closest('.rlb-surface__refresh-cell')
+            .querySelector('.rlb-surface__refresh-status')
+            .classList.contains('rlb-visually-hidden')
+    );
     assert.match(
         success.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
         /Updated just now/
@@ -355,6 +368,10 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
     assert.equal(
         popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
         'error'
+    );
+    assert.equal(
+        popover.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'),
+        true
     );
     assert.match(popover.querySelector('.rlb-surface__refresh-status').textContent, /last valid snapshot/i);
     assert.match(popover.querySelector('.rlb-popover__notice').textContent, /Retry after Roam finishes syncing/i);

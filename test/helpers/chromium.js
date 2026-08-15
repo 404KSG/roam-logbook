@@ -116,7 +116,7 @@ export function chromiumLaunchArgs(profile) {
     ];
 }
 
-export async function withChromium(html, expression) {
+export async function withChromium(html, expression, viewport = null) {
     const executable = await findChromium();
     if (!executable) throw new Error('Chromium is unavailable');
 
@@ -135,6 +135,18 @@ export async function withChromium(html, expression) {
         ({ targetId } = await client.send('Target.createTarget', { url: 'about:blank' }));
         const { sessionId } = await client.send('Target.attachToTarget', { targetId, flatten: true });
         await client.send('Page.enable', {}, sessionId);
+        if (viewport) {
+            await client.send(
+                'Emulation.setDeviceMetricsOverride',
+                {
+                    width: viewport.width,
+                    height: viewport.height,
+                    deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+                    mobile: false,
+                },
+                sessionId
+            );
+        }
         await client.send(
             'Page.navigate',
             { url: `data:text/html;charset=utf-8,${encodeURIComponent(html)}` },

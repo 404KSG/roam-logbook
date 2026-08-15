@@ -501,7 +501,7 @@ export function createTopbar({
             syncButtonLayout(pausedItems.length > 0 ? 'paused' : 'idle');
             buttonNode.title = pausedItems.length
                 ? `${sessionCount(pausedItems.length)} Paused — click to resume or review.`
-                : 'Logbook — no Session running. Click for details.';
+                : 'Roam Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
         }

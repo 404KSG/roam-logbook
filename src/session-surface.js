@@ -12,6 +12,7 @@ import { findStaleClocks } from './stats.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+const SURFACE_TITLE = 'Roam Logbook';
 
 const rowFigures = (entry, now) => {
     const elapsed = now.getTime() - entry.start.getTime();
@@ -165,7 +166,7 @@ const surfaceTitle = model =>
         ? `${sessionCount(model.runningCount)} Running`
         : model.pausedCount > 0
           ? `${sessionCount(model.pausedCount)} Paused`
-          : 'Logbook';
+          : SURFACE_TITLE;
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
 export function renderSessionSurface(root, model, options = {}) {
@@ -224,7 +225,7 @@ export function renderSessionSurface(root, model, options = {}) {
     const footer = el('div', 'rlb-popover__footer');
     footer.appendChild(
         button('bp3-button bp3-small', 'Dashboard', () => options.onOpenDashboard?.(), {
-            title: 'Open Logbook Dashboard',
+            title: 'Open Roam Logbook Dashboard',
         })
     );
     if (model.runningCount > 0 || model.pausedCount > 0) {
@@ -278,7 +279,7 @@ export function renderSessionSurface(root, model, options = {}) {
         }
         const refreshStatus = el(
             'span',
-            `rlb-surface__refresh-status rlb-surface__refresh-status--${state}`,
+            `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
             refreshState.message || ''
         );
         refreshStatus.setAttribute('role', 'status');
