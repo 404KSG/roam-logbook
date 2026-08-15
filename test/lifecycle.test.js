@@ -101,6 +101,13 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /width: min\(1120px, calc\(100vw - 48px\)\)/);
     assert.match(css, /max-height: min\(84vh, calc\(100vh - 48px\)\)/);
     assert.doesNotMatch(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
+    assert.match(css, /\.rlb-root\s*\{[^}]*position: fixed[^}]*inset: 0[^}]*overflow: hidden[^}]*overscroll-behavior: none/s);
+    assert.match(css, /\.rlb-dialog\s*\{[^}]*display: flex[^}]*flex-direction: column[^}]*min-height: 0[^}]*overflow: hidden/s);
+    assert.match(css, /\.rlb-body,\s*\.rlb-body__scroll\s*\{[^}]*min-height: 0[^}]*max-height: none[^}]*overflow-y: auto[^}]*overscroll-behavior: contain/s);
+    assert.match(css, /--page-link-color, var\(--page-links, var\(--page-reference-color, var\(--page-ref-color/);
+    assert.match(css, /--links-hover, var\(--page-link-hover-color, var\(--link-hover-color/);
+    assert.doesNotMatch(css, /--rlb-surface-link-underline|rgba\(45, 114, 210, 0\.42\)/);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:hover[\s\S]*?text-decoration-color: currentColor/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
@@ -635,11 +642,23 @@ test('legacy targets remain compatible while the shared cycle controls the topba
 });
 
 test('onunload removes every trace of the extension', () => {
+    const html = document.documentElement;
+    const body = document.body;
+    const htmlStyle = 'overflow: auto; color: rebeccapurple;';
+    const bodyStyle = 'padding-right: 4px; overflow: auto;';
+    html.setAttribute('style', htmlStyle);
+    body.setAttribute('style', bodyStyle);
+    paletteCommands.get('Logbook: Open dashboard')();
+    assert.equal(html.style.overflow, 'hidden');
+    assert.equal(body.style.overflow, 'hidden');
+
     extension.onunload();
 
     assert.equal(topbarWidget(), null);
     assert.equal(dialog(), null);
     assert.equal(document.getElementById('roam-logbook-styles'), null);
+    assert.equal(html.getAttribute('style'), htmlStyle);
+    assert.equal(body.getAttribute('style'), bodyStyle);
     assert.equal(contextCommands.size, 0);
     assert.equal(paletteCommands.size, 0);
 });

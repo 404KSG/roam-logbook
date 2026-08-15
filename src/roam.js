@@ -265,9 +265,10 @@ export async function openBlockInRightSidebar(uid) {
     try {
         await sidebar.open?.();
 
-        // Prefer Roam's own window list when available. The local set is only
-        // a fallback for older APIs without getWindows; it is never a graph
-        // lock or a cross-tab atomicity claim.
+        // Prefer Roam's own window list whenever the API exposes it. Roam is
+        // authoritative here: a user can close a sidebar window outside this
+        // extension, so an extension-local Set is not allowed to suppress a
+        // later request when the block is no longer genuinely open.
         if (typeof sidebar.getWindows === 'function') {
             const windows = await sidebar.getWindows();
             if (
@@ -279,8 +280,16 @@ export async function openBlockInRightSidebar(uid) {
             ) {
                 return { ok: true, deduped: true };
             }
+
+            await sidebar.addWindow({
+                window: { type: 'block', 'block-uid': uid },
+            });
+            return { ok: true };
         }
 
+        // Older Roam builds do not expose getWindows. Keep a best-effort
+        // fallback only for those builds, and clear a pending marker whenever
+        // addWindow rejects so a later attempt can retry safely.
         let requested = requestedSidebarBlocks.get(sidebar);
         if (!requested) {
             requested = new Set();
@@ -288,10 +297,15 @@ export async function openBlockInRightSidebar(uid) {
         }
         if (requested.has(uid)) return { ok: true, deduped: true };
 
-        await sidebar.addWindow({
-            window: { type: 'block', 'block-uid': uid },
-        });
-        requested.add(uid);
+        try {
+            await sidebar.addWindow({
+                window: { type: 'block', 'block-uid': uid },
+            });
+            requested.add(uid);
+        } catch (error) {
+            requested.delete(uid);
+            throw error;
+        }
         return { ok: true };
     } catch (error) {
         console.debug('[roam-logbook] could not open task in right sidebar', uid, error);

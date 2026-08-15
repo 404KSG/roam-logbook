@@ -48,8 +48,15 @@ const pomodoro = await import('../src/pomodoro.js');
 const paused = await import('../src/paused.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
-const shiftClick = node =>
-    node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, shiftKey: true }));
+const shiftClick = node => {
+    const event = new dom.window.MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        shiftKey: true,
+    });
+    node.dispatchEvent(event);
+    return event;
+};
 const settle = async () => {
     await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
@@ -586,56 +593,34 @@ test('individual Resume is idempotent under double click and retains the paused 
     assert.match(surface.textContent, /individual resume write failed/i);
 });
 
-test('Shift+Click opens one shared Current Sessions sidebar without graph writes', async t => {
+test('Topbar Shift+Click is inert and cannot open a popover or sidebar', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
-
-    const writes = { create: 0, update: 0, delete: 0 };
-    const original = {
-        create: graph.api.data.block.create,
-        update: graph.api.data.block.update,
-        delete: graph.api.data.block.delete,
+    const nativeCalls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => nativeCalls.push('open'),
+        addWindow: async spec => nativeCalls.push(spec),
     };
-    for (const name of Object.keys(writes)) {
-        graph.api.data.block[name] = async (...args) => {
-            writes[name] += 1;
-            return original[name](...args);
-        };
-    }
-    try {
-        const trigger = topbarButton();
-        shiftClick(trigger);
-        const sidebar = document.querySelector('#roam-logbook-current-sessions');
-        assert.ok(sidebar);
-        assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
-        assert.equal(sidebar.getAttribute('role'), 'region');
-        assert.match(sidebar.textContent, /1 Session Running/);
-        const sidebarList = sidebar.querySelector('.rlb-surface__list');
-        assert.ok(sidebarList);
-        assert.equal(sidebarList.getAttribute('role'), 'group');
-        assert.equal(sidebarList.getAttribute('aria-label'), 'Current Sessions');
-        assert.equal(sidebar.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
-        const sidebarRefresh = sidebar.querySelector('.rlb-popover__footer [data-action="refresh"]');
-        assert.ok(sidebarRefresh);
-        assert.equal(sidebar.querySelectorAll('[data-action="refresh"]').length, 1);
-        assert.equal(sidebarRefresh.title, 'Refresh Sessions from graph');
-        assert.equal(sidebarRefresh.getAttribute('aria-label'), 'Refresh Sessions from graph');
-        assert.ok(sidebar.querySelector('[data-action="clock-out"]'));
-        assert.equal(trigger.getAttribute('aria-expanded'), 'true');
 
-        shiftClick(trigger);
-        assert.equal(document.querySelectorAll('#roam-logbook-current-sessions').length, 1);
-        assert.equal(document.activeElement, sidebar.querySelector('button'));
-        assert.deepEqual(writes, { create: 0, update: 0, delete: 0 });
+    const trigger = topbarButton();
+    let parentClicks = 0;
+    trigger.parentElement.addEventListener('click', () => {
+        parentClicks += 1;
+    });
+    const before = document.body.innerHTML;
+    const event = shiftClick(trigger);
+    await settle();
 
-        click(sidebar.querySelector('[data-action="close"]'));
-        assert.equal(document.querySelector('#roam-logbook-current-sessions'), null);
-        assert.equal(document.activeElement, trigger);
-        assert.equal(trigger.getAttribute('aria-expanded'), 'false');
-    } finally {
-        for (const name of Object.keys(writes)) graph.api.data.block[name] = original[name];
-    }
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(parentClicks, 0, 'Shift+Click stops before the topbar parent');
+    assert.equal(document.querySelector('.rlb-popover'), null);
+    assert.equal(document.body.innerHTML, before, 'the inert gesture does not mutate layout');
+    assert.deepEqual(nativeCalls, []);
+
+    click(trigger);
+    assert.ok(document.querySelector('.rlb-popover'), 'ordinary click still opens the popover');
+    click(trigger);
+    assert.equal(document.querySelector('.rlb-popover'), null);
 });
 
 test('Shift+Click on a Session task uses Roam native block-sidebar API and action icons do not navigate', async t => {
@@ -654,9 +639,10 @@ test('Shift+Click on a Session task uses Roam native block-sidebar API and actio
         rowClicks += 1;
     });
 
-    shiftClick(row.querySelector('.rlb-run__title'));
+    const event = shiftClick(row.querySelector('.rlb-run__title'));
     await settle();
 
+    assert.equal(event.defaultPrevented, true);
     assert.deepEqual(nativeCalls, [
         { action: 'open' },
         {
@@ -680,53 +666,45 @@ test('Shift+Click on a Session task uses Roam native block-sidebar API and actio
     assert.equal(actionRowClicks, 0);
 });
 
-test('Shift+Click waits for Roam to mount the native sidebar host after open', async t => {
+test('Session Shift+Click keeps the popover open with a visible retry notice when native sidebar fails', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const nativeCalls = [];
+    const mainCalls = [];
+    const originalOpenBlock = window.roamAlphaAPI.ui.mainWindow.openBlock;
+    window.roamAlphaAPI.ui.mainWindow.openBlock = async spec => mainCalls.push(spec);
     window.roamAlphaAPI.ui.rightSidebar = {
-        open: () => {
-            nativeCalls.push('open');
-            queueMicrotask(() => {
-                if (!document.querySelector('#right-sidebar-content')) {
-                    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
-                }
-            });
+        open: () => nativeCalls.push('open'),
+        addWindow: async () => {
+            nativeCalls.push('addWindow');
+            throw new Error('native sidebar rejected the block');
         },
     };
 
-    shiftClick(topbarButton());
+    const popover = openPopover();
+    const title = popover.querySelector('.rlb-run__title');
+    const event = shiftClick(title);
     await settle();
 
-    const sidebar = document.querySelector('#roam-logbook-current-sessions');
-    assert.equal(nativeCalls.length, 1);
-    assert.ok(sidebar);
-    assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
+    assert.equal(event.defaultPrevented, true);
+    assert.deepEqual(nativeCalls, ['open', 'addWindow']);
+    assert.equal(document.querySelector('.rlb-popover'), popover);
+    assert.match(popover.textContent, /native sidebar rejected the block/i);
+    assert.deepEqual(mainCalls, []);
+    window.roamAlphaAPI.ui.mainWindow.openBlock = originalOpenBlock;
 });
 
-test('sidebar paused rows use the same actionable Resume icon as the popover', async t => {
+test('Session Shift+Click shows a concise notice when Roam has no sidebar API', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    settingsStore.set('allowMultipleClocks', true);
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
-    shiftClick(topbarButton());
-    const sidebar = document.querySelector('#roam-logbook-current-sessions');
-    const pause = [...sidebar.querySelectorAll('.rlb-popover__footer button')].find(
-        node => node.textContent === 'Pause All'
-    );
-    click(pause);
-    await settle();
+    window.roamAlphaAPI.ui.rightSidebar = undefined;
 
-    const resume = sidebar.querySelector('[data-session-state="paused"] [data-action="resume"]');
-    assert.ok(resume);
-    assert.equal(resume.textContent, '');
-    assert.ok(resume.classList.contains('bp3-icon-play'));
-    assert.equal(resume.title, 'Resume');
-    assert.equal(resume.getAttribute('aria-label'), 'Resume');
-    click(resume);
+    const popover = openPopover();
+    const event = shiftClick(popover.querySelector('.rlb-run__title'));
     await settle();
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(sidebar.querySelector('[data-session-state="paused"]'), null);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(document.querySelector('.rlb-popover'), popover);
+    assert.match(popover.textContent, /right-sidebar block windows are unavailable/i);
 });
 
 test('external clock activity during a pause is not duplicated by individual Resume', async t => {
@@ -748,16 +726,15 @@ test('external clock activity during a pause is not duplicated by individual Res
     assert.match(surface.textContent, /already clocked out|not reopened|reconciled/i);
 });
 
-test('Current Sessions sidebar is removed completely on extension unload', async t => {
+test('extension unload removes the regular Session popover and topbar cleanly', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
-    shiftClick(topbarButton());
-    assert.ok(document.querySelector('#roam-logbook-current-sessions'));
+    openPopover();
+    assert.ok(document.querySelector('.rlb-popover'));
 
     extension.onunload();
 
-    assert.equal(document.querySelector('#roam-logbook-current-sessions'), null);
+    assert.equal(document.querySelector('.rlb-popover'), null);
     assert.equal(document.querySelector('#roam-logbook-topbar'), null);
 });
 

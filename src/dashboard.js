@@ -18,6 +18,78 @@ import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Roam Logbook';
 
+// Dashboard overlays are allowed to outlive a single render, and hot reloads
+// can briefly create more than one controller. Keep the document lock shared
+// and reference-counted so the last close restores the exact pre-open state.
+const documentScrollLocks = new WeakMap();
+
+const restoreInlineStyle = (node, value) => {
+    if (!node) return;
+    if (value === null) node.removeAttribute('style');
+    else node.setAttribute('style', value);
+};
+
+const releaseDocumentScrollLock = (documentRef, state) => {
+    const current = documentScrollLocks.get(documentRef);
+    if (current !== state) return;
+    current.count -= 1;
+    if (current.count > 0) return;
+
+    restoreInlineStyle(current.html, current.htmlStyle);
+    restoreInlineStyle(current.body, current.bodyStyle);
+    try {
+        window.scrollTo(current.scrollX, current.scrollY);
+    } catch {
+        // jsdom and older embedded WebViews may not implement scrollTo.
+    }
+    documentScrollLocks.delete(documentRef);
+};
+
+const acquireDocumentScrollLock = () => {
+    const documentRef = document;
+    const html = documentRef.documentElement;
+    const body = documentRef.body;
+    if (!html || !body) return () => {};
+
+    let state = documentScrollLocks.get(documentRef);
+    if (!state) {
+        const scrollX = Number(window.scrollX) || 0;
+        const scrollY = Number(window.scrollY) || 0;
+        const scrollbarWidth = Math.max(0, (Number(window.innerWidth) || 0) - html.clientWidth);
+        const computedPadding = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+        state = {
+            count: 0,
+            html,
+            body,
+            htmlStyle: html.getAttribute('style'),
+            bodyStyle: body.getAttribute('style'),
+            scrollX,
+            scrollY,
+        };
+        documentScrollLocks.set(documentRef, state);
+        try {
+            html.style.overflow = 'hidden';
+            body.style.overflow = 'hidden';
+            if (scrollbarWidth > 0) {
+                body.style.paddingRight = `${computedPadding + scrollbarWidth}px`;
+            }
+        } catch (error) {
+            restoreInlineStyle(html, state.htmlStyle);
+            restoreInlineStyle(body, state.bodyStyle);
+            documentScrollLocks.delete(documentRef);
+            throw error;
+        }
+    }
+
+    state.count += 1;
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        releaseDocumentScrollLock(documentRef, state);
+    };
+};
+
 export function createDashboard({
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -32,6 +104,7 @@ export function createDashboard({
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
     let lastSnapshot = null;
+    let releaseScrollLock = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
     const collapsed = new Set();
@@ -683,39 +756,58 @@ export function createDashboard({
         return overlay;
     };
 
-    function close() {
-        if (!root) return;
+    function close({ restoreFocus = true } = {}) {
+        if (!root) {
+            releaseScrollLock?.();
+            releaseScrollLock = null;
+            return;
+        }
         clearLiveTicker();
         resetDiscardConfirmation();
         root.classList.remove('rlb-root--open');
         root.setAttribute('aria-hidden', 'true');
         document.removeEventListener('keydown', onKeyDown, true);
-        if (returnFocusTo?.isConnected) returnFocusTo.focus();
+        try {
+            if (restoreFocus && returnFocusTo?.isConnected) returnFocusTo.focus();
+        } finally {
+            releaseScrollLock?.();
+            releaseScrollLock = null;
+        }
         returnFocusTo = null;
     }
 
     return {
         open({ returnFocusTo: requestedFocus } = {}) {
+            const alreadyOpen = root?.classList.contains('rlb-root--open');
             const active = document.activeElement;
             returnFocusTo = requestedFocus?.isConnected
                 ? requestedFocus
                 : active && active !== document.body && active.isConnected
                   ? active
                   : null;
-            if (!root) root = build();
-            root.classList.add('rlb-root--open');
-            root.setAttribute('aria-hidden', 'false');
-            document.addEventListener('keydown', onKeyDown, true);
-            render();
-            const dialog = root.querySelector('.rlb-dialog');
-            const initial = dialogFocusables(dialog)[0];
-            (initial || dialog)?.focus();
+            try {
+                if (!root) root = build();
+                if (!alreadyOpen) releaseScrollLock = acquireDocumentScrollLock();
+                root.classList.add('rlb-root--open');
+                root.setAttribute('aria-hidden', 'false');
+                document.addEventListener('keydown', onKeyDown, true);
+                render();
+                const dialog = root.querySelector('.rlb-dialog');
+                const initial = dialogFocusables(dialog)[0];
+                (initial || dialog)?.focus();
+            } catch (error) {
+                root?.classList.remove('rlb-root--open');
+                root?.setAttribute('aria-hidden', 'true');
+                document.removeEventListener('keydown', onKeyDown, true);
+                releaseScrollLock?.();
+                releaseScrollLock = null;
+                returnFocusTo = null;
+                throw error;
+            }
         },
         close,
         destroy() {
-            clearLiveTicker();
-            resetDiscardConfirmation();
-            document.removeEventListener('keydown', onKeyDown, true);
+            close({ restoreFocus: false });
             root?.remove();
             root = null;
             summaryNode = null;

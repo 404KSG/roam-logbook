@@ -18,6 +18,7 @@ const extensionAPI = {
 
 const { setExtensionAPI } = await import('../src/settings.js');
 const { createDashboard } = await import('../src/dashboard.js');
+const { STYLES } = await import('../src/styles.js');
 const clock = await import('../src/clock.js');
 const { openBlockInRightSidebar } = await import('../src/roam.js');
 
@@ -216,6 +217,131 @@ test('native task sidebar seam rejects missing UIDs and dedupes repeated block w
         { window: { type: 'block', 'block-uid': 'live-child' } },
         'open',
     ]);
+});
+
+test('native sidebar window list is authoritative after a user closes a block window', async () => {
+    const windows = [];
+    const calls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => calls.push({ action: 'open' }),
+        getWindows: async () => {
+            calls.push({ action: 'getWindows' });
+            return windows;
+        },
+        addWindow: async spec => {
+            calls.push({ action: 'addWindow', spec });
+            windows.push(spec.window);
+        },
+    };
+
+    assert.deepEqual(await openBlockInRightSidebar('live-child'), { ok: true });
+    assert.deepEqual(await openBlockInRightSidebar('live-child'), { ok: true, deduped: true });
+
+    // Simulate closing the native Roam sidebar window outside the extension.
+    windows.splice(0, windows.length);
+    assert.deepEqual(await openBlockInRightSidebar('live-child'), { ok: true });
+
+    assert.deepEqual(calls, [
+        { action: 'open' },
+        { action: 'getWindows' },
+        { action: 'addWindow', spec: { window: { type: 'block', 'block-uid': 'live-child' } } },
+        { action: 'open' },
+        { action: 'getWindows' },
+        { action: 'open' },
+        { action: 'getWindows' },
+        { action: 'addWindow', spec: { window: { type: 'block', 'block-uid': 'live-child' } } },
+    ]);
+});
+
+test('legacy native sidebar fallback clears a failed request so the next click can retry', async () => {
+    let attempts = 0;
+    const payloads = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => {},
+        addWindow: async spec => {
+            attempts += 1;
+            payloads.push(spec);
+            if (attempts === 1) throw new Error('first sidebar request failed');
+        },
+    };
+
+    const first = await openBlockInRightSidebar('live-child');
+    const second = await openBlockInRightSidebar('live-child');
+    assert.equal(first.ok, false);
+    assert.equal(second.ok, true);
+    assert.equal(attempts, 2);
+    assert.deepEqual(payloads, [
+        { window: { type: 'block', 'block-uid': 'live-child' } },
+        { window: { type: 'block', 'block-uid': 'live-child' } },
+    ]);
+});
+
+test('Dashboard locks document scroll reversibly without moving the dialog root', () => {
+    const html = document.documentElement;
+    const body = document.body;
+    const style = document.createElement('style');
+    style.textContent = STYLES;
+    document.head.appendChild(style);
+    const originalHtmlStyle = 'overflow:auto; color: rebeccapurple;';
+    const originalBodyStyle = 'padding-right: 4px; overflow: auto;';
+    html.setAttribute('style', originalHtmlStyle);
+    body.setAttribute('style', originalBodyStyle);
+
+    const originalScrollTo = window.scrollTo;
+    const scrollCalls = [];
+    const scrollXDescriptor = Object.getOwnPropertyDescriptor(window, 'scrollX');
+    const scrollYDescriptor = Object.getOwnPropertyDescriptor(window, 'scrollY');
+    const clientWidthDescriptor = Object.getOwnPropertyDescriptor(html, 'clientWidth');
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 19 });
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 407 });
+    Object.defineProperty(html, 'clientWidth', { configurable: true, value: 1000 });
+    window.scrollTo = (x, y) => scrollCalls.push([x, y]);
+
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    try {
+        dashboard.open();
+        const root = document.querySelector('.rlb-root--open');
+        const dialog = root.querySelector('.rlb-dialog');
+        const bodyScroll = root.querySelector('.rlb-body');
+        assert.equal(window.getComputedStyle(root).overflow, 'hidden');
+        assert.equal(window.getComputedStyle(root).overscrollBehavior, 'none');
+        assert.equal(window.getComputedStyle(root).position, 'fixed');
+        assert.equal(window.getComputedStyle(dialog).display, 'flex');
+        assert.equal(window.getComputedStyle(bodyScroll).overflowY, 'auto');
+        assert.equal(html.style.overflow, 'hidden');
+        assert.equal(body.style.overflow, 'hidden');
+        assert.equal(body.style.paddingRight, '28px');
+
+        // Re-rendering an already open dashboard must not acquire a second lock.
+        dashboard.open();
+        dashboard.close();
+        assert.equal(html.getAttribute('style'), originalHtmlStyle);
+        assert.equal(body.getAttribute('style'), originalBodyStyle);
+        assert.deepEqual(scrollCalls, [[19, 407]]);
+
+        Object.defineProperty(window, 'scrollX', { configurable: true, value: 23 });
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 512 });
+        dashboard.open();
+        dashboard.destroy();
+        assert.equal(html.getAttribute('style'), originalHtmlStyle);
+        assert.equal(body.getAttribute('style'), originalBodyStyle);
+        assert.deepEqual(scrollCalls, [
+            [19, 407],
+            [23, 512],
+        ]);
+    } finally {
+        dashboard.destroy();
+        style.remove();
+        window.scrollTo = originalScrollTo;
+        if (scrollXDescriptor) Object.defineProperty(window, 'scrollX', scrollXDescriptor);
+        else delete window.scrollX;
+        if (scrollYDescriptor) Object.defineProperty(window, 'scrollY', scrollYDescriptor);
+        else delete window.scrollY;
+        if (clientWidthDescriptor) Object.defineProperty(html, 'clientWidth', clientWidthDescriptor);
+        else delete html.clientWidth;
+        html.setAttribute('style', originalHtmlStyle);
+        body.setAttribute('style', originalBodyStyle);
+    }
 });
 
 test('Integrated summary owns the selected-range activity rail and keeps three metrics', () => {

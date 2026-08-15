@@ -131,6 +131,30 @@ test('topbar visible glyphs keep equal space around the separator', async t => {
     assert.equal(geometry.separator.width, 3, JSON.stringify(geometry));
 });
 
+test('Session title links inherit Roam theme colors and keep a current-color underline', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(
+            `<div class="rlb-popover" style="--page-link-color: rgb(123, 45, 67)"><div class="rlb-run"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Reading" aria-label="Open this block: Reading">Reading</button></div></div>`
+        ),
+        `(() => {
+            const title = document.querySelector('.rlb-run__title');
+            title.focus();
+            const style = getComputedStyle(title);
+            return {
+                color: style.color,
+                underline: style.textDecorationColor,
+                decoration: style.textDecorationLine,
+                outline: style.outlineColor,
+            };
+        })()`
+    );
+    assert.equal(geometry.color, 'rgb(123, 45, 67)', JSON.stringify(geometry));
+    assert.equal(geometry.underline, 'rgb(123, 45, 67)', JSON.stringify(geometry));
+    assert.match(geometry.decoration, /underline/, JSON.stringify(geometry));
+    assert.equal(geometry.outline, 'rgb(123, 45, 67)', JSON.stringify(geometry));
+});
+
 test('topbar remains a stable unit while Roam search expands and at narrow widths', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [720, 480, 360]) {
@@ -912,4 +936,74 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
     assert.ok(geometry.footerListGap <= 14, JSON.stringify(geometry));
     assert.ok(geometry.footerHeightDelta <= 1, JSON.stringify(geometry));
     assert.match(geometry.footerRows, /32px/);
+});
+
+test('Dashboard overlay keeps background and dialog chrome fixed while body content scrolls', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`
+            <style>
+                html, body { margin: 0; min-height: 2400px; }
+                #background { height: 2200px; }
+            </style>
+            <div id="background"></div>
+            <div class="rlb-root rlb-root--open rlb-dashboard" aria-hidden="false">
+                <div class="rlb-dialog" role="dialog" aria-modal="true" aria-labelledby="dashboard-title" style="height:680px">
+                    <header class="rlb-header bp3-dialog-header"><h2 id="dashboard-title" class="rlb-header__title">Roam Logbook</h2></header>
+                    <div class="rlb-summary"><div class="rlb-overview"><div class="rlb-overview__item">Summary</div></div></div>
+                    <div class="rlb-body rlb-body__scroll"><div style="height:1400px">Long dashboard content</div></div>
+                </div>
+            </div>
+        `),
+        `(() => {
+            const root = document.querySelector('.rlb-root');
+            const dialog = document.querySelector('.rlb-dialog');
+            const header = document.querySelector('.rlb-header');
+            const body = document.querySelector('.rlb-body');
+            document.documentElement.style.overflow = 'hidden';
+            document.body.style.overflow = 'hidden';
+            const before = { documentY: scrollY, rootY: root.scrollTop, dialogY: dialog.scrollTop };
+            header.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 800 }));
+            const afterHeader = { documentY: scrollY, rootY: root.scrollTop, dialogY: dialog.scrollTop };
+            body.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 600 }));
+            body.scrollTop = 240;
+            const afterBody = { documentY: scrollY, rootY: root.scrollTop, dialogY: dialog.scrollTop, bodyY: body.scrollTop };
+            const rootStyle = getComputedStyle(root);
+            const dialogStyle = getComputedStyle(dialog);
+            const bodyStyle = getComputedStyle(body);
+            return {
+                before, afterHeader, afterBody,
+                rootPosition: rootStyle.position,
+                rootOverflow: rootStyle.overflow,
+                rootOverscroll: rootStyle.overscrollBehavior,
+                dialogDisplay: dialogStyle.display,
+                dialogOverflow: dialogStyle.overflow,
+                bodyOverflow: bodyStyle.overflowY,
+                bodyOverscroll: bodyStyle.overscrollBehavior,
+                a11y: {
+                    role: dialog.getAttribute('role'),
+                    modal: dialog.getAttribute('aria-modal'),
+                    labelledBy: dialog.getAttribute('aria-labelledby'),
+                },
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.deepEqual(geometry.afterHeader, geometry.before, JSON.stringify(geometry));
+    assert.equal(geometry.afterBody.documentY, geometry.before.documentY, JSON.stringify(geometry));
+    assert.equal(geometry.afterBody.rootY, geometry.before.rootY, JSON.stringify(geometry));
+    assert.equal(geometry.afterBody.dialogY, geometry.before.dialogY, JSON.stringify(geometry));
+    assert.equal(geometry.afterBody.bodyY, 240, JSON.stringify(geometry));
+    assert.equal(geometry.rootPosition, 'fixed', JSON.stringify(geometry));
+    assert.equal(geometry.rootOverflow, 'hidden', JSON.stringify(geometry));
+    assert.equal(geometry.rootOverscroll, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.dialogDisplay, 'flex', JSON.stringify(geometry));
+    assert.equal(geometry.dialogOverflow, 'hidden', JSON.stringify(geometry));
+    assert.equal(geometry.bodyOverflow, 'auto', JSON.stringify(geometry));
+    assert.equal(geometry.bodyOverscroll, 'contain', JSON.stringify(geometry));
+    assert.deepEqual(geometry.a11y, {
+        role: 'dialog',
+        modal: 'true',
+        labelledBy: 'dashboard-title',
+    });
 });

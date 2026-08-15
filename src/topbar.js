@@ -24,8 +24,6 @@ import {
 const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
 const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
-const SIDEBAR_ID = 'roam-logbook-current-sessions';
-const SIDEBAR_TITLE_ID = 'roam-logbook-current-sessions-title';
 const TOPBAR_SELECTOR = '.rm-topbar';
 const REFRESH_SUCCESS_DURATION = 1800;
 const REFRESH_LOADING_MESSAGE = 'Refreshing Sessions from graph…';
@@ -60,8 +58,6 @@ export function createTopbar({
     let separatorNode = null;
     let buttonNode = null;
     let popover = null;
-    let sidebar = null;
-    let sidebarHost = null;
     let observer = null;
     let hostObserver = null;
     let recoveryObserver = null;
@@ -114,7 +110,7 @@ export function createTopbar({
         document.removeEventListener('mousedown', onDocumentMouseDown, true);
         document.removeEventListener('keydown', onPopoverKeyDown, true);
         window.removeEventListener('resize', closePopover);
-        if (!sidebar) syncSurfaceAria(null);
+        syncSurfaceAria(null);
         if (restoreFocus && buttonNode?.isConnected) buttonNode.focus();
     };
 
@@ -190,7 +186,6 @@ export function createTopbar({
 
     const renderSurfaces = () => {
         if (popover) renderPopover();
-        if (sidebar) renderSidebar();
     };
 
     const renderRefreshState = () => {
@@ -269,10 +264,10 @@ export function createTopbar({
         renderSurfaces();
     };
 
-    const surfaceOptions = surface => {
+    const surfaceOptions = () => {
         const scope = 'session-surface';
         return {
-            titleId: surface === 'sidebar' ? SIDEBAR_TITLE_ID : POPOVER_TITLE_ID,
+            titleId: POPOVER_TITLE_ID,
             staleHours: staleHours(),
             notices: surfaceNotices(),
             clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
@@ -282,10 +277,12 @@ export function createTopbar({
                 if (event?.shiftKey) {
                     event.preventDefault();
                     event.stopPropagation();
-                    closePopover({ restoreFocus: false });
-                    closeSidebar({ restoreFocus: false });
                     void openBlockInRightSidebar(taskUid).then(result => {
-                        if (!result.ok) {
+                        if (result?.ok) {
+                            closePopover({ restoreFocus: false });
+                            return;
+                        }
+                        if (!result?.ok) {
                             actionNotice = result.message || 'Could not open this Task in the right sidebar.';
                             renderSurfaces();
                         }
@@ -294,7 +291,6 @@ export function createTopbar({
                 }
                 event?.stopPropagation();
                 closePopover({ restoreFocus: false });
-                closeSidebar({ restoreFocus: false });
                 void openBlock(taskUid);
             },
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
@@ -315,7 +311,6 @@ export function createTopbar({
             },
             onOpenDashboard: () => {
                 closePopover({ restoreFocus: false });
-                closeSidebar({ restoreFocus: false });
                 onOpenDashboard?.(buttonNode);
             },
             onPauseAll: () => void run(() => paused.pauseAll()),
@@ -328,7 +323,7 @@ export function createTopbar({
                 resetClockOutConfirmation();
                 void run(() => paused.clockOutAll());
             },
-            onClose: surface === 'sidebar' ? () => closeSidebar() : null,
+            onClose: null,
             discardingClockUid: discardConfirmUid,
         };
     };
@@ -337,104 +332,24 @@ export function createTopbar({
         if (!popover) return;
         const model = sessionModel();
         const refreshStatus = clock.getLastRefreshStatus();
-        const options = surfaceOptions('popover');
+        const options = surfaceOptions();
         options.emptyMessage = refreshStatus.ok
             ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
             : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
         renderSessionSurface(popover, model, options);
     }
 
-    function renderSidebar() {
-        if (!sidebar) return;
-        const model = sessionModel();
-        const refreshStatus = clock.getLastRefreshStatus();
-        const options = surfaceOptions('sidebar');
-        options.emptyMessage = refreshStatus.ok
-            ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
-            : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
-        renderSessionSurface(sidebar, model, options);
-    }
-
-    const syncSurfaceAria = targetId => {
-        buttonNode?.setAttribute('aria-expanded', targetId ? 'true' : 'false');
-        buttonNode?.setAttribute('aria-controls', targetId || POPOVER_ID);
-    };
-
-    const closeSidebar = ({ restoreFocus = true } = {}) => {
-        sidebar?.remove();
-        sidebar = null;
-        sidebarHost = null;
-        if (!popover) syncSurfaceAria(null);
-        if (restoreFocus && buttonNode?.isConnected) buttonNode.focus();
-    };
-
-    const findSidebarHost = () =>
-        document.querySelector(
-            '#right-sidebar-content, #roam-right-sidebar-content, #right-sidebar .rm-right-sidebar__content, #right-sidebar, .rm-right-sidebar'
-        ) || document.body;
-
-    const requestRoamSidebarOpen = () => {
-        try {
-            window.roamAlphaAPI?.ui?.rightSidebar?.open?.();
-        } catch (error) {
-            // A missing Roam UI helper is harmless; the existing right-sidebar
-            // host (or the fixture fallback) remains the DOM seam we own.
-            console.debug('[roam-logbook] right sidebar open helper unavailable', error);
-        }
-    };
-
-    const mountSidebar = host => {
-        if (destroyed || sidebar?.isConnected) return;
-        sidebarHost = host;
-        sidebar = el('section', 'bp3-card rlb-sidebar');
-        if (sidebarHost === document.body) sidebar.classList.add('rlb-sidebar--fallback');
-        sidebar.id = SIDEBAR_ID;
-        sidebar.setAttribute('role', 'region');
-        sidebar.setAttribute('aria-labelledby', SIDEBAR_TITLE_ID);
-        sidebarHost.appendChild(sidebar);
-        syncSurfaceAria(SIDEBAR_ID);
-        clock.refresh();
-        renderSidebar();
-        sidebar.querySelector('button')?.focus();
-    };
-
-    const waitForSidebarHost = () =>
-        new Promise(resolve => {
-            let attempts = 0;
-            const probe = () => {
-                const host = findSidebarHost();
-                if (host !== document.body || attempts >= 2) {
-                    resolve(host);
-                    return;
-                }
-                attempts += 1;
-                setTimeout(probe, 0);
-            };
-            queueMicrotask(probe);
-        });
-
-    const openSidebar = () => {
-        if (sidebar?.isConnected) {
-            sidebar.querySelector('.rlb-surface__close, button')?.focus();
-            return;
-        }
-        closePopover({ restoreFocus: false });
-        requestRoamSidebarOpen();
-        const host = findSidebarHost();
-        if (host !== document.body) {
-            mountSidebar(host);
-            return;
-        }
-        void waitForSidebarHost().then(mountSidebar);
+    const syncSurfaceAria = expanded => {
+        buttonNode?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        buttonNode?.setAttribute('aria-controls', POPOVER_ID);
     };
 
     const togglePopover = event => {
         if (event?.shiftKey) {
             event.preventDefault();
-            openSidebar();
+            event.stopPropagation();
             return;
         }
-        closeSidebar({ restoreFocus: false });
         if (popover) {
             closePopover();
             return;
@@ -561,7 +476,6 @@ export function createTopbar({
         const now = nowDate();
         renderButton(entries, now);
         updateSessionSurfaceElapsed(popover, entries, now);
-        updateSessionSurfaceElapsed(sidebar, entries, now);
     };
 
     const build = () => {
@@ -817,7 +731,6 @@ export function createTopbar({
 
     const remove = () => {
         closePopover();
-        closeSidebar({ restoreFocus: false });
         for (const host of layoutHosts) host.classList.remove('rlb-topbar__layout');
         for (const host of searchHosts) host.classList.remove('rlb-topbar__search');
         layoutHosts.clear();

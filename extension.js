@@ -432,6 +432,10 @@ async function openBlockInRightSidebar(uid) {
       )) {
         return { ok: true, deduped: true };
       }
+      await sidebar.addWindow({
+        window: { type: "block", "block-uid": uid }
+      });
+      return { ok: true };
     }
     let requested = requestedSidebarBlocks.get(sidebar);
     if (!requested) {
@@ -440,10 +444,15 @@ async function openBlockInRightSidebar(uid) {
     }
     if (requested.has(uid))
       return { ok: true, deduped: true };
-    await sidebar.addWindow({
-      window: { type: "block", "block-uid": uid }
-    });
-    requested.add(uid);
+    try {
+      await sidebar.addWindow({
+        window: { type: "block", "block-uid": uid }
+      });
+      requested.add(uid);
+    } catch (error) {
+      requested.delete(uid);
+      throw error;
+    }
     return { ok: true };
   } catch (error) {
     console.debug("[roam-logbook] could not open task in right sidebar", uid, error);
@@ -655,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.12";
+var PLUGIN_VERSION = "0.9.0-beta.13";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -1507,6 +1516,75 @@ function findStaleClocks(entries, now, staleHours2) {
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Roam Logbook";
+var documentScrollLocks = /* @__PURE__ */ new WeakMap();
+var restoreInlineStyle = (node, value) => {
+  if (!node)
+    return;
+  if (value === null)
+    node.removeAttribute("style");
+  else
+    node.setAttribute("style", value);
+};
+var releaseDocumentScrollLock = (documentRef, state) => {
+  const current = documentScrollLocks.get(documentRef);
+  if (current !== state)
+    return;
+  current.count -= 1;
+  if (current.count > 0)
+    return;
+  restoreInlineStyle(current.html, current.htmlStyle);
+  restoreInlineStyle(current.body, current.bodyStyle);
+  try {
+    window.scrollTo(current.scrollX, current.scrollY);
+  } catch {
+  }
+  documentScrollLocks.delete(documentRef);
+};
+var acquireDocumentScrollLock = () => {
+  const documentRef = document;
+  const html = documentRef.documentElement;
+  const body = documentRef.body;
+  if (!html || !body)
+    return () => {
+    };
+  let state = documentScrollLocks.get(documentRef);
+  if (!state) {
+    const scrollX = Number(window.scrollX) || 0;
+    const scrollY = Number(window.scrollY) || 0;
+    const scrollbarWidth = Math.max(0, (Number(window.innerWidth) || 0) - html.clientWidth);
+    const computedPadding = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+    state = {
+      count: 0,
+      html,
+      body,
+      htmlStyle: html.getAttribute("style"),
+      bodyStyle: body.getAttribute("style"),
+      scrollX,
+      scrollY
+    };
+    documentScrollLocks.set(documentRef, state);
+    try {
+      html.style.overflow = "hidden";
+      body.style.overflow = "hidden";
+      if (scrollbarWidth > 0) {
+        body.style.paddingRight = `${computedPadding + scrollbarWidth}px`;
+      }
+    } catch (error) {
+      restoreInlineStyle(html, state.htmlStyle);
+      restoreInlineStyle(body, state.bodyStyle);
+      documentScrollLocks.delete(documentRef);
+      throw error;
+    }
+  }
+  state.count += 1;
+  let released = false;
+  return () => {
+    if (released)
+      return;
+    released = true;
+    releaseDocumentScrollLock(documentRef, state);
+  };
+};
 function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -1521,6 +1599,7 @@ function createDashboard({
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
   let lastSnapshot = null;
+  let releaseScrollLock = null;
   const collapsed = /* @__PURE__ */ new Set();
   const clearLiveTicker = () => {
     if (liveTicker !== null)
@@ -2114,37 +2193,56 @@ function createDashboard({
     document.body.appendChild(overlay);
     return overlay;
   };
-  function close() {
-    if (!root)
+  function close({ restoreFocus = true } = {}) {
+    if (!root) {
+      releaseScrollLock?.();
+      releaseScrollLock = null;
       return;
+    }
     clearLiveTicker();
     resetDiscardConfirmation();
     root.classList.remove("rlb-root--open");
     root.setAttribute("aria-hidden", "true");
     document.removeEventListener("keydown", onKeyDown, true);
-    if (returnFocusTo?.isConnected)
-      returnFocusTo.focus();
+    try {
+      if (restoreFocus && returnFocusTo?.isConnected)
+        returnFocusTo.focus();
+    } finally {
+      releaseScrollLock?.();
+      releaseScrollLock = null;
+    }
     returnFocusTo = null;
   }
   return {
     open({ returnFocusTo: requestedFocus } = {}) {
+      const alreadyOpen = root?.classList.contains("rlb-root--open");
       const active = document.activeElement;
       returnFocusTo = requestedFocus?.isConnected ? requestedFocus : active && active !== document.body && active.isConnected ? active : null;
-      if (!root)
-        root = build();
-      root.classList.add("rlb-root--open");
-      root.setAttribute("aria-hidden", "false");
-      document.addEventListener("keydown", onKeyDown, true);
-      render();
-      const dialog = root.querySelector(".rlb-dialog");
-      const initial = dialogFocusables(dialog)[0];
-      (initial || dialog)?.focus();
+      try {
+        if (!root)
+          root = build();
+        if (!alreadyOpen)
+          releaseScrollLock = acquireDocumentScrollLock();
+        root.classList.add("rlb-root--open");
+        root.setAttribute("aria-hidden", "false");
+        document.addEventListener("keydown", onKeyDown, true);
+        render();
+        const dialog = root.querySelector(".rlb-dialog");
+        const initial = dialogFocusables(dialog)[0];
+        (initial || dialog)?.focus();
+      } catch (error) {
+        root?.classList.remove("rlb-root--open");
+        root?.setAttribute("aria-hidden", "true");
+        document.removeEventListener("keydown", onKeyDown, true);
+        releaseScrollLock?.();
+        releaseScrollLock = null;
+        returnFocusTo = null;
+        throw error;
+      }
     },
     close,
     destroy() {
-      clearLiveTicker();
-      resetDiscardConfirmation();
-      document.removeEventListener("keydown", onKeyDown, true);
+      close({ restoreFocus: false });
       root?.remove();
       root = null;
       summaryNode = null;
@@ -3551,8 +3649,8 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
-    --rlb-surface-link: var(--roam-accent-color, #2d72d2);
-    --rlb-surface-link-underline: rgba(45, 114, 210, 0.42);
+    --rlb-surface-link: var(--page-link-color, var(--page-links, var(--page-reference-color, var(--page-ref-color, var(--link-color, var(--roam-link-color, var(--accent-color, var(--roam-accent-color, #2d72d2))))))));
+    --rlb-surface-link-hover: var(--links-hover, var(--page-link-hover-color, var(--link-hover-color, var(--rlb-surface-link))));
     position: fixed;
     z-index: 30;
     width: min(340px, calc(100vw - 16px));
@@ -3594,35 +3692,6 @@ var STYLES = `
 
 .bp3-dark .rlb-surface__header .bp3-button {
     color: #a7b6c2;
-}
-
-.rlb-sidebar {
-    --rlb-surface-action-height: 32px;
-    --rlb-surface-title-size: 10px;
-    --rlb-surface-task-size: 13px;
-    --rlb-surface-meta-size: 10px;
-    --rlb-surface-action-size: 13px;
-    --rlb-surface-row-padding: 5px;
-    --rlb-surface-border: rgba(16, 22, 26, 0.12);
-    --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
-    --rlb-surface-hover: rgba(167, 182, 194, 0.15);
-    --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
-    --rlb-surface-link: var(--roam-accent-color, #2d72d2);
-    --rlb-surface-link-underline: rgba(45, 114, 210, 0.42);
-    width: min(360px, 100%);
-    max-width: 100%;
-    max-height: 100%;
-    overflow-y: auto;
-    padding: 10px;
-    text-align: left;
-}
-
-.rlb-sidebar--fallback {
-    position: fixed;
-    top: 56px;
-    right: 0;
-    z-index: 30;
-    max-height: calc(100vh - 56px);
 }
 
 .rlb-popover__empty {
@@ -3817,14 +3886,11 @@ var STYLES = `
     border-top-color: rgba(255, 255, 255, 0.15);
 }
 
-.bp3-dark .rlb-popover,
-.bp3-dark .rlb-sidebar {
+.bp3-dark .rlb-popover {
     --rlb-surface-border: rgba(255, 255, 255, 0.14);
     --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-hover: rgba(167, 182, 194, 0.18);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
-    --rlb-surface-link: var(--roam-accent-color, #48aff0);
-    --rlb-surface-link-underline: rgba(72, 175, 240, 0.55);
 }
 
 .rlb-run {
@@ -3886,7 +3952,7 @@ var STYLES = `
     font-weight: 500;
     line-height: 1.25;
     text-decoration: underline;
-    text-decoration-color: var(--rlb-surface-link-underline);
+    text-decoration-color: currentColor;
     text-decoration-thickness: 1px;
     text-underline-offset: 2px;
     border-radius: 2px;
@@ -3899,11 +3965,12 @@ var STYLES = `
 
 .bp3-button.bp3-minimal.rlb-run__title:hover,
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
+    color: var(--rlb-surface-link-hover);
     text-decoration-color: currentColor;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
-    outline: 2px solid var(--rlb-surface-link);
+    outline: 2px solid currentColor;
     outline-offset: 2px;
 }
 
@@ -4018,8 +4085,15 @@ var STYLES = `
     display: none;
     position: fixed;
     inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
     z-index: 100;
     justify-content: center;
+    box-sizing: border-box;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
 }
 
 .rlb-root--open {
@@ -4354,7 +4428,8 @@ var STYLES = `
     --rlb-overlay: rgba(16, 22, 26, 0.56);
     align-items: flex-start;
     padding: clamp(24px, 7vh, 64px) 24px 32px;
-    overflow-y: auto;
+    overflow: hidden;
+    overscroll-behavior: none;
     background: var(--rlb-overlay);
     color: var(--rlb-text);
     font-family: inherit;
@@ -4378,10 +4453,14 @@ var STYLES = `
 }
 
 .rlb-dialog {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
     width: min(1120px, calc(100vw - 48px));
     height: auto;
     min-height: 0;
     max-height: min(84vh, calc(100vh - 48px));
+    max-height: min(84dvh, calc(100dvh - 48px));
     overflow: hidden;
     border: 1px solid var(--rlb-border);
     border-radius: 4px;
@@ -4621,12 +4700,14 @@ var STYLES = `
 
 .rlb-body,
 .rlb-body__scroll {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-height: 0;
-    max-height: calc(84vh - 72px);
+    max-height: none;
     padding: 10px 20px 24px;
     overflow-y: auto;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
 }
 
 .rlb-dashboard-section {
@@ -4751,12 +4832,15 @@ var STYLES = `
     .rlb-root {
         align-items: flex-start;
         padding: 12px;
+        height: 100vh;
+        height: 100dvh;
     }
 
     .rlb-dialog {
         width: 100%;
         height: auto;
         max-height: calc(100vh - 24px);
+        max-height: calc(100dvh - 24px);
         border: 0;
         border-radius: 0;
     }
@@ -4829,7 +4913,7 @@ var STYLES = `
 
     .rlb-body,
     .rlb-body__scroll {
-        max-height: calc(100vh - 150px);
+        max-height: none;
         padding: 10px 12px 20px;
     }
 
@@ -5156,8 +5240,6 @@ function updateSessionSurfaceElapsed(root, entries, now) {
 var WIDGET_ID = "roam-logbook-topbar";
 var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
-var SIDEBAR_ID = "roam-logbook-current-sessions";
-var SIDEBAR_TITLE_ID = "roam-logbook-current-sessions-title";
 var TOPBAR_SELECTOR = ".rm-topbar";
 var REFRESH_SUCCESS_DURATION = 1800;
 var REFRESH_LOADING_MESSAGE = "Refreshing Sessions from graph\u2026";
@@ -5183,8 +5265,6 @@ function createTopbar({
   let separatorNode = null;
   let buttonNode = null;
   let popover = null;
-  let sidebar = null;
-  let sidebarHost = null;
   let observer = null;
   let hostObserver = null;
   let recoveryObserver = null;
@@ -5232,8 +5312,7 @@ function createTopbar({
     document.removeEventListener("mousedown", onDocumentMouseDown, true);
     document.removeEventListener("keydown", onPopoverKeyDown, true);
     window.removeEventListener("resize", closePopover);
-    if (!sidebar)
-      syncSurfaceAria(null);
+    syncSurfaceAria(null);
     if (restoreFocus && buttonNode?.isConnected)
       buttonNode.focus();
   };
@@ -5298,8 +5377,6 @@ function createTopbar({
   const renderSurfaces = () => {
     if (popover)
       renderPopover();
-    if (sidebar)
-      renderSidebar();
   };
   const renderRefreshState = () => {
     if (destroyed)
@@ -5370,10 +5447,10 @@ function createTopbar({
     }
     renderSurfaces();
   };
-  const surfaceOptions = (surface) => {
+  const surfaceOptions = () => {
     const scope = "session-surface";
     return {
-      titleId: surface === "sidebar" ? SIDEBAR_TITLE_ID : POPOVER_TITLE_ID,
+      titleId: POPOVER_TITLE_ID,
       staleHours: staleHours(),
       notices: surfaceNotices(),
       clockOutAllConfirm: confirmation?.isArmed("clock-out-all", scope),
@@ -5383,10 +5460,12 @@ function createTopbar({
         if (event?.shiftKey) {
           event.preventDefault();
           event.stopPropagation();
-          closePopover({ restoreFocus: false });
-          closeSidebar({ restoreFocus: false });
           void openBlockInRightSidebar(taskUid).then((result) => {
-            if (!result.ok) {
+            if (result?.ok) {
+              closePopover({ restoreFocus: false });
+              return;
+            }
+            if (!result?.ok) {
               actionNotice = result.message || "Could not open this Task in the right sidebar.";
               renderSurfaces();
             }
@@ -5395,7 +5474,6 @@ function createTopbar({
         }
         event?.stopPropagation();
         closePopover({ restoreFocus: false });
-        closeSidebar({ restoreFocus: false });
         void openBlock(taskUid);
       },
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
@@ -5417,7 +5495,6 @@ function createTopbar({
       },
       onOpenDashboard: () => {
         closePopover({ restoreFocus: false });
-        closeSidebar({ restoreFocus: false });
         onOpenDashboard?.(buttonNode);
       },
       onPauseAll: () => void run(() => pauseAll()),
@@ -5430,7 +5507,7 @@ function createTopbar({
         resetClockOutConfirmation();
         void run(() => clockOutAll());
       },
-      onClose: surface === "sidebar" ? () => closeSidebar() : null,
+      onClose: null,
       discardingClockUid: discardConfirmUid
     };
   };
@@ -5439,92 +5516,20 @@ function createTopbar({
       return;
     const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
-    const options = surfaceOptions("popover");
+    const options = surfaceOptions();
     options.emptyMessage = refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
     renderSessionSurface(popover, model, options);
   }
-  function renderSidebar() {
-    if (!sidebar)
-      return;
-    const model = sessionModel();
-    const refreshStatus = getLastRefreshStatus();
-    const options = surfaceOptions("sidebar");
-    options.emptyMessage = refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
-    renderSessionSurface(sidebar, model, options);
-  }
-  const syncSurfaceAria = (targetId) => {
-    buttonNode?.setAttribute("aria-expanded", targetId ? "true" : "false");
-    buttonNode?.setAttribute("aria-controls", targetId || POPOVER_ID);
-  };
-  const closeSidebar = ({ restoreFocus = true } = {}) => {
-    sidebar?.remove();
-    sidebar = null;
-    sidebarHost = null;
-    if (!popover)
-      syncSurfaceAria(null);
-    if (restoreFocus && buttonNode?.isConnected)
-      buttonNode.focus();
-  };
-  const findSidebarHost = () => document.querySelector(
-    "#right-sidebar-content, #roam-right-sidebar-content, #right-sidebar .rm-right-sidebar__content, #right-sidebar, .rm-right-sidebar"
-  ) || document.body;
-  const requestRoamSidebarOpen = () => {
-    try {
-      window.roamAlphaAPI?.ui?.rightSidebar?.open?.();
-    } catch (error) {
-      console.debug("[roam-logbook] right sidebar open helper unavailable", error);
-    }
-  };
-  const mountSidebar = (host) => {
-    if (destroyed || sidebar?.isConnected)
-      return;
-    sidebarHost = host;
-    sidebar = el("section", "bp3-card rlb-sidebar");
-    if (sidebarHost === document.body)
-      sidebar.classList.add("rlb-sidebar--fallback");
-    sidebar.id = SIDEBAR_ID;
-    sidebar.setAttribute("role", "region");
-    sidebar.setAttribute("aria-labelledby", SIDEBAR_TITLE_ID);
-    sidebarHost.appendChild(sidebar);
-    syncSurfaceAria(SIDEBAR_ID);
-    refresh();
-    renderSidebar();
-    sidebar.querySelector("button")?.focus();
-  };
-  const waitForSidebarHost = () => new Promise((resolve2) => {
-    let attempts = 0;
-    const probe = () => {
-      const host = findSidebarHost();
-      if (host !== document.body || attempts >= 2) {
-        resolve2(host);
-        return;
-      }
-      attempts += 1;
-      setTimeout(probe, 0);
-    };
-    queueMicrotask(probe);
-  });
-  const openSidebar = () => {
-    if (sidebar?.isConnected) {
-      sidebar.querySelector(".rlb-surface__close, button")?.focus();
-      return;
-    }
-    closePopover({ restoreFocus: false });
-    requestRoamSidebarOpen();
-    const host = findSidebarHost();
-    if (host !== document.body) {
-      mountSidebar(host);
-      return;
-    }
-    void waitForSidebarHost().then(mountSidebar);
+  const syncSurfaceAria = (expanded) => {
+    buttonNode?.setAttribute("aria-expanded", expanded ? "true" : "false");
+    buttonNode?.setAttribute("aria-controls", POPOVER_ID);
   };
   const togglePopover = (event) => {
     if (event?.shiftKey) {
       event.preventDefault();
-      openSidebar();
+      event.stopPropagation();
       return;
     }
-    closeSidebar({ restoreFocus: false });
     if (popover) {
       closePopover();
       return;
@@ -5630,7 +5635,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     const now = nowDate();
     renderButton(entries, now);
     updateSessionSurfaceElapsed(popover, entries, now);
-    updateSessionSurfaceElapsed(sidebar, entries, now);
   };
   const build = () => {
     container = el("div", "rlb-topbar");
@@ -5814,7 +5818,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   };
   const remove = () => {
     closePopover();
-    closeSidebar({ restoreFocus: false });
     for (const host of layoutHosts)
       host.classList.remove("rlb-topbar__layout");
     for (const host of searchHosts)

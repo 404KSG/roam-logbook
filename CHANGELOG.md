@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.13 — 2026-08-16
+
+- Restored reliable Session-title Shift+Click navigation to Roam's native right sidebar: `getWindows()` is authoritative, closed native windows can be reopened, old APIs retry after failed requests, and failed or unavailable sidebar calls leave the popover open with a concise notice.
+- Made topbar Shift+Click deliberately inert; ordinary click remains the only topbar popover toggle, with no custom sidebar, default navigation, or layout mutation.
+- Switched Session title links to Roam-theme-safe CSS variable fallbacks with current-color underline and focus treatment, including dark themes.
+- Fixed the Dashboard overlay to the viewport, locked and exactly restored document scrolling/styles across close, Escape, overlay click, repeated opens, exceptions, and extension unload, and restricted scrolling to the dialog body.
+- Added jsdom lifecycle, native-sidebar retry, scroll-lock, and Chromium wheel/geometry/accessibility regression coverage.
+
 ## 0.9.0-beta.12 — 2026-08-16
 
 - Renamed the user-visible Dashboard heading and overview label to **Roam Logbook** without changing internal extension IDs, commands, or Depot identity.
