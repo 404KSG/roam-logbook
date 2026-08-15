@@ -1,11 +1,41 @@
 // src/time.js
 var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec"
+];
 var pad = (n) => String(n).padStart(2, "0");
 function formatTimestamp(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${DAY_NAMES[date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 function formatStamp(date) {
   return `[${formatTimestamp(date)}]`;
+}
+var isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
+function formatStarted(start2, now = /* @__PURE__ */ new Date()) {
+  const raw = isValidDate(start2) ? formatStamp(start2) : String(start2 ?? "");
+  const candidate = isValidDate(start2) ? start2 : parseTimestamp(raw.replace(/^\[|\]$/g, ""));
+  if (!isValidDate(candidate)) {
+    return { valid: false, raw, dateLabel: raw, timeLabel: "", datetime: null };
+  }
+  const sameDay = isValidDate(now) && candidate.getFullYear() === now.getFullYear() && candidate.getMonth() === now.getMonth() && candidate.getDate() === now.getDate();
+  return {
+    valid: true,
+    raw,
+    dateLabel: sameDay ? "Today" : `${MONTH_NAMES[candidate.getMonth()]} ${candidate.getDate()}`,
+    timeLabel: `${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`,
+    datetime: `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`
+  };
 }
 var STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 function parseTimestamp(text) {
@@ -847,9 +877,25 @@ function createDashboard() {
           { title: "Discard this entry" }
         )
       );
+      const started = formatStarted(entry.start, now);
+      const startedTime = el("time", "rlb-started", "");
+      startedTime.title = started.raw;
+      startedTime.setAttribute("aria-label", started.raw);
+      if (started.datetime)
+        startedTime.dateTime = started.datetime;
+      if (started.valid) {
+        startedTime.append(
+          el("span", "rlb-started__date", started.dateLabel),
+          el("span", "rlb-started__time", started.timeLabel)
+        );
+      } else {
+        startedTime.textContent = started.raw;
+      }
+      const startedCell = el("td", "rlb-muted rlb-started-cell");
+      startedCell.appendChild(startedTime);
       row.append(
         task,
-        el("td", "rlb-muted", formatStamp(entry.start)),
+        startedCell,
         el("td", "rlb-table__num", formatElapsed(now.getTime() - entry.start.getTime())),
         actions
       );
@@ -1862,6 +1908,28 @@ var STYLES = `
     white-space: nowrap;
 }
 
+.rlb-started-cell {
+    min-width: 132px;
+    white-space: nowrap;
+}
+
+.rlb-started {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    vertical-align: baseline;
+}
+
+.rlb-started__date {
+    opacity: 0.72;
+}
+
+.rlb-started__time {
+    font-weight: 500;
+}
+
 /* Beats the .rlb-table th left-align above, which otherwise parks a numeric
    column's label against the opposite edge from its figures. */
 .rlb-table th.rlb-table__num {
@@ -2357,6 +2425,7 @@ function createTopbar({ onOpenDashboard }) {
   let destroyed = false;
   const isStale = (entry) => findStaleClocks([entry], /* @__PURE__ */ new Date(), staleHours()).length > 0;
   const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
+  const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
   const closePopover = () => {
     popover?.remove();
@@ -2445,7 +2514,7 @@ function createTopbar({ onOpenDashboard }) {
       el(
         "div",
         "rlb-popover__title",
-        entries.length ? `${taskCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook"
+        entries.length ? `${sessionCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook"
       )
     );
     if (entries.length === 0 && pausedItems.length === 0) {
@@ -2463,7 +2532,7 @@ function createTopbar({ onOpenDashboard }) {
           el(
             "div",
             "rlb-popover__empty bp3-text-small",
-            `${taskCount(stale.length)} ${stale.length > 1 ? "have" : "has"} been open for over ${staleHours()}h \u2014 likely forgotten.`
+            `${sessionCount(stale.length)} ${stale.length > 1 ? "have" : "has"} been open for over ${staleHours()}h \u2014 likely forgotten.`
           )
         );
       }
@@ -2555,7 +2624,7 @@ function createTopbar({ onOpenDashboard }) {
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       buttonNode.replaceChildren(iconNode);
-      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Task running. Click for details.";
+      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -2566,7 +2635,7 @@ function createTopbar({ onOpenDashboard }) {
     timeNode.textContent = formatElapsed(elapsed);
     if (entries.length > 1) {
       buttonNode.classList.add("rlb-topbar__button--parallel");
-      parallelNode.textContent = taskCount(entries.length);
+      parallelNode.textContent = sessionCount(entries.length);
       separatorNode.textContent = "";
       buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     } else {
@@ -2574,13 +2643,14 @@ function createTopbar({ onOpenDashboard }) {
       buttonNode.replaceChildren(timeNode);
     }
     if (entries.length > 1) {
-      buttonNode.title = `${taskCount(entries.length)} Running
+      buttonNode.title = `${sessionCount(entries.length)} Running
 Primary timer: ${first.title}
 This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
       const target = targetMinutes(first.clockUid);
       const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
-      buttonNode.title = `Clocked in: ${first.title}
+      buttonNode.title = `${sessionCount(entries.length)} Running
+Clocked in: ${first.title}
 This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
 Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
     }

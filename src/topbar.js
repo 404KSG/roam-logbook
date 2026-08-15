@@ -48,6 +48,7 @@ export function createTopbar({ onOpenDashboard }) {
         findStaleClocks([entry], new Date(), staleHours()).length > 0;
 
     const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
+    const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
     const pomodoroLabel = minutes =>
         Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 60_000);
 
@@ -161,7 +162,7 @@ export function createTopbar({ onOpenDashboard }) {
                 'div',
                 'rlb-popover__title',
                 entries.length
-                    ? `${taskCount(entries.length)} Running`
+                    ? `${sessionCount(entries.length)} Running`
                     : pausedItems.length
                       ? `${taskCount(pausedItems.length)} Paused`
                       : 'Logbook'
@@ -183,7 +184,7 @@ export function createTopbar({ onOpenDashboard }) {
                     el(
                         'div',
                         'rlb-popover__empty bp3-text-small',
-                        `${taskCount(stale.length)} ${stale.length > 1 ? 'have' : 'has'} been open for over ` +
+                        `${sessionCount(stale.length)} ${stale.length > 1 ? 'have' : 'has'} been open for over ` +
                             `${staleHours()}h — likely forgotten.`
                     )
                 );
@@ -280,7 +281,7 @@ export function createTopbar({ onOpenDashboard }) {
             buttonNode.replaceChildren(iconNode);
             buttonNode.title = pausedItems.length
                 ? `${taskCount(pausedItems.length)} Paused — click to resume or review.`
-                : 'Logbook — no Task running. Click for details.';
+                : 'Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
         }
@@ -295,7 +296,7 @@ export function createTopbar({ onOpenDashboard }) {
         timeNode.textContent = formatElapsed(elapsed);
         if (entries.length > 1) {
             buttonNode.classList.add('rlb-topbar__button--parallel');
-            parallelNode.textContent = taskCount(entries.length);
+            parallelNode.textContent = sessionCount(entries.length);
             separatorNode.textContent = '';
             buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         } else {
@@ -305,7 +306,7 @@ export function createTopbar({ onOpenDashboard }) {
 
         if (entries.length > 1) {
             buttonNode.title =
-                `${taskCount(entries.length)} Running\n` +
+                `${sessionCount(entries.length)} Running\n` +
                 `Primary timer: ${first.title}\n` +
                 `This session ${formatElapsed(elapsed)}` +
                 (overrun ? '\nA Pomodoro is over its target.' : '') +
@@ -315,6 +316,7 @@ export function createTopbar({ onOpenDashboard }) {
             const target = pomodoro.targetMinutes(first.clockUid);
             const totalMinutes = first.priorMinutes + Math.floor(elapsed / 60_000);
             buttonNode.title =
+                `${sessionCount(entries.length)} Running\n` +
                 `Clocked in: ${first.title}\n` +
                 `This session ${formatElapsed(elapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
                 (target

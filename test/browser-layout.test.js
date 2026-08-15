@@ -102,10 +102,32 @@ const taskGeometryExpression = `(() => {
     };
 })()`;
 
+const startedGeometryExpression = `(() => {
+    const rect = node => {
+        const value = node.getBoundingClientRect();
+        return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+    };
+    const started = document.querySelector('.rlb-started');
+    const date = started.querySelector('.rlb-started__date');
+    const time = started.querySelector('.rlb-started__time');
+    const dateRect = rect(date);
+    const timeRect = rect(time);
+    const startedStyle = getComputedStyle(started);
+    const cellStyle = getComputedStyle(started.closest('td'));
+    return {
+        started: rect(started), date: dateRect, time: timeRect,
+        display: startedStyle.display, alignItems: startedStyle.alignItems,
+        gap: startedStyle.gap, whiteSpace: startedStyle.whiteSpace,
+        fontVariantNumeric: startedStyle.fontVariantNumeric,
+        cellMinWidth: cellStyle.minWidth, cellWhiteSpace: cellStyle.whiteSpace,
+        sameLine: Math.max(dateRect.top, timeRect.top) < Math.min(dateRect.bottom, timeRect.bottom),
+    };
+})()`;
+
 test('topbar visible glyphs keep equal space around the separator', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rm-topbar"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Tasks</span></button></div></div>`),
+        htmlWithLateHost(`<div class="rm-topbar"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button></div></div>`),
         geometryExpression
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
@@ -126,4 +148,21 @@ test('a collapsed long Task wraps without painting into its summary', async t =>
     assert.ok(geometry.separation >= 8, JSON.stringify(geometry));
     assert.ok(geometry.lineCount >= 2, JSON.stringify(geometry));
     assert.ok(geometry.title.rect.height > 20, JSON.stringify(geometry));
+});
+
+test('Started date and time stay on one baseline-aligned compact line', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<table class="rlb-table" style="width:760px"><tbody><tr><td class="rlb-cell">Task</td><td class="rlb-muted rlb-started-cell"><time class="rlb-started" datetime="2026-08-14T21:30" title="[2026-08-14 Fri 21:30]"><span class="rlb-started__date">Aug 14</span><span class="rlb-started__time">21:30</span></time></td><td class="rlb-table__num">5:44</td></tr></tbody></table>`),
+        startedGeometryExpression
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.display, 'inline-flex', JSON.stringify(geometry));
+    assert.equal(geometry.alignItems, 'baseline', JSON.stringify(geometry));
+    assert.equal(geometry.gap, '8px', JSON.stringify(geometry));
+    assert.equal(geometry.whiteSpace, 'nowrap', JSON.stringify(geometry));
+    assert.equal(geometry.cellWhiteSpace, 'nowrap', JSON.stringify(geometry));
+    assert.match(geometry.fontVariantNumeric, /tabular-nums/, JSON.stringify(geometry));
+    assert.equal(geometry.sameLine, true, JSON.stringify(geometry));
+    assert.ok(Number.parseFloat(geometry.cellMinWidth) >= 120, JSON.stringify(geometry));
 });

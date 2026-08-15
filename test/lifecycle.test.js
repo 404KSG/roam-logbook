@@ -163,6 +163,11 @@ test('clocking in shows only the primary live elapsed time in the topbar', async
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
     assert.doesNotMatch(topbarWidget().textContent, /this is a test task|\/|·|clocks/);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
+    assert.match(topbarWidget().querySelector('button').title, /^1 Session Running\n/);
+    assert.equal(
+        topbarWidget().querySelector('button').getAttribute('aria-label'),
+        topbarWidget().querySelector('button').title
+    );
 });
 
 test('banked task time stays available in the tooltip, not the visible topbar', () => {
@@ -220,8 +225,8 @@ test('a stale clock marks only the visible elapsed time', () => {
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Task Running');
-    assert.match(popover.textContent, /1 Task has been open for over 8h/);
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Session Running');
+    assert.match(popover.textContent, /1 Session has been open for over 8h/);
     assert.doesNotMatch(popover.textContent, /clock has been open/i);
     click(topbarWidget().querySelector('button'));
 
@@ -249,7 +254,7 @@ test('clock in is hidden and clock out offered while the clock runs', () => {
     assert.equal(contextCommands.get('Logbook: Clock out')['display-conditional'](context), true);
 });
 
-test('multiple-clock mode leads with elapsed time and follows with a compact Task count', async () => {
+test('multiple-clock mode leads with elapsed time and follows with a compact Session count', async () => {
     const [primary] = clock.getRunning();
     graph.store.get(primary.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 10 * 60_000))}`;
     graph.store.set('tasktwo002', {
@@ -280,7 +285,7 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Tas
             'rlb-topbar__parallel',
         ]);
         assert.match(visible[0].textContent, /^\d+:\d{2}(?::\d{2})?$/);
-        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Tasks');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Sessions');
         assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent, '');
         assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
         assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
@@ -288,13 +293,13 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Tas
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
         assert.doesNotMatch(topbarWidget().textContent, /parallel task|third parallel task|this is a test task|clocks|\//);
-        assert.match(topbarWidget().querySelector('button').title, /^3 Tasks Running\n/);
+        assert.match(topbarWidget().querySelector('button').title, /^3 Sessions Running\n/);
         assert.doesNotMatch(topbarWidget().querySelector('button').title, /clocks running/i);
 
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
-        assert.equal(popover.querySelector('.rlb-popover__title').textContent, '3 Tasks Running');
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, '3 Sessions Running');
         const footer = [...popover.querySelectorAll('.rlb-popover__footer button')];
         assert.deepEqual(footer.map(node => node.textContent), [
             'Dashboard',
@@ -334,7 +339,7 @@ test('the popover lists the running clock', () => {
 
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Task Running');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Session Running');
     assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
     assert.equal(popover.querySelector('.bp3-icon-stopwatch'), null);
     for (const selector of ['.bp3-icon-stop', '.bp3-icon-trash']) {
@@ -392,6 +397,14 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.ok(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'));
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
+    const runningTable = dialog().querySelector('.rlb-table');
+    const started = runningTable.querySelector('.rlb-started');
+    assert.ok(started, 'Running exposes a semantic Started time');
+    assert.equal(started.tagName, 'TIME');
+    assert.equal(started.title, formatStamp(clock.getRunning()[0].start));
+    assert.equal(started.querySelector('.rlb-started__date')?.textContent, 'Today');
+    assert.match(started.querySelector('.rlb-started__time')?.textContent ?? '', /^\d{2}:\d{2}$/);
+    assert.equal(started.dateTime, started.getAttribute('datetime'));
     const taskTable = dialog().querySelector('.rlb-task-table');
     assert.ok(taskTable, 'By Task uses its own stable column contract');
     assert.deepEqual(
@@ -526,7 +539,7 @@ test('clocking out through the palette closes the entry', async () => {
     assert.equal(topbarWidget().textContent, '');
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(topbarWidget().querySelector('button').title, /no Task running/);
+    assert.match(topbarWidget().querySelector('button').title, /no Session running/);
 });
 
 test('automatic targets capture the configured duration per Session and recover missing state on reload', async () => {

@@ -6,6 +6,20 @@
  */
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+];
 
 const pad = n => String(n).padStart(2, '0');
 
@@ -20,6 +34,42 @@ export function formatTimestamp(date) {
 /** `[2026-08-05 Wed 15:58]` — the bracketed (inactive) org timestamp. */
 export function formatStamp(date) {
     return `[${formatTimestamp(date)}]`;
+}
+
+const isValidDate = value => value instanceof Date && !Number.isNaN(value.getTime());
+
+/**
+ * Compact, local Started metadata for the Running table.
+ *
+ * The graph stores org timestamps without a timezone. Keep the original text
+ * for the title/fallback, and only expose a datetime attribute when the local
+ * date is known to be valid.
+ */
+export function formatStarted(start, now = new Date()) {
+    const raw = isValidDate(start) ? formatStamp(start) : String(start ?? '');
+    const candidate = isValidDate(start)
+        ? start
+        : parseTimestamp(raw.replace(/^\[|\]$/g, ''));
+    if (!isValidDate(candidate)) {
+        return { valid: false, raw, dateLabel: raw, timeLabel: '', datetime: null };
+    }
+
+    const sameDay =
+        isValidDate(now) &&
+        candidate.getFullYear() === now.getFullYear() &&
+        candidate.getMonth() === now.getMonth() &&
+        candidate.getDate() === now.getDate();
+    return {
+        valid: true,
+        raw,
+        dateLabel: sameDay
+            ? 'Today'
+            : `${MONTH_NAMES[candidate.getMonth()]} ${candidate.getDate()}`,
+        timeLabel: `${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`,
+        datetime:
+            `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}` +
+            `T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`,
+    };
 }
 
 // The day name is optional and free-form so that graphs written in a non-English

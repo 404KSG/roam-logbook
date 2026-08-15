@@ -141,7 +141,7 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(JSON.parse(settingsStore.get('pausedBatch')).items.length, 0);
     const resumedFirst = clock.getRunning().find(entry => entry.taskUid === 'pauseone1');
     assert.equal(pomodoro.targetDurationMs(resumedFirst.clockUid), 24 * 60_000 + 43_000);
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Running');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Running');
     const resumedRow = [...popover().querySelectorAll('.rlb-run')]
         .find(row => row.textContent.includes('first paused task'));
     assert.match(resumedRow.querySelector('.rlb-run__meta').textContent, /24:43/);

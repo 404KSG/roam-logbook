@@ -7,6 +7,7 @@ import {
     formatDurationMinutes,
     formatElapsed,
     formatMinutesHuman,
+    formatStarted,
     formatStamp,
     formatTimestamp,
     parseDurationMinutes,
@@ -17,6 +18,34 @@ import {
 test('formats an org timestamp with its day name', () => {
     assert.equal(formatTimestamp(new Date(2026, 7, 5, 15, 58)), '2026-08-05 Wed 15:58');
     assert.equal(formatStamp(new Date(2026, 7, 5, 15, 58)), '[2026-08-05 Wed 15:58]');
+});
+
+test('formats Started as a compact local date and time against a fixed now', () => {
+    const now = new Date(2026, 7, 15, 9, 0);
+    assert.deepEqual(formatStarted('[2026-08-15 Sat 08:46]', now), {
+        valid: true,
+        raw: '[2026-08-15 Sat 08:46]',
+        dateLabel: 'Today',
+        timeLabel: '08:46',
+        datetime: '2026-08-15T08:46',
+    });
+    assert.deepEqual(formatStarted('[2026-08-14 Fri 21:30]', now), {
+        valid: true,
+        raw: '[2026-08-14 Fri 21:30]',
+        dateLabel: 'Aug 14',
+        timeLabel: '21:30',
+        datetime: '2026-08-14T21:30',
+    });
+});
+
+test('falls back to the original Started text when its timestamp is invalid', () => {
+    assert.deepEqual(formatStarted('[not a timestamp]', new Date(2026, 7, 15, 9, 0)), {
+        valid: false,
+        raw: '[not a timestamp]',
+        dateLabel: '[not a timestamp]',
+        timeLabel: '',
+        datetime: null,
+    });
 });
 
 test('pads single-digit months, days and hours', () => {

@@ -423,6 +423,28 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+.rlb-started-cell {
+    min-width: 132px;
+    white-space: nowrap;
+}
+
+.rlb-started {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    vertical-align: baseline;
+}
+
+.rlb-started__date {
+    opacity: 0.72;
+}
+
+.rlb-started__time {
+    font-weight: 500;
+}
+
 /* Beats the .rlb-table th left-align above, which otherwise parks a numeric
    column's label against the opposite edge from its figures. */
 .rlb-table th.rlb-table__num {

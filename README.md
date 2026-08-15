@@ -31,13 +31,13 @@ The extension reads and writes the local graph only. There are no analytics, net
 12:34
 ```
 
-With parallel timing enabled, it follows the stable elapsed timer with only the active-task count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline:
+With parallel timing enabled, it follows the stable elapsed timer with only the active-session count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline:
 
 ```
-0:28 · 2 Tasks
+0:28 · 2 Sessions
 ```
 
-Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and full running-task popover. Click the icon, time, or task count to open that popover, where each clock can be stopped, thrown away, or jumped to. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is the one icon-only footer action. Per-task Clock Out and Discard controls remain compact icon buttons.
+Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and full running-session popover. Click the icon, time, or session count to open that popover, where each clock can be stopped, thrown away, or jumped to. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is the one icon-only footer action. Per-task Clock Out and Discard controls remain compact icon buttons.
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. Clicking the idle history icon then shows the paused Tasks and **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 
@@ -45,7 +45,7 @@ If a running Session had an unfinished Pomodoro, its exact remaining budget cont
 
 **Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. By Task keeps complete titles—even beyond 80 characters—in a dedicated inner grid whose title span explicitly overrides Blueprint's non-shrinking button-child rule; collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails. Narrow screens scroll only when those columns truly need it.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. Running rows show Started as compact `Today 08:46` or `Aug 14 21:30` metadata while retaining the complete Org timestamp in the accessible title. By Task keeps complete titles—even beyond 80 characters—in a dedicated inner grid whose title span explicitly overrides Blueprint's non-shrinking button-child rule; collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails. Narrow screens scroll only when those columns truly need it.
 
 ### Custom hotkeys
 
@@ -87,7 +87,7 @@ Clocks that have been open longer than the threshold (8 hours by default) are ma
 
 ### One clock or several
 
-By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `elapsed · N Tasks` using its existing primary live timer, while the popover lists every parallel task. A deterministic three-column grid draws the centered dot and explicitly clears Blueprint's child margins and shrink rules, so the visible spacing stays balanced without a hidden timer-width reservation. Clocking the same task twice is refused so nothing gets double-counted.
+By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `elapsed · N Sessions` using its existing primary live timer, while the popover lists every parallel task. A deterministic three-column grid draws the centered dot and explicitly clears Blueprint's child margins and shrink rules, so the visible spacing stays balanced without a hidden timer-width reservation. Clocking the same task twice is refused so nothing gets double-counted.
 
 ## Settings
 

@@ -11,7 +11,7 @@ import { readAllEntries, readHierarchy } from './entries.js';
 import { openBlock } from './roam.js';
 import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
 import { staleHours } from './settings.js';
-import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
+import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 
@@ -118,9 +118,26 @@ export function createDashboard() {
                 )
             );
 
+            const started = formatStarted(entry.start, now);
+            const startedTime = el('time', 'rlb-started', '');
+            startedTime.title = started.raw;
+            startedTime.setAttribute('aria-label', started.raw);
+            if (started.datetime) startedTime.dateTime = started.datetime;
+            if (started.valid) {
+                startedTime.append(
+                    el('span', 'rlb-started__date', started.dateLabel),
+                    el('span', 'rlb-started__time', started.timeLabel)
+                );
+            } else {
+                startedTime.textContent = started.raw;
+            }
+
+            const startedCell = el('td', 'rlb-muted rlb-started-cell');
+            startedCell.appendChild(startedTime);
+
             row.append(
                 task,
-                el('td', 'rlb-muted', formatStamp(entry.start)),
+                startedCell,
                 el('td', 'rlb-table__num', formatElapsed(now.getTime() - entry.start.getTime())),
                 actions
             );
