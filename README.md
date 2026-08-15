@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.6**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.7**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -39,7 +39,7 @@ is reported as uncertain.
 12:34
 ```
 
-With parallel timing enabled, it follows the stable elapsed timer with only the active-session count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline. When all Sessions are paused, the clock identity stays visible with a small muted pause badge instead of falling back to an indistinguishable idle icon:
+With parallel timing enabled, it follows the stable elapsed timer with only the active-session count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline. When all Sessions are paused, the history-clock identity stays visible with a low-saturation ochre background and an explicit paused accessible name; there is no extra badge:
 
 ```
 0:28 · 2 Sessions
@@ -53,7 +53,7 @@ If a running Session had an unfinished Pomodoro, its exact remaining budget cont
 
 **Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, a compact seven-column By Day activity chart, and the original per-task tree over the range you pick. The beta.6 surface uses whitespace and alignment instead of card grids and repeated row rules: By Day keeps its date range in the heading, uses one quiet shared baseline with silent zero-value days, and shows compact values only on days with activity; each bar still exposes the complete date and duration through its accessible label and tooltip. Running rows show Started as compact `Today 08:46` or `Aug 14 21:30` metadata while retaining the complete Org timestamp in the accessible title. By Task keeps complete titles—even beyond 80 characters—in a dedicated inner grid whose title span explicitly overrides Blueprint's non-shrinking button-child rule; collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails. Narrow screens scroll only when those columns truly need it.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment. The summary is exactly three metrics — Today, the selected range, and Tasks tracked — with the selected-range metric containing a compact activity rail. Finite ranges expose their real daily buckets; All time keeps the exact total but labels the rail as a recent 30-day activity window. Running Sessions appear only when present, followed by the primary By Task hierarchy with Sessions, Own, Total, disclosure controls, and task navigation. The roll-up explanation is available through the By Task info control instead of a full-width footer note. The beta.7 surface uses whitespace and alignment instead of card grids, independent By Day sections, repeated tracks, or per-row rules; every bucket still exposes its complete date and duration through its accessible label and tooltip. Narrow screens stack the three metrics without clipping and retain safe task-column overflow only where those columns truly need it.
 
 ### Custom hotkeys
 

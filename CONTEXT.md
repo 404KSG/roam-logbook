@@ -46,6 +46,10 @@ The intended focus duration attached to one Session. Passing the target changes
 the reminder state but does not end the Session.
 _Avoid_: Pomodoro Session, timer limit
 
+The paused topbar keeps the same history-clock identity and uses only a
+low-saturation ochre background for a compact, non-alarming distinction from
+idle. It has no additional pause badge or glyph.
+
 ## Mutation boundary
 
 Graph mutations are serialized only within one loaded plugin instance. Each queued

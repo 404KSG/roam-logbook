@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.7 — 2026-08-15
+
+- Rebuilt the Dashboard around an integrated three-metric summary: the selected-range metric now owns the real daily activity rail, and the standalone By Day section is gone.
+- Made By Task the primary list after the summary and any actual Running Sessions; moved roll-up guidance to an accessible info control and kept graph-read/timing issues conditional and compact.
+- Removed the paused topbar's pause badge DOM and CSS. Paused state now keeps the history-clock identity and uses only a low-saturation ochre background plus its accessible paused count.
+- Added public DOM, range, responsive, accessibility, and lifecycle coverage for the embedded rail, omitted sections, empty/running states, and badge removal.
+- The complete local suite now contains 226 tests, including browser geometry, accessibility, data-health ordering, and final-bundle lifecycle coverage.
+
 ## 0.9.0-beta.6 — 2026-08-15
 
 - Simplified the Dashboard into a quiet Roam-native surface: summary metrics no longer read as cards, repeated table/track borders are removed, and By Day keeps one shared baseline with silent zero-value days.

@@ -100,7 +100,7 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.equal(document.querySelectorAll('#roam-logbook-styles').length, 1);
     assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
-    assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 62px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 58px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 11px[^}]*line-height: 1\.4[^}]*overflow: visible[^}]*white-space: normal/s);

@@ -99,17 +99,18 @@ export function createDashboard({
         const model = buildDashboard(entries, { now, rangeId, hierarchy });
         bodyNode.replaceChildren();
 
-        // Today and the last week are always shown; a third card for the selected
-        // range would just repeat one of them unless the range is wider.
         const rangeLabel = getRange(rangeId).label;
-        const duplicatesFixedCard = rangeId === 'today' || rangeId === 'week';
         summaryNode.replaceChildren(
-            statsRow([
-                ['Today', formatMinutesHuman(model.todayMinutes)],
-                ['Last 7 days', formatMinutesHuman(model.weekMinutes)],
-                ...(duplicatesFixedCard ? [] : [[rangeLabel, formatMinutesHuman(model.totalMinutes)]]),
-                ['Tasks tracked', String(model.tasks.length)],
-            ])
+            statsRow({
+                today: formatMinutesHuman(model.todayMinutes),
+                selected: formatMinutesHuman(model.totalMinutes),
+                selectedLabel: rangeLabel,
+                activity: model.activity || model.days,
+                activityLabel: model.activityLabel || rangeLabel,
+                activityScope: model.activityScope || 'selected-range',
+                tasks: String(model.tasks.length),
+                now,
+            })
         );
 
         if (refreshNotice) {
@@ -118,27 +119,27 @@ export function createDashboard({
             bodyNode.appendChild(notice);
         }
 
+        if (model.running.length > 0) {
+            bodyNode.appendChild(runningSection(model.running, now));
+        }
+
         const issues = [
             ...model.issues,
             ...(hierarchy.issues || []).map(issueRow),
             ...transientIssues.map(issueRow),
         ];
-        if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
-
-        if (model.running.length > 0) {
-            bodyNode.appendChild(runningSection(model.running, now));
-        }
 
         if (model.entries.length === 0) {
             bodyNode.appendChild(
                 el('div', 'rlb-empty', 'No clock entries in this range yet.')
             );
+            if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
             startLiveTicker();
             return;
         }
 
-        bodyNode.appendChild(daysSection(model.days, now));
         bodyNode.appendChild(tasksSection(model.tree));
+        if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
         startLiveTicker();
     };
 
@@ -151,7 +152,7 @@ export function createDashboard({
     });
 
     const dataIssuesSection = issues => {
-        const details = el('details', 'rlb-data-issues');
+        const details = el('details', 'rlb-data-issues rlb-dashboard__inline-status');
         const issueGroups = issues.map(entry => (entry.issues || [entry.issue]).filter(Boolean));
         const graphReadCount = issueGroups.filter(group =>
             group.some(issue => issue.kind === 'graph-read')
@@ -195,14 +196,65 @@ export function createDashboard({
         return details;
     };
 
-    const statsRow = pairs => {
+    const activityRail = (days, now, activityLabel, activityScope) => {
+        const series = days || [];
+        const peak = Math.max(1, ...series.map(day => day.minutes));
+        const rail = el('div', 'rlb-activity-rail');
+        rail.dataset.dayCount = String(series.length);
+        rail.style.setProperty('--rlb-activity-count', String(series.length));
+        rail.dataset.activityScope = activityScope;
+        rail.setAttribute('role', 'group');
+        rail.setAttribute('aria-label', `${activityLabel} activity`);
+
+        for (const day of series) {
+            const level =
+                day.minutes === 0 ? 0 : Math.max(1, Math.ceil((day.minutes / peak) * 3));
+            const duration = formatMinutesHuman(day.minutes);
+            const label = formatDayLabel(day.date, now);
+            const bucket = button(
+                `rlb-activity__bucket rlb-activity__bucket--level-${level}${
+                    day.minutes === 0 ? ' rlb-activity__bucket--empty' : ''
+                }`,
+                '',
+                () => {},
+                { title: `${day.key} · ${duration}` }
+            );
+            bucket.dataset.date = day.key;
+            bucket.dataset.minutes = String(day.minutes);
+            bucket.dataset.level = String(level);
+            bucket.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
+            const fill = el('span', 'rlb-activity__fill');
+            fill.style.height = `${day.minutes === 0 ? 0 : Math.max(8, Math.round((day.minutes / peak) * 100))}%`;
+            bucket.append(fill, el('span', 'rlb-activity__label', label));
+            rail.appendChild(bucket);
+        }
+        return rail;
+    };
+
+    const statsRow = ({
+        today,
+        selected,
+        selectedLabel,
+        activity,
+        activityLabel,
+        activityScope,
+        tasks,
+        now,
+    }) => {
         const wrapper = el('div', 'rlb-stats');
         wrapper.setAttribute('role', 'list');
         wrapper.setAttribute('aria-label', 'Logbook summary');
-        for (const [label, value] of pairs) {
+        const metrics = [
+            ['Today', today],
+            [selectedLabel, selected],
+            ['Tasks tracked', tasks],
+        ];
+        for (const [index, [label, value]] of metrics.entries()) {
             const card = el('div', 'rlb-stat');
+            if (index === 1) card.classList.add('rlb-stat--activity');
             card.setAttribute('role', 'listitem');
             card.append(el('strong', 'rlb-stat__value', value), el('span', 'rlb-stat__label', label));
+            if (index === 1) card.appendChild(activityRail(activity, now, activityLabel, activityScope));
             wrapper.appendChild(card);
         }
         return wrapper;
@@ -210,7 +262,7 @@ export function createDashboard({
 
     const runningSection = (running, now) => {
         const stale = new Set(findStaleClocks(running, now, staleHours()).map(e => e.clockUid));
-        const section = el('section', 'rlb-section');
+        const section = el('section', 'rlb-dashboard-section rlb-running');
         section.appendChild(
             el(
                 'h3',
@@ -305,63 +357,27 @@ export function createDashboard({
         return section;
     };
 
-    const daysSection = (days, now) => {
-        const section = el('section', 'rlb-section');
-        const heading = el('div', 'rlb-section__heading');
-        const range = el(
-            'span',
-            'rlb-bars__range',
-            `${days[0]?.key ?? ''} → ${days[days.length - 1]?.key ?? ''}`
-        );
-        range.title = range.textContent;
-        range.setAttribute('aria-label', `Date range: ${range.textContent}`);
-        heading.append(el('h3', 'rlb-section__title', 'By day'), range);
-        section.appendChild(heading);
-        const peak = Math.max(1, ...days.map(day => day.minutes));
-        const bars = el('div', 'rlb-bars');
-        bars.dataset.dayCount = String(days.length);
-        bars.style.setProperty('--rlb-day-count', String(days.length));
-        bars.setAttribute('role', 'list');
-        bars.setAttribute('aria-label', `Activity by day for ${days.length} days`);
-        for (const day of days) {
-            const level = day.minutes === 0 ? 0 : Math.max(1, Math.ceil((day.minutes / peak) * 3));
-            const duration = formatMinutesHuman(day.minutes);
-            const label = formatDayLabel(day.date, now);
-            const bar = el(
-                'div',
-                `rlb-bar rlb-bar--level-${level}${day.minutes === 0 ? ' rlb-bar--empty' : ''}`
-            );
-            bar.dataset.date = day.key;
-            bar.dataset.minutes = String(day.minutes);
-            bar.dataset.level = String(level);
-            bar.title = `${day.key} · ${duration}`;
-            bar.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
-            bar.setAttribute('role', 'listitem');
-            const durationLabel = el(
-                'span',
-                'rlb-bar__duration',
-                day.minutes > 0 ? duration : ''
-            );
-            if (day.minutes === 0) durationLabel.setAttribute('aria-hidden', 'true');
-            const track = el('div', 'rlb-bar__track');
-            const fill = el('div', 'rlb-bar__fill');
-            fill.style.height = `${day.minutes === 0 ? 0 : Math.max(4, Math.round((day.minutes / peak) * 100))}%`;
-            track.appendChild(fill);
-            bar.append(durationLabel, track, el('span', 'rlb-bar__label', label));
-            bars.appendChild(bar);
-        }
-        section.appendChild(bars);
-        return section;
-    };
-
     const tasksSection = tree => {
         const everyRow = flattenForest(tree);
         const parentUids = everyRow.filter(node => node.hasChildren).map(node => node.taskUid);
-        const nested = everyRow.some(node => node.depth > 0);
 
-        const section = el('section', 'rlb-section');
+        const section = el('section', 'rlb-dashboard-section rlb-by-task');
         const heading = el('div', 'rlb-section__heading');
         heading.appendChild(el('h3', 'rlb-section__title', 'By task'));
+
+        const rollupHelp =
+            'Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.';
+        const info = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info',
+            '',
+            () => {},
+            { title: rollupHelp }
+        );
+        info.setAttribute('aria-describedby', 'roam-logbook-task-rollup-help');
+        heading.appendChild(info);
+        const help = el('span', 'rlb-visually-hidden', rollupHelp);
+        help.id = 'roam-logbook-task-rollup-help';
+        section.appendChild(help);
 
         const toggleAll = button('bp3-button bp3-minimal bp3-small', '', () => {
             const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
@@ -467,15 +483,6 @@ export function createDashboard({
 
         paint();
 
-        if (nested) {
-            section.appendChild(
-                el(
-                    'div',
-                    'rlb-muted bp3-text-small rlb-tree__note',
-                    'Total includes sub-tasks, so rows overlap — the figures above are counted once each.'
-                )
-            );
-        }
         return section;
     };
 

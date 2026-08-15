@@ -52,7 +52,6 @@ export function createTopbar({
     let container = null;
     let timeNode = null;
     let iconNode = null;
-    let pauseBadgeNode = null;
     let parallelNode = null;
     let separatorNode = null;
     let buttonNode = null;
@@ -366,7 +365,7 @@ export function createTopbar({
     const syncButtonLayout = mode => {
         if (layoutMode === mode) return;
         if (mode === 'idle') buttonNode.replaceChildren(iconNode);
-        else if (mode === 'paused') buttonNode.replaceChildren(iconNode, pauseBadgeNode);
+        else if (mode === 'paused') buttonNode.replaceChildren(iconNode);
         else if (mode === 'parallel') buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         else buttonNode.replaceChildren(timeNode);
         layoutMode = mode;
@@ -388,7 +387,6 @@ export function createTopbar({
             timeNode.className = 'rlb-topbar__time';
             parallelNode.textContent = '';
             separatorNode.textContent = '';
-            pauseBadgeNode.textContent = pausedItems.length > 0 ? 'Ⅱ' : '';
             syncButtonLayout(pausedItems.length > 0 ? 'paused' : 'idle');
             buttonNode.title = pausedItems.length
                 ? `${sessionCount(pausedItems.length)} Paused — click to resume or review.`
@@ -461,8 +459,6 @@ export function createTopbar({
         container.id = WIDGET_ID;
 
         iconNode = el('span', 'bp3-icon bp3-icon-history rlb-topbar__icon');
-        pauseBadgeNode = el('span', 'rlb-topbar__pause-badge', 'Ⅱ');
-        pauseBadgeNode.setAttribute('aria-hidden', 'true');
         parallelNode = el('span', 'rlb-topbar__parallel');
         separatorNode = el('span', 'rlb-topbar__separator');
         separatorNode.setAttribute('aria-hidden', 'true');

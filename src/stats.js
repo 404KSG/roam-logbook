@@ -89,6 +89,28 @@ export function summariseByDay(entries, now, days) {
     return series;
 }
 
+/**
+ * Activity buckets for the compact Dashboard rail. Finite ranges retain their
+ * exact daily series. All time has no finite number of days, so its rail is an
+ * explicitly labelled recent window while the selected-range metric remains
+ * the exact all-time total.
+ */
+export function summariseActivity(entries, now, rangeId) {
+    const range = getRange(rangeId);
+    if (range.days === null) {
+        return {
+            buckets: summariseByDay(filterByRange(entries, 'month', now), now, 30),
+            label: 'Recent 30 days',
+            scope: 'recent-30-days',
+        };
+    }
+    return {
+        buckets: summariseByDay(entries, now, range.days),
+        label: range.label,
+        scope: 'selected-range',
+    };
+}
+
 // ---- task tree ----
 
 /** Guard for a graph where references have been chained into a loop. */
@@ -232,6 +254,7 @@ export function flattenForest(forest, options = {}, depth = 0) {
 export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) {
     const inRange = filterByRange(entries, rangeId, now);
     const tasks = summariseByTask(inRange, now);
+    const activity = summariseActivity(entries, now, rangeId);
     return {
         rangeId,
         entries: inRange,
@@ -242,7 +265,10 @@ export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERAR
         weekMinutes: totalMinutes(filterByRange(entries, 'week', now), now),
         tasks,
         tree: buildTaskForest(tasks, hierarchy),
-        days: summariseByDay(inRange, now, getRange(rangeId).days ?? 30),
+        days: activity.buckets,
+        activity: activity.buckets,
+        activityLabel: activity.label,
+        activityScope: activity.scope,
         running: entries.filter(entry => entry.running),
         issues: entries.filter(entry => entry.issue),
     };

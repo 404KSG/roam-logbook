@@ -172,7 +172,7 @@ test('Dashboard Running and By Task links expose the complete Task title', async
     dashboard.destroy();
 });
 
-test('Last 7 days renders seven accessible green intensity cells including zero days', () => {
+test('Integrated summary owns the selected-range activity rail and keeps three metrics', () => {
     graph = installGraph([
         { uid: 'day-task', string: '{{[[TODO]]}} Activity task', parent: null },
         { uid: 'day-drawer', string: 'LOGBOOK::', parent: 'day-task' },
@@ -197,23 +197,104 @@ test('Last 7 days renders seven accessible green intensity cells including zero 
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
 
-    const bars = document.querySelector('.rlb-bars');
-    const cells = [...bars.querySelectorAll('.rlb-bar')];
+    const summary = document.querySelector('.rlb-summary');
+    const metrics = [...summary.querySelectorAll('.rlb-stat')];
+    assert.equal(metrics.length, 3, 'the summary has a stable three-metric contract');
+    assert.deepEqual(
+        metrics.map(metric => metric.querySelector('.rlb-stat__label')?.textContent),
+        ['Today', 'Last 7 days', 'Tasks tracked']
+    );
+
+    const bars = summary.querySelector('.rlb-activity-rail');
+    assert.ok(bars, 'activity is embedded in the selected-range metric');
+    const cells = [...bars.querySelectorAll('.rlb-activity__bucket')];
     assert.equal(bars.dataset.dayCount, '7');
+    assert.equal(bars.getAttribute('role'), 'group');
     assert.equal(cells.length, 7);
-    const daySection = bars.closest('.rlb-section');
-    const dayHeading = daySection.querySelector('.rlb-section__heading');
-    assert.ok(dayHeading, 'By Day keeps title and date range on one heading row');
-    assert.equal(dayHeading.querySelector('.rlb-section__title').textContent, 'By day');
-    assert.match(dayHeading.querySelector('.rlb-bars__range').textContent, /^2026-08-09 → 2026-08-15$/);
-    assert.equal(daySection.querySelectorAll('.rlb-bars__range').length, 1);
-    assert.ok(cells.every(cell => cell.querySelector('.rlb-bar__label')?.textContent));
+    assert.equal(document.querySelector('.rlb-by-day'), null, 'By Day is no longer a standalone section');
+    assert.equal(document.querySelector('.rlb-bars__range'), null, 'the range is not repeated below the summary');
+    assert.ok(cells.every(cell => cell.querySelector('.rlb-activity__label')?.textContent));
     assert.ok(cells.every(cell => /2026-08-\d{2}/.test(cell.getAttribute('aria-label'))));
     assert.ok(cells.every(cell => /\d+(?:h \d{2}m|m)/.test(cell.title)));
-    assert.ok(cells.some(cell => cell.querySelector('.rlb-bar__duration')?.textContent));
-    assert.ok(cells.some(cell => cell.classList.contains('rlb-bar--level-0')));
-    assert.ok(cells.some(cell => cell.classList.contains('rlb-bar--level-3')));
+    assert.ok(cells.every(cell => cell.tagName === 'BUTTON'));
+    assert.ok(cells.every(cell => cell.getAttribute('role') !== 'listitem'));
+    assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-0')));
+    assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-3')));
     assert.ok(cells.some(cell => /(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/.test(cell.textContent)));
+
+    const byTask = document.querySelector('.rlb-by-task');
+    assert.ok(byTask, 'By Task remains the primary follow-up list');
+    assert.ok(
+        summary.compareDocumentPosition(byTask) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    dashboard.destroy();
+});
+
+test('activity rail labels finite ranges and the All time fallback honestly', () => {
+    graph = installGraph([
+        { uid: 'range-task', string: '{{[[TODO]]}} Range activity', parent: null },
+        { uid: 'range-drawer', string: 'LOGBOOK::', parent: 'range-task' },
+        {
+            uid: 'range-old',
+            string: 'CLOCK:: [2026-07-01 Wed 09:00]--[2026-07-01 Wed 10:00] => 1:00',
+            parent: 'range-drawer',
+        },
+        {
+            uid: 'range-recent',
+            string: 'CLOCK:: [2026-08-10 Mon 09:00]--[2026-08-10 Mon 10:30] => 0:30',
+            parent: 'range-drawer',
+        },
+    ]);
+    const nowMs = new Date('2026-08-15T12:00:00').getTime();
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+    dashboard.open();
+
+    const select = document.querySelector('.rlb-header select');
+    select.value = 'month';
+    select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    let rail = document.querySelector('.rlb-activity-rail');
+    assert.equal(rail.dataset.dayCount, '30');
+    assert.match(rail.getAttribute('aria-label'), /Last 30 days activity/i);
+
+    select.value = 'all';
+    select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    rail = document.querySelector('.rlb-activity-rail');
+    assert.equal(
+        document.querySelectorAll('.rlb-stat')[1].querySelector('.rlb-stat__label').textContent,
+        'All time'
+    );
+    assert.equal(rail.dataset.activityScope, 'recent-30-days');
+    assert.match(rail.getAttribute('aria-label'), /Recent 30 days activity/i);
+    assert.equal(rail.querySelectorAll('.rlb-activity__bucket').length, 30);
+
+    dashboard.destroy();
+});
+
+test('the Dashboard is list-first when idle and keeps rollup help accessible without a footer block', () => {
+    graph = installGraph([
+        { uid: 'idle-parent', string: '{{[[TODO]]}} Idle parent', parent: null },
+        { uid: 'idle-child', string: '{{[[TODO]]}} Idle child', parent: 'idle-parent' },
+        { uid: 'idle-drawer', string: 'LOGBOOK::', parent: 'idle-child' },
+        {
+            uid: 'idle-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 09:30] => 0:30',
+            parent: 'idle-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    assert.equal(document.querySelector('.rlb-running'), null);
+    assert.equal(document.querySelector('.rlb-by-day'), null);
+    assert.equal(document.querySelector('.rlb-tree__note'), null);
+    const byTask = document.querySelector('.rlb-by-task');
+    const info = byTask.querySelector('.rlb-tree__info');
+    assert.ok(info);
+    assert.equal(info.getAttribute('aria-label'), info.title);
+    assert.equal(info.getAttribute('aria-describedby'), 'roam-logbook-task-rollup-help');
+    assert.ok(document.getElementById('roam-logbook-task-rollup-help'));
+    assert.equal(document.querySelectorAll('.rlb-activity-rail').length, 1);
 
     dashboard.destroy();
 });

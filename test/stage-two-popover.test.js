@@ -252,11 +252,9 @@ test('paused topbar keeps its clock identity while visibly distinguishing paused
     assert.ok(pausedButton.classList.contains('rlb-topbar__button--icon-only'));
     assert.ok(pausedButton.classList.contains('rlb-topbar__button--paused'));
     assert.ok(pausedButton.querySelector('.bp3-icon-history'), 'paused state keeps the clock identity');
-    const badge = pausedButton.querySelector('.rlb-topbar__pause-badge');
-    assert.ok(badge);
-    assert.equal(badge.getAttribute('aria-hidden'), 'true');
+    assert.equal(pausedButton.querySelector('.rlb-topbar__pause-badge'), null);
     assert.match(pausedButton.getAttribute('aria-label'), /1 Session Paused/i);
-    assert.equal(pausedButton.textContent, 'Ⅱ');
+    assert.equal(pausedButton.textContent, '');
 });
 
 test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {

@@ -328,6 +328,20 @@ test('Dashboard labels a graph read failure separately and clears it after recov
     dashboard.destroy();
 });
 
+test('Dashboard keeps conditional data issues after the primary task list', () => {
+    seed(true);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const children = [...document.querySelector('.rlb-body').children];
+    const byTaskIndex = children.findIndex(node => node.classList.contains('rlb-by-task'));
+    const issuesIndex = children.findIndex(node => node.classList.contains('rlb-data-issues'));
+    assert.ok(byTaskIndex >= 0);
+    assert.ok(issuesIndex > byTaskIndex, 'issues are an inline follow-up, not the primary list');
+
+    dashboard.destroy();
+});
+
 test('an unresolved parent is visible in Data Issues without being promoted to a fake root', () => {
     installGraph([
         { uid: 'health-missing-parent-ref', string: '((health-deleted-parent))', parent: null },

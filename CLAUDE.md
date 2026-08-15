@@ -64,8 +64,8 @@ Layering, innermost first:
     Session rows use a small, muted status bullet for alignment; the explicit
     `Check Out` action is a neutral log-out icon with an accessible text label,
     and paused rows expose an icon-only `Resume` action. A fully paused batch
-    keeps the history-clock identity and adds a small muted warm pause badge;
-    idle has no badge. The shared Refresh
+    keeps the history-clock identity and uses only a low-saturation ochre
+    background; it has no additional pause badge or glyph. The shared Refresh
     action belongs in the two-column footer grid, not the surface header.
   - `syncTopbarLayout` marks the actual navigation shell and search child found at
     attach time. The Logbook unit is `flex: 0 0 auto`/`min-width: max-content`
@@ -76,12 +76,12 @@ Layering, innermost first:
     Roam's existing right-sidebar host. It creates no page or block. The panel is
     removed on its close action and during extension unload; a missing host uses a
     visibly marked DOM fallback only for unusual shells/test fixtures.
-  - Dashboard By Day is a compact seven-column chart: its range stays in the
-    heading, the bars use one quiet shared baseline and green intensity levels,
-    zero-value days are silent, and By Task follows without an extra range row
-    or large empty spacer. Dashboard summary/table rows avoid repeated card,
-    track, and per-row border treatment; section boundaries remain as orientation
-    cues.
+  - Dashboard uses exactly three summary metrics: Today, the selected range,
+    and Tasks tracked. The selected-range metric owns the real daily activity
+    rail (finite ranges keep their bucket count; All time is labelled as a
+    recent activity window). There is no standalone By Day section. Running
+    appears only when populated, then By Task is the primary list; summary and
+    table rows avoid repeated card, track, and per-row border treatment.
   - Current-session rows use a shared grid with the status point and title on
     row one, metadata on row two, and actions spanning both rows. Alignment is
     structural (`display: contents` plus explicit grid tracks), not a margin
@@ -141,6 +141,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.6 visual slice currently has 224 tests).
+  (the beta.7 clean run currently contains 226 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.
