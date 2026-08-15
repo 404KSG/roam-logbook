@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.9**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.10**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -45,15 +45,15 @@ With parallel timing enabled, it follows the stable elapsed timer with only the 
 0:28 · 2 Sessions
 ```
 
-Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Shift+Clicking a Session task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API, while ordinary click keeps the main-window navigation. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is one icon-only footer action in each surface, aligned to the same 32px action height. Current-session rows use a shared title/metadata grid so the status point, task title, and actions stay aligned in both surfaces.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Shift+Clicking a Session task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API, while ordinary click keeps the main-window navigation. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is one icon-only footer action in each surface, aligned to the same 32px action height. Current-session rows use a shared title/metadata grid so the status point, task title, and actions stay aligned in both surfaces.
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 
-If a running Session had an unfinished Pomodoro, its exact remaining budget continues on the new Session. A completed or overrun Pomodoro is saved as explicitly suppressed and does not restart. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
+Resume creates a fresh shared Pomodoro cycle from zero for each valid Task; it never restores an old per-clock remainder. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
 
-**Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
+**Shared Pomodoro cycle** — when the first confirmed Session starts, the extension freezes the configured threshold (30 minutes by default) and starts one cycle from that action instant. The topbar shows that cycle's elapsed time, not a historical task total or the age of an arbitrary parallel Session. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. Adding or removing parallel Sessions does not reset the cycle, and changing the setting affects the next cycle. A reload restores a valid persisted cycle or conservatively uses the earliest open CLOCK; a confirmed empty graph clears it. The old `pomodoroTargets` setting is retained only as deprecated compatibility state and no longer controls the visible timer.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. The beta.9 Dashboard is a content-fit Linear-inspired inspector: a compact one-line header, three low-contrast stat panels, Running only when present, and a primary By Task list panel. Today, the selected range, and Tasks tracked remain the only metrics; the selected-range panel contains a readable 56–84px activity chart made from the real daily buckets, with exact date/duration in each bucket's accessible name and tooltip. Short reports end shortly after their last row; long reports scroll inside the body while the header and controls remain available. Finite ranges expose their real buckets; All time keeps the exact total but labels the chart as a recent 30-day activity window. The roll-up explanation is available through the By Task info control instead of a full-width footer note. The surface uses quiet borders, spacing, and hierarchy instead of heavy cards, independent By Day sections, or border soup. Narrow screens keep panels, labels, values, and task columns grouped without clipping.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. The beta.10 Dashboard is a content-fit Linear-inspired inspector: a compact one-line header, three low-contrast stat panels, Running only when present, and a primary By Task list panel. Today, the selected range, and Tasks tracked remain the only metrics; the selected-range panel contains a readable 44–56px activity chart made from the real daily buckets, with exact date/duration in each bucket's accessible name and tooltip. Short reports end shortly after their last row; long reports scroll inside the body while the header and controls remain available. Finite ranges expose their real buckets; All time keeps the exact total but labels the chart as a recent 30-day activity window. The roll-up explanation is available through the By Task info control instead of a full-width footer note. The surface uses quiet borders, spacing, and hierarchy instead of heavy cards, independent By Day sections, or border soup. Narrow screens keep panels, labels, values, and task columns grouped without clipping.
 
 ### Custom hotkeys
 
@@ -102,7 +102,7 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Show topbar widget | on | The left-navigation history icon, live counter, and running-task list |
-| Pomodoro duration (minutes) | 30 | Automatic target captured by each new Session; passing it only changes elapsed colour |
+| Pomodoro duration (minutes) | 30 | Shared cycle threshold captured when the first Session of a cycle starts; passing it only changes elapsed colour |
 | Only offer clock in on TODO blocks | on | Off lets any block be clocked |
 | Allow multiple clocks at once | off | On runs several clocks in parallel |
 | Flag unfinished clocks after | 8h | When a running clock is called out as forgotten |
@@ -116,10 +116,15 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 
 ### Compatibility and data health
 
-Pause Batch state is stored as version 2 `{ version, data }`; Pomodoro targets
-use version 1 `{ version, data }`. The extension migrates the legacy Pause Batch
-shape and a clean flat Pomodoro map in place. A mixed legacy Pomodoro map is
-backed up as raw and is not overwritten until its invalid entries are reviewed.
+Pause Batch state is stored as version 2 `{ version, data }`; the shared
+Pomodoro cycle is stored as version 1 `{ version, data: { startedAt,
+thresholdMinutes } }` (or `data: null` when no cycle is active). The old
+per-clock Pomodoro targets use version 1 `{ version, data }` and remain only
+as deprecated compatibility state. The extension migrates the legacy Pause
+Batch shape and a clean flat Pomodoro map in place; old pause remainder and
+suppression fields are removed from the settings record without changing a
+CLOCK. A mixed legacy Pomodoro map is backed up as raw and is not overwritten
+until its invalid entries are reviewed.
 Unknown or corrupt composite state is kept untouched, copied once into the
 versioned internal `stateBackups` setting, and reported without destructive
 migration. A CLOCK whose query row is still available but whose Task metadata is

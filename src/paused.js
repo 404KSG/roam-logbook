@@ -3,12 +3,13 @@
  *
  * A pause closes real CLOCK entries, so paused time never accrues. The graph-scoped
  * settings record stores the recoverable Pause Batch and any in-flight Resume
- * association needed to survive a reload between graph and Pomodoro writes.
+ * association needed to survive a reload between graph and state writes. A
+ * Resume starts a new shared Pomodoro cycle; old per-clock remainder fields are
+ * migrated away without touching CLOCK records.
  */
 
 import * as clock from './clock.js';
 import { taskTitle } from './org.js';
-import * as pomodoro from './pomodoro.js';
 import { STATE_FORMATS } from './version.js';
 import { getBlockString, GraphReadError } from './roam.js';
 import {
@@ -34,9 +35,6 @@ const cleanRecord = value => {
     const taskUid = typeof value.taskUid === 'string' ? value.taskUid.trim() : '';
     const title = typeof value.title === 'string' ? value.title : '';
     const pausedAtMs = Number(value.pausedAtMs);
-    const remaining = value.pomodoroRemainingMs;
-    const pomodoroRemainingMs = remaining === null || remaining === undefined ? null : Number(remaining);
-    const pomodoroSuppressed = value.pomodoroSuppressed === true;
     const clockUid = typeof value.clockUid === 'string' && value.clockUid ? value.clockUid : null;
     const reconciliationState =
         value.reconciliationState === 'externally-replaced' ||
@@ -48,18 +46,10 @@ const cleanRecord = value => {
             ? value.externalClockUid
             : null;
     if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0) return null;
-    if (
-        pomodoroRemainingMs !== null &&
-        (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)
-    ) {
-        return null;
-    }
     return {
         taskUid,
         title,
         pausedAtMs,
-        pomodoroRemainingMs,
-        pomodoroSuppressed,
         ...(clockUid ? { clockUid } : {}),
         ...(reconciliationState ? { reconciliationState } : {}),
         ...(externalClockUid ? { externalClockUid } : {}),
@@ -90,6 +80,9 @@ const cleanPending = (value, { version = VERSION, legacy = false } = {}) => {
               }),
     };
 };
+
+const hasLegacyPomodoroFields = value =>
+    Boolean(value && ('pomodoroRemainingMs' in value || 'pomodoroSuppressed' in value));
 
 const serialized = () =>
     JSON.stringify({
@@ -173,6 +166,9 @@ export function load() {
     try {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (parsed?.version === VERSION && parsed.data && Array.isArray(parsed.data.items)) {
+            const needsMigration =
+                parsed.data.items.some(hasLegacyPomodoroFields) ||
+                (Array.isArray(parsed.data.pendingResume) && parsed.data.pendingResume.some(hasLegacyPomodoroFields));
             const loadedItems = parsed.data.items.map(cleanRecord);
             const loadedPending = Array.isArray(parsed.data.pendingResume)
                 ? parsed.data.pendingResume.map(value => cleanPending(value, { version: VERSION }))
@@ -190,6 +186,7 @@ export function load() {
                     ? 'A current pending Resume has no exact Session association; it was retained as a conflict.'
                     : '';
             }
+            if (needsMigration) persist();
             return getPaused();
         }
         if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
@@ -218,21 +215,6 @@ export function load() {
         return getPaused();
     }
 }
-
-const pomodoroSnapshot = (entry, nowMs) => {
-    const targetMs = pomodoro.targetDurationMs(entry.clockUid);
-    if (targetMs === null) {
-        return {
-            pomodoroRemainingMs: null,
-            pomodoroSuppressed: pomodoro.isAssigned(entry.clockUid),
-        };
-    }
-    const remaining = targetMs - Math.max(0, nowMs - entry.start.getTime());
-    return {
-        pomodoroRemainingMs: remaining > 0 ? remaining : null,
-        pomodoroSuppressed: remaining <= 0,
-    };
-};
 
 const pausedRecord = snapshot => {
     const { clockUid: _clockUid, ...record } = snapshot;
@@ -322,7 +304,6 @@ export async function pauseAll({ now = new Date() } = {}) {
                     taskUid: entry.taskUid,
                     title: entry.title,
                     pausedAtMs: now.getTime(),
-                    ...pomodoroSnapshot(entry, now.getTime()),
                     clockUid: entry.clockUid,
                 }));
                 // Persist before the first graph mutation. A reload then has the
@@ -409,23 +390,13 @@ const existingTask = record => {
     }
 };
 
-const applyPomodoro = record => {
-    if (record.pomodoroRemainingMs) {
-        if (!pomodoro.startDurationMs(record.clockUid, record.pomodoroRemainingMs)) {
-            throw new Error('Pomodoro remainder could not be saved.');
-        }
-    } else if (record.pomodoroSuppressed) {
-        if (!pomodoro.suppress(record.clockUid)) throw new Error('Pomodoro suppression could not be saved.');
-    }
-};
-
 const removeTask = taskUid => {
     items = items.filter(item => item.taskUid !== taskUid);
 };
 
 /**
  * Complete durable Resume associations that survived a reload or an interrupted
- * Pomodoro write. This function never creates a CLOCK: a pending clockUid is an
+ * state write. This function never creates a CLOCK: a pending clockUid is an
  * exact foreign-key-like association, and a missing exact Session is a conflict.
  * Only legacy records without a clockUid may be scheduled for a fresh resume.
  */
@@ -470,17 +441,11 @@ async function recoverPending({ running = [] } = {}) {
             continue;
         }
 
-        try {
-            applyPomodoro({ ...pending, clockUid: entry.clockUid });
-            pendingResume = pendingResume.filter(item => item.taskUid !== pending.taskUid);
-            removeTask(pending.taskUid);
-            persist();
-            recovered += 1;
-            if (pending.legacy === true) legacyRecovered += 1;
-        } catch (error) {
-            failed += 1;
-            console.error('[roam-logbook] could not recover paused task', pending.taskUid, error);
-        }
+        pendingResume = pendingResume.filter(item => item.taskUid !== pending.taskUid);
+        removeTask(pending.taskUid);
+        persist();
+        recovered += 1;
+        if (pending.legacy === true) legacyRecovered += 1;
     }
     return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
@@ -616,11 +581,10 @@ async function resumeRecord(record, now) {
     pending.sourceVersion = VERSION;
     delete pending.recoveryState;
     delete pending.recoveryIssue;
-    // This write is intentionally before the Pomodoro migration. If the next
-    // line fails, reload can find this exact Session and finish it.
+    // This write is intentionally before consuming the Pause Batch item. If a
+    // reload happens now, the exact Session association remains recoverable.
     persist();
 
-    applyPomodoro({ ...record, clockUid: entry.clockUid });
     pendingResume = pendingResume.filter(item => item.taskUid !== record.taskUid);
     removeTask(record.taskUid);
     persist();
@@ -991,7 +955,6 @@ export async function clockOutAll({ now = new Date() } = {}) {
             taskUid: entry.taskUid,
             title: entry.title,
             pausedAtMs: now.getTime(),
-            ...pomodoroSnapshot(entry, now.getTime()),
             clockUid: entry.clockUid,
         });
     }

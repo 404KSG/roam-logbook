@@ -1011,7 +1011,7 @@ export const STYLES = `
 }
 
 .rlb-dialog {
-    width: min(1160px, calc(100vw - 48px));
+    width: min(1120px, calc(100vw - 48px));
     height: auto;
     min-height: 0;
     max-height: min(84vh, calc(100vh - 48px));
@@ -1092,10 +1092,10 @@ export const STYLES = `
     align-items: flex-start;
     gap: 7px;
     min-width: 0;
-    height: 144px;
-    min-height: 144px;
+    height: 116px;
+    min-height: 116px;
     box-sizing: border-box;
-    justify-content: space-between;
+    justify-content: center;
     padding: 10px 12px;
     border: 1px solid var(--rlb-border-light);
     border-radius: 7px;
@@ -1104,6 +1104,7 @@ export const STYLES = `
 
 .rlb-overview__item--selected {
     min-width: 0;
+    justify-content: space-between;
 }
 
 .rlb-overview__panel {
@@ -1176,7 +1177,7 @@ export const STYLES = `
     align-items: end;
     gap: 4px;
     width: 100%;
-    height: 60px;
+    height: 52px;
     min-width: 0;
     margin: 0;
     overflow: hidden;
@@ -1188,7 +1189,7 @@ export const STYLES = `
     align-items: end;
     width: 100%;
     min-width: 0;
-    height: 60px;
+    height: 52px;
     margin: 0 !important;
     padding: 0 !important;
     border: 0;

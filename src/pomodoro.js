@@ -1,9 +1,10 @@
 /**
- * Automatic Pomodoro targets layered on top of running clocks.
+ * A shared Pomodoro cycle layered on top of running clocks.
  *
- * A target is an intention, not a record, and nothing about it belongs in the
- * LOGBOOK drawer. It lives in extension settings keyed by clock uid, while the
- * graph remains the source of truth for the Session itself.
+ * `cycle` is the active user-facing timer: one frozen threshold and one start
+ * instant for the whole set of concurrently running Sessions. The old
+ * clock-UID target map remains only as a versioned compatibility read/write
+ * seam for older integrations; it no longer drives the topbar or session UI.
  */
 
 import * as clock from './clock.js';
@@ -11,16 +12,21 @@ import { STATE_FORMATS } from './version.js';
 import {
     pomodoroMinutes,
     readSetting,
+    SETTING_POMODORO_CYCLE,
     SETTING_POMODORO_STATE,
     preserveStateBackup,
     writeSetting,
 } from './settings.js';
 
 const VERSION = STATE_FORMATS.pomodoroTargets;
-/** @type {Map<string, number>} clock uid → positive minutes, or 0 when suppressed */
+const CYCLE_VERSION = STATE_FORMATS.pomodoroCycle;
+/** @type {Map<string, number>} Deprecated clock uid → positive minutes, or 0 when suppressed. */
 let targets = new Map();
+/** @type {{version: number, startedAt: number, thresholdMinutes: number}|null} */
+let cycle = null;
 let notice = '';
 let unsupportedRaw = null;
+let unsupportedCycleRaw = null;
 
 const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
 
@@ -42,6 +48,70 @@ const mapFromData = (data, { strict = false } = {}) => {
 const serialized = values =>
     JSON.stringify({ version: VERSION, data: Object.fromEntries(values) });
 
+const serializedCycle = value =>
+    JSON.stringify({
+        version: CYCLE_VERSION,
+        data: value
+            ? {
+                  startedAt: value.startedAt,
+                  thresholdMinutes: value.thresholdMinutes,
+              }
+            : null,
+    });
+
+const validCycle = value => {
+    if (!isRecord(value)) return false;
+    const startedAt = Number(value.startedAt);
+    const thresholdMinutes = Number(value.thresholdMinutes);
+    return Number.isFinite(startedAt) && startedAt >= 0 && Number.isFinite(thresholdMinutes) && thresholdMinutes > 0;
+};
+
+const cycleFromData = data => {
+    if (data === null) return null;
+    if (!validCycle(data)) throw new Error('invalid Pomodoro cycle');
+    return {
+        version: CYCLE_VERSION,
+        startedAt: Number(data.startedAt),
+        thresholdMinutes: Number(data.thresholdMinutes),
+    };
+};
+
+function writeCycle(next) {
+    if (unsupportedCycleRaw !== null) {
+        notice ||= 'Saved Pomodoro cycle uses an unsupported version and was kept.';
+        return false;
+    }
+    try {
+        writeSetting(SETTING_POMODORO_CYCLE, serializedCycle(next));
+        cycle = next ? { ...next } : null;
+        return true;
+    } catch (error) {
+        notice ||= 'Pomodoro cycle could not be saved yet; the current cycle remains in memory.';
+        console.warn('[roam-logbook] could not persist Pomodoro cycle', error);
+        cycle = next ? { ...next } : null;
+        return false;
+    }
+}
+
+function loadCycle() {
+    const raw = readSetting(SETTING_POMODORO_CYCLE);
+    if (!raw) return;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!isRecord(parsed) || parsed.version !== CYCLE_VERSION || !('data' in parsed)) {
+            throw new Error('unsupported pomodoro cycle version');
+        }
+        cycle = cycleFromData(parsed.data);
+    } catch (error) {
+        unsupportedCycleRaw = raw;
+        const firstWarning = preserveStateBackup(SETTING_POMODORO_CYCLE, raw);
+        if (!notice && firstWarning) {
+            notice = 'Saved Pomodoro cycle uses an unsupported or invalid version and was kept.';
+        }
+        if (firstWarning) console.warn('[roam-logbook] could not read Pomodoro cycle', error);
+    }
+}
+
 function writeTargets(next) {
     if (unsupportedRaw !== null) {
         notice = 'Saved Pomodoro state uses an unsupported version and was kept.';
@@ -55,8 +125,11 @@ function writeTargets(next) {
 /** Read persisted targets, accepting the original flat map as a legacy format. */
 export function load() {
     targets = new Map();
+    cycle = null;
     notice = '';
     unsupportedRaw = null;
+    unsupportedCycleRaw = null;
+    loadCycle();
     const raw = readSetting(SETTING_POMODORO_STATE);
     if (!raw) return;
 
@@ -110,6 +183,80 @@ export function getNotice() {
     return notice;
 }
 
+/** Return the active shared cycle without exposing mutable module state. */
+export function getCycle() {
+    return cycle ? { ...cycle } : null;
+}
+
+const instantMs = value =>
+    value instanceof Date ? value.getTime() : Number.isFinite(Number(value)) ? Number(value) : Date.now();
+
+/** Milliseconds elapsed since the shared cycle began. */
+export function cycleElapsedMs(now = Date.now()) {
+    return cycle ? Math.max(0, instantMs(now) - cycle.startedAt) : 0;
+}
+
+export function cycleThresholdMinutes() {
+    return cycle?.thresholdMinutes ?? null;
+}
+
+export function cycleThresholdMs() {
+    return cycle ? cycle.thresholdMinutes * 60_000 : null;
+}
+
+/** The shared Pomodoro turns red at the exact threshold and keeps counting. */
+export function isCycleOverrun(now = Date.now()) {
+    const threshold = cycleThresholdMs();
+    return threshold !== null && cycleElapsedMs(now) >= threshold;
+}
+
+export function cycleOverrunMs(now = Date.now()) {
+    const threshold = cycleThresholdMs();
+    return threshold === null ? 0 : Math.max(0, cycleElapsedMs(now) - threshold);
+}
+
+/**
+ * Reconcile one graph snapshot with the shared Pomodoro cycle.
+ *
+ * A non-empty snapshot starts a cycle only when no cycle is active. The cycle
+ * then survives parallel Session additions/removals until the graph confirms
+ * that no Session remains. On reload, a valid persisted cycle wins; otherwise
+ * the earliest open CLOCK is the conservative fallback.
+ */
+export function reconcileCycle(running = [], { now = Date.now() } = {}) {
+    const entries = Array.isArray(running) ? running : [];
+    if (entries.length === 0) {
+        if (cycle !== null) writeCycle(null);
+        return null;
+    }
+    if (cycle) return getCycle();
+
+    const starts = entries
+        .map(entry => (entry?.start instanceof Date ? entry.start.getTime() : Number(entry?.start)))
+        .filter(value => Number.isFinite(value));
+    const startedAt = starts.length > 0 ? Math.min(...starts) : instantMs(now);
+    const next = {
+        version: CYCLE_VERSION,
+        startedAt,
+        thresholdMinutes: pomodoroMinutes(),
+    };
+    writeCycle(next);
+    return getCycle();
+}
+
+/** Align a newly created cycle to the action instant, not minute-only Org text. */
+export function startCycleAt(running = [], startedAt = Date.now()) {
+    if (!Array.isArray(running) || running.length === 0) return null;
+    const instant = instantMs(startedAt);
+    const next = {
+        version: CYCLE_VERSION,
+        startedAt: instant,
+        thresholdMinutes: pomodoroMinutes(),
+    };
+    writeCycle(next);
+    return getCycle();
+}
+
 export function targetMinutes(clockUid) {
     const minutes = targets.get(clockUid);
     return minutes > 0 ? minutes : null;
@@ -158,9 +305,15 @@ export function cancel(clockUid) {
     return writeTargets(next);
 }
 
-/** Assign new Sessions and forget assignments whose clock has closed. */
+/**
+ * Keep deprecated clock-UID assignments in step with the graph for old
+ * integrations. The shared cycle above is deliberately independent of this
+ * compatibility map.
+ */
 export function reconcile(running) {
-    if (unsupportedRaw !== null) return false;
+    const cycleBefore = getCycle();
+    const cycleAfter = reconcileCycle(running);
+    if (unsupportedRaw !== null) return cycleBefore !== cycleAfter;
     const live = new Set(running.map(entry => entry.clockUid));
     const next = new Map(targets);
     for (const clockUid of [...next.keys()]) {
@@ -170,7 +323,7 @@ export function reconcile(running) {
         if (!next.has(entry.clockUid)) next.set(entry.clockUid, pomodoroMinutes());
     }
     if (next.size === targets.size && [...next].every(([uid, value]) => targets.get(uid) === value)) {
-        return false;
+        return cycleBefore?.startedAt !== cycleAfter?.startedAt || cycleBefore?.thresholdMinutes !== cycleAfter?.thresholdMinutes;
     }
     writeTargets(next);
     return true;
@@ -208,17 +361,29 @@ export function isOverrun(entry, now = Date.now()) {
  */
 export function attach() {
     let sawInitialReplay = false;
-    return clock.subscribe(running => {
+    const unsubscribe = clock.subscribe(running => {
         if (!sawInitialReplay) {
             sawInitialReplay = true;
             return;
         }
         reconcile(running);
     });
+    const unsubscribeActions = clock.subscribeActions(action => {
+        if (action?.type !== 'clock-in' || !action.newCycle || !Number.isFinite(action.cycleStartedAt)) {
+            return;
+        }
+        startCycleAt(clock.getRunning(), action.cycleStartedAt);
+    });
+    return () => {
+        unsubscribe();
+        unsubscribeActions();
+    };
 }
 
 export function reset() {
     targets = new Map();
+    cycle = null;
     notice = '';
     unsupportedRaw = null;
+    unsupportedCycleRaw = null;
 }

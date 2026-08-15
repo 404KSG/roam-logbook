@@ -14,14 +14,9 @@ import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 
 const rowFigures = (entry, now) => {
-    const target = pomodoro.targetMinutes(entry.clockUid);
     const elapsed = now.getTime() - entry.start.getTime();
     const total = entry.priorMinutes + Math.floor(elapsed / 60_000);
-    return (
-        formatElapsed(elapsed) +
-        (target ? ` · target ${formatElapsed(target * 60_000)}` : '') +
-        ` · ${formatMinutesHuman(total)} total`
-    );
+    return `${formatElapsed(elapsed)} · ${formatMinutesHuman(total)} total`;
 };
 
 const fullTaskLabel = title => `Open this block: ${title}`;
@@ -40,7 +35,7 @@ const renderTitle = (row, onOpenTask) => {
 
 const renderRunningRow = (row, now, options) => {
     const entry = row.entry;
-    const overrun = pomodoro.isOverrun(entry, now);
+    const overrun = pomodoro.isCycleOverrun(now);
     const node = el('div', `rlb-run${overrun ? ' rlb-run--overrun' : ''}`);
     node.dataset.sessionState = 'running';
     node.dataset.clockUid = entry.clockUid;
@@ -288,6 +283,6 @@ export function updateSessionSurfaceElapsed(root, entries, now) {
         const primary = meta.querySelector('.rlb-run__meta-primary');
         if (primary) primary.textContent = rowFigures(entry, currentNow);
         const row = meta.closest('.rlb-run');
-        if (row) row.classList.toggle('rlb-run--overrun', pomodoro.isOverrun(entry, currentNow));
+        if (row) row.classList.toggle('rlb-run--overrun', pomodoro.isCycleOverrun(currentNow));
     }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.10 — 2026-08-16
+
+- Replaced per-clock Pomodoro colouring with one persisted shared cycle: the first confirmed running Session freezes the threshold and action start instant, parallel Session changes retain it, exact threshold time turns red without stopping, and an empty state/Pause All/Clock Out All/final Check Out resets it.
+- Resume starts a fresh shared cycle instead of restoring per-clock remainder or suppression state; valid cycles survive reload and missing cycles fall back to the earliest open CLOCK without writing graph data.
+- Kept the legacy `pomodoroTargets` map readable for compatibility, removed visible per-session target metadata, and migrated old pause Pomodoro fields safely without rewriting CLOCK records.
+- Tightened the beta.10 UI acceptance geometry: 116px overview cards, 52px activity rail, content-fit desktop Dashboard width up to 1120px, compact shared session surface, 0px status/title center error in the Chromium fixture, and equal 32px footer actions.
+- Added shared-cycle boundary, parallel/reload/reset, sync-indicator isolation, pause/resume, and no-visible-target regression coverage. The complete local suite contains 245 tests.
+
 ## 0.9.0-beta.9 — 2026-08-15
 
 - Made Shift+Click Roam-native for both the topbar Current Sessions surface and task entries: task blocks use the right-sidebar `open`/`addWindow` API, repeated block windows are extension-deduped, and delayed sidebar host mounting is handled safely.

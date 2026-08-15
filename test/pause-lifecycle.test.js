@@ -97,7 +97,7 @@ test.afterEach(t => {
 
 test.after(() => uninstallGraph());
 
-test('Pause All survives reload and Resume All starts fresh Sessions with the Pomodoro remainder', async t => {
+test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cycle', async t => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pausetwo2' });
     assert.equal(clock.getRunning().length, 2);
@@ -129,10 +129,8 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     const persisted = JSON.parse(settingsStore.get('pausedBatch'));
     assert.equal(persisted.version, 2);
     assert.equal(persisted.data.items.length, 2);
-    assert.equal(
-        persisted.data.items.find(item => item.taskUid === 'pauseone1').pomodoroRemainingMs,
-        24 * 60_000 + 43_000
-    );
+    assert.equal('pomodoroRemainingMs' in persisted.data.items[0], false);
+    assert.equal('pomodoroSuppressed' in persisted.data.items[0], false);
 
     extension.onunload();
     extension.onload({ extensionAPI });
@@ -147,12 +145,16 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(clockLines('pauseone1').length, 2);
     assert.equal(clockLines('pausetwo2').length, 2);
     assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
-    const resumedFirst = clock.getRunning().find(entry => entry.taskUid === 'pauseone1');
-    assert.equal(pomodoro.targetDurationMs(resumedFirst.clockUid), 24 * 60_000 + 43_000);
+    const resumed = clock.getRunning();
+    const cycle = pomodoro.getCycle();
+    assert.ok(cycle);
+    assert.ok(cycle.startedAt >= Math.min(...resumed.map(entry => entry.start.getTime())));
+    assert.ok(pomodoro.cycleElapsedMs() <= 1_000, 'Resume starts a fresh cycle at the action instant');
+    assert.equal(pomodoro.isCycleOverrun(), false);
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Running');
     const resumedRow = [...popover().querySelectorAll('.rlb-run')]
         .find(row => row.textContent.includes('first paused task'));
-    assert.match(resumedRow.querySelector('.rlb-run__meta').textContent, /24:43/);
+    assert.match(resumedRow.querySelector('.rlb-run__meta').textContent, /0:\d{2} · 5m total/);
     assert.equal(resumedRow.querySelector('.bp3-icon-stopwatch'), null);
 });
 
@@ -271,7 +273,7 @@ test('a failed resume retains only the failed Task for retry', async t => {
     assert.match(popover().textContent, /1 Task resumed; 1 could not be updated\. Retry after Roam finishes syncing\./);
 });
 
-test('an overrun Pomodoro is not restarted after pause and resume', async t => {
+test('an overrun shared cycle is reset after pause and resume', async t => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     t.mock.timers.tick(31 * 60_000);
 
@@ -279,19 +281,18 @@ test('an overrun Pomodoro is not restarted after pause and resume', async t => {
     click(action('Pause All'));
     await settle();
     const pausedRecord = JSON.parse(settingsStore.get('pausedBatch')).data.items[0];
-    assert.equal(pausedRecord.pomodoroRemainingMs, null);
-    assert.equal(pausedRecord.pomodoroSuppressed, true);
+    assert.equal('pomodoroRemainingMs' in pausedRecord, false);
+    assert.equal('pomodoroSuppressed' in pausedRecord, false);
 
     extension.onunload();
     extension.onload({ extensionAPI });
     click(topbarButton());
     click(action('Resume All'));
     await settle();
-    const resumed = clock.getRunning()[0];
-    assert.equal(pomodoro.targetMinutes(resumed.clockUid), null);
-    assert.equal(pomodoro.isAssigned(resumed.clockUid), true);
-    assert.equal(pomodoro.isActive(resumed.clockUid), false);
-    assert.equal(JSON.parse(settingsStore.get('pomodoroTargets')).data[resumed.clockUid], 0);
+    assert.equal(clock.getRunning().length, 1);
+    assert.ok(pomodoro.getCycle());
+    assert.equal(pomodoro.cycleElapsedMs(), 0);
+    assert.equal(pomodoro.isCycleOverrun(), false);
 });
 
 test('Clock Out All permanently finishes running Tasks and clears an older paused batch', async () => {

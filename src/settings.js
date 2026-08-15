@@ -12,8 +12,10 @@ export const SETTING_MULTIPLE = 'allowMultipleClocks';
 export const SETTING_TODO_ONLY = 'todoBlocksOnly';
 export const SETTING_STALE_HOURS = 'staleHours';
 export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
-/** Internal, not shown in the panel: which running clocks have a pomodoro. */
+/** Deprecated compatibility state: old per-clock Pomodoro assignments. */
 export const SETTING_POMODORO_STATE = 'pomodoroTargets';
+/** Internal shared Pomodoro cycle: one threshold for the active work cycle. */
+export const SETTING_POMODORO_CYCLE = 'pomodoroCycle';
 /** Internal, graph-scoped state for work deliberately paused as one batch. */
 export const SETTING_PAUSED_BATCH = 'pausedBatch';
 /** Internal, recoverable backups for unsupported or corrupt composite state. */

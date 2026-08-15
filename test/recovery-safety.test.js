@@ -316,7 +316,7 @@ test('Pause All stops after a post-write refresh failure and resumes the exact r
     );
 });
 
-test('Resume retains a pending association when Pomodoro migration fails, then recovers without a duplicate Session', async () => {
+test('Resume ignores legacy Pomodoro remainder and keeps the exact Session association', async () => {
     const { clock, paused, pomodoro } = await install();
     store.set(
         'pausedBatch',
@@ -343,18 +343,17 @@ test('Resume retains a pending association when Pomodoro migration fails, then r
     };
     try {
         const first = await paused.resumeAll({ now: T0 });
-        assert.equal(first.resumed, 0);
-        assert.equal(first.failed, 1);
+        assert.equal(first.resumed, 1);
+        assert.equal(first.failed, 0);
     } finally {
         extensionAPI.settings.set = originalSet;
     }
 
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clockLines(TASK.uid).length, 1);
-    assert.equal(paused.getPaused().length, 1);
-    assert.equal(paused.getPendingResume().length, 1);
-    const persistedPending = JSON.parse(store.get('pausedBatch')).data.pendingResume;
-    assert.equal(persistedPending[0].clockUid, clock.getRunning()[0].clockUid);
+    assert.equal(paused.getPaused().length, 0);
+    assert.equal(paused.getPendingResume().length, 0);
+    assert.equal(pomodoro.targetDurationMs(clock.getRunning()[0].clockUid), null);
 
     // Simulate reload: the graph CLOCK remains, while only durable settings survive.
     paused.reset();
@@ -365,13 +364,13 @@ test('Resume retains a pending association when Pomodoro migration fails, then r
     clock.refresh();
 
     const second = await paused.resumeAll({ now: new Date(T0.getTime() + 1_000) });
-    assert.equal(second.resumed, 1);
+    assert.equal(second.resumed, 0);
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clockLines(TASK.uid).length, 1, 'recovery must not create a second Session');
     assert.equal(paused.getPaused().length, 0);
     assert.equal(paused.getPendingResume().length, 0);
     const resumedUid = clock.getRunning()[0].clockUid;
-    assert.equal(pomodoro.targetDurationMs(resumedUid), 17 * 60_000);
+    assert.equal(pomodoro.targetDurationMs(resumedUid), null);
 });
 
 test('Resume does not close an unrelated Session while two exact pending associations are unresolved', async () => {
@@ -546,7 +545,10 @@ test('current pending Resume conflict survives repeated reload without consuming
     assert.deepEqual(second, first);
     assert.equal(second[0].legacy, false);
     assert.equal(second[0].recoveryState, 'conflict');
-    assert.equal(store.get('pausedBatch'), raw);
+    const canonical = store.get('pausedBatch');
+    assert.notEqual(canonical, raw, 'legacy Pomodoro fields are removed during safe migration');
+    assert.match(canonical, /"recoveryState":"conflict"/);
+    assert.equal(canonical, JSON.stringify({ version: 2, data: { items: [], pendingResume: second } }));
 });
 
 test('explicit legacy pending Resume uses task fallback and reports legacy recovery', async () => {
@@ -581,7 +583,7 @@ test('explicit legacy pending Resume uses task fallback and reports legacy recov
     assert.equal(result.legacyRecovery, true);
     assert.equal(result.legacyRecovered, 1);
     assert.equal(paused.getPendingResume().length, 0);
-    assert.equal(pomodoro.targetDurationMs(runningUid), 9 * 60_000);
+    assert.equal(pomodoro.targetDurationMs(runningUid), null);
     assert.match(paused.getNotice(), /legacy.*recovery|legacy.*Task matching/i);
 });
 

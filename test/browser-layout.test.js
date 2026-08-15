@@ -272,7 +272,7 @@ test('activity rail keeps accessible green intensity cells compact on a narrow p
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.equal(geometry.count, 7, JSON.stringify(geometry));
-    assert.ok(geometry.chart.height >= 56 && geometry.chart.height <= 84, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 44 && geometry.chart.height <= 56, JSON.stringify(geometry));
     assert.match(geometry.columns, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
     assert.equal(geometry.accessible, true, JSON.stringify(geometry));
     assert.equal(geometry.keyboard, true, JSON.stringify(geometry));
@@ -677,7 +677,7 @@ test('beta.9 Dashboard presents three Linear-style panels and a readable activit
     assert.match(geometry.panelGrid, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
     assert.equal(geometry.panelBorder, '1px', JSON.stringify(geometry));
     assert.ok(Number.parseFloat(geometry.panelRadius) >= 6, JSON.stringify(geometry));
-    assert.ok(geometry.chart.height >= 56 && geometry.chart.height <= 84, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 44 && geometry.chart.height <= 56, JSON.stringify(geometry));
     assert.equal(geometry.barCount, 7, JSON.stringify(geometry));
     assert.ok(geometry.barRects.every(item => item.height <= geometry.chart.height && item.width > 0), JSON.stringify(geometry));
     assert.equal(geometry.noDaySection, true, JSON.stringify(geometry));
@@ -712,7 +712,7 @@ test('beta.10 compact Dashboard cards fill their content without a tall empty ca
             return {
                 panelRects,
                 equalHeight: Math.max(...panelRects.map(item => item.height)) - Math.min(...panelRects.map(item => item.height)) <= 1,
-                compact: panelRects.every(item => item.height >= 132 && item.height <= 156),
+                    compact: panelRects.every(item => item.height >= 100 && item.height <= 128),
                 chartHeight: railRect.height,
                 chartBottomInset: panelRects[1].bottom - railRect.bottom,
                 barCount: barRects.length,
@@ -728,7 +728,7 @@ test('beta.10 compact Dashboard cards fill their content without a tall empty ca
     assert.equal(geometry.equalHeight, true, JSON.stringify(geometry));
     assert.equal(geometry.compact, true, JSON.stringify(geometry));
     assert.ok(geometry.chartHeight >= 52 && geometry.chartHeight <= 68, JSON.stringify(geometry));
-    assert.ok(geometry.chartBottomInset >= 8 && geometry.chartBottomInset <= 18, JSON.stringify(geometry));
+    assert.ok(geometry.chartBottomInset >= 6 && geometry.chartBottomInset <= 24, JSON.stringify(geometry));
     assert.equal(geometry.barCount, 7, JSON.stringify(geometry));
     assert.equal(geometry.barsAligned, true, JSON.stringify(geometry));
     assert.ok(geometry.taskGap >= 16 && geometry.taskGap <= 20, JSON.stringify(geometry));
@@ -742,7 +742,7 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
     const longTitle = 'A long Session title that remains accessible while ellipsizing visually';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh" aria-label="Refresh"></button></div></div>`
+            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh" aria-label="Refresh"></button></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };

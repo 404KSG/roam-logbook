@@ -86,9 +86,6 @@ export function createTopbar({
     };
 
     const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
-    const pomodoroLabel = minutes =>
-        Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 60_000);
-
     // ---- popover ----
 
     const resetClockOutConfirmation = () => {
@@ -414,7 +411,9 @@ export function createTopbar({
         if (!buttonNode) return;
         const pausedItems = paused.getPaused();
         const running = entries.length > 0;
-        const overrun = entries.some(entry => pomodoro.isOverrun(entry, now));
+        if (running) pomodoro.reconcileCycle(entries, { now });
+        const cycleElapsed = pomodoro.cycleElapsedMs(now);
+        const overrun = pomodoro.isCycleOverrun(now);
         const stale = findStaleClocks(entries, now, staleHours()).length > 0;
 
         if (!running) {
@@ -437,13 +436,12 @@ export function createTopbar({
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
         buttonNode.classList.remove('rlb-topbar__button--paused');
         const [first] = entries;
-        const elapsed = now - first.start.getTime();
         // The topbar is a timing-state entry, not a task summary. Overrun
         // outranks stale, matching the previous status priority without putting
         // either state on the whole button.
         const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
-        timeNode.textContent = formatElapsed(elapsed);
+        timeNode.textContent = formatElapsed(cycleElapsed);
         if (entries.length > 1) {
             buttonNode.classList.add('rlb-topbar__button--parallel');
             parallelNode.textContent = sessionCount(entries.length);
@@ -460,22 +458,22 @@ export function createTopbar({
             buttonNode.title =
                 `${sessionCount(entries.length)} Running\n` +
                 `Primary timer: ${first.title}\n` +
-                `This session ${formatElapsed(elapsed)}` +
+                `Shared cycle ${formatElapsed(cycleElapsed)}` +
                 (overrun ? '\nA Pomodoro is over its target.' : '') +
                 (!overrun && stale ? '\nA clock is likely forgotten.' : '') +
                 '\nClick for all clock details.';
         } else {
-            const target = pomodoro.targetMinutes(first.clockUid);
-            const totalMinutes = first.priorMinutes + Math.floor(elapsed / 60_000);
+            const totalMinutes = first.priorMinutes + Math.floor((now - first.start.getTime()) / 60_000);
+            const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
                 `${sessionCount(entries.length)} Running\n` +
                 `Clocked in: ${first.title}\n` +
-                `This session ${formatElapsed(elapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
-                (target
-                    ? `\nPomodoro ${pomodoroLabel(target)} — ${
+                `Shared cycle ${formatElapsed(cycleElapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
+                (threshold
+                    ? `\nPomodoro cycle ${formatElapsed(threshold * 60_000)} — ${
                           overrun
-                              ? `over by ${formatElapsed(pomodoro.overrunMs(first, now))}`
-                              : `${formatElapsed(target * 60_000 - elapsed)} left`
+                              ? `over by ${formatElapsed(pomodoro.cycleOverrunMs(now))}`
+                              : `${formatElapsed(threshold * 60_000 - cycleElapsed)} left`
                       }`
                     : '') +
                 (!overrun && stale ? '\nThis clock is likely forgotten.' : '');

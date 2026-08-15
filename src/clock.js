@@ -345,7 +345,7 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
                 string: formatClockLine(now),
             });
 
-            const confirmation = refreshResult();
+            const confirmation = refreshResult({ notify: false });
             if (!confirmation.ok) {
                 return {
                     clockUid,
@@ -357,7 +357,15 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
                 };
             }
             const result = { clockUid, taskUid };
-            publishAction({ type: 'clock-in', source, clockUid, taskUid });
+            publishAction({
+                type: 'clock-in',
+                source,
+                clockUid,
+                taskUid,
+                newCycle: open.length === 0,
+                cycleStartedAt: open.length === 0 ? now.getTime() : null,
+            });
+            notify();
             return result;
         })
     );
@@ -411,6 +419,11 @@ export async function clockOutEntries(
                         });
                     }
                 }
+                // Batch close changes the confirmed running snapshot without
+                // using closeEntriesNow's normal per-session publish path.
+                // Notify subscribers once so the shared Pomodoro cycle and
+                // surfaces reconcile the final batch state together.
+                notify();
                 return result;
             });
         } catch (error) {

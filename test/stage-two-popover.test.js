@@ -81,7 +81,7 @@ test.afterEach(t => {
 });
 test.after(() => uninstallGraph());
 
-test('running rows expose compact explicit target metadata and complete accessible task names', async t => {
+test('running rows expose compact cycle metadata without misleading per-session targets', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
@@ -98,8 +98,9 @@ test('running rows expose compact explicit target metadata and complete accessib
     assert.equal(row.querySelectorAll('.rlb-run__meta-line').length, 2);
     assert.match(
         row.querySelector('.rlb-run__meta-primary').textContent,
-        /^\d+:\d{2} · target \d+:\d{2} · \d+m total$/
+        /^\d+:\d{2} · \d+m total$/
     );
+    assert.doesNotMatch(row.textContent, /target|Pomodoro/i);
     assert.match(
         row.querySelector('.rlb-run__started').textContent,
         /^(Today|[A-Z][a-z]{2} \d{1,2}) \d{2}:\d{2}$/
@@ -118,6 +119,38 @@ test('running rows expose compact explicit target metadata and complete accessib
     assert.match(discard.title, /Discard this CLOCK|discard this Session/i);
     assert.equal(discard.getAttribute('aria-label'), discard.title);
     await settle();
+});
+
+test('topbar uses one shared cycle across parallel Sessions and ignores Roam sync indicator color', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:31:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second cycle task',
+        parent: null,
+        page: 'Project Page',
+    });
+    const firstStart = new Date('2026-08-15T09:00:00');
+    const secondStart = new Date('2026-08-15T09:28:00');
+    await clock.clockIn('popover-task-01', { now: firstStart });
+    const syncIndicator = document.createElement('span');
+    syncIndicator.className = 'rm-sync-indicator';
+    syncIndicator.style.color = 'rgb(220, 50, 50)';
+    document.querySelector('.rm-topbar').appendChild(syncIndicator);
+
+    assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
+    assert.ok(topbarButton().querySelector('.rlb-topbar__time--overrun'));
+    await clock.clockIn('popover-task-02', { now: secondStart });
+    assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
+    assert.ok(topbarButton().querySelector('.rlb-topbar__time--overrun'));
+    assert.equal(document.querySelector('.rm-sync-indicator').style.color, 'rgb(220, 50, 50)');
+
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:31:00') });
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:31:00') });
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(pomodoro.getCycle(), null);
 });
 
 test('Session surfaces put one accessible Refresh action in the footer', async t => {
@@ -352,6 +385,10 @@ test('Shift+Click opens one shared Current Sessions sidebar without graph writes
         assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
         assert.equal(sidebar.getAttribute('role'), 'region');
         assert.match(sidebar.textContent, /1 Session Running/);
+        const sidebarList = sidebar.querySelector('.rlb-surface__list');
+        assert.ok(sidebarList);
+        assert.equal(sidebarList.getAttribute('role'), 'group');
+        assert.equal(sidebarList.getAttribute('aria-label'), 'Current Sessions');
         assert.equal(sidebar.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
         const sidebarRefresh = sidebar.querySelector('.rlb-popover__footer [data-action="refresh"]');
         assert.ok(sidebarRefresh);

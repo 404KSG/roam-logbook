@@ -1,7 +1,7 @@
 # Dashboard embedded activity design
 
 Date: 2026-08-15  
-Status: approved for beta.9 implementation
+Status: approved for beta.10 implementation
 
 ## Purpose
 
@@ -144,12 +144,13 @@ legible at normal desktop and high-DPI sizes.
 
 Beta.10 keeps the beta.9 three-panel Overview, but removes the remaining
 vertical slack inside it. Each card is a content-dense, equal-height panel
-with a 144px desktop target; Today and Tasks tracked keep their label, value,
-and context in one compact heading row, while the selected-range card gives
-the real activity rail a 60px readable area. The quiet `0m / No active
-Sessions` state is intentionally muted rather than presented as a dominant
-metric. A small body inset keeps the next Running or By Task panel about
-18px below the cards without changing any statistics or range semantics.
+with a 116px desktop target (the accepted 100–128px range); Today and Tasks
+tracked keep their label, value, and context in one compact heading row, while
+the selected-range card gives the real activity rail a 52px readable area.
+The quiet `0m / No active Sessions` state is intentionally muted rather than
+presented as a dominant metric. A small body inset keeps the next Running or
+By Task panel about 18px below the cards without changing any statistics or
+range semantics.
 
 Popover and Current Sessions sidebar now share one `Current Sessions` group
 wrapper around their rows. The group provides the only low-contrast surface
@@ -160,7 +161,17 @@ gap to the session group and the Refresh icon in the lower-right cell. This is
 an information-density change only: actions, Shift+Click navigation, pause
 batch state, and graph-read behavior are unchanged.
 
-Beta.10 does not change Pomodoro state, graph formats, task rollups, version
-metadata, or release state. Browser geometry covers card height/chart fill,
-overview-to-list spacing, group borders, row alignment, and equal footer
-controls; DOM tests cover the shared accessible group and quiet zero state.
+Beta.10 also replaces per-clock Pomodoro colouring with one persisted shared
+cycle: the first confirmed running Session freezes `startedAt` and the
+configured threshold; parallel additions/removals keep it; a confirmed empty
+running snapshot, Pause All, Clock Out All, or a final Check Out clears it.
+Resume starts a fresh cycle and never restores an old per-clock remainder.
+Valid persisted cycles survive reload, while a missing cycle falls back to the
+earliest open CLOCK. The old `pomodoroTargets` map remains versioned only for
+compatibility and is not a topbar/UI source. The Roam sync indicator remains
+host-owned and is not selected or recoloured by the extension.
+
+Browser geometry covers the 100–128px card/44–56px rail contract, content
+fit, group borders, row alignment, and equal footer controls; DOM tests cover
+the shared accessible group, quiet zero state, exact shared-cycle boundaries,
+reload recovery, and the absence of visible per-clock targets.

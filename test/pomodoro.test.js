@@ -21,11 +21,98 @@ const entry = (clockUid, startedMinutesAgo, now) => ({
     start: new Date(now - startedMinutesAgo * 60_000),
 });
 
+const cycleEntry = (clockUid, startedAt, extra = {}) => ({
+    clockUid,
+    taskUid: clockUid,
+    start: new Date(startedAt),
+    ...extra,
+});
+
 test.beforeEach(() => {
     useSettings();
     pomodoro.reset();
 });
 test.after(() => uninstallGraph());
+
+test('shared cycle uses one frozen threshold with exact boundary semantics', () => {
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const now = startedAt + 30 * 60_000;
+    const cycle = pomodoro.reconcileCycle([cycleEntry('cycle-1', startedAt)], { now });
+
+    assert.equal(cycle.startedAt, startedAt);
+    assert.equal(cycle.thresholdMinutes, 30);
+    assert.equal(pomodoro.cycleElapsedMs(startedAt + 3 * 60_000), 3 * 60_000);
+    assert.equal(pomodoro.isCycleOverrun(startedAt + 29 * 60_000 + 59_000), false);
+    assert.equal(pomodoro.isCycleOverrun(now), true);
+    assert.equal(pomodoro.isCycleOverrun(now + 1_000), true);
+});
+
+test('historical totals and legacy per-clock targets cannot turn a short shared cycle red', () => {
+    const now = Date.parse('2026-08-15T09:03:00Z');
+    pomodoro.start('legacy-3-minute-target', 3);
+    pomodoro.start('legacy-13-minute-target', 13);
+    pomodoro.reconcileCycle([
+        cycleEntry('legacy-3-minute-target', now - 3 * 60_000, { priorMinutes: 600 }),
+        cycleEntry('legacy-13-minute-target', now - 2 * 60_000, { priorMinutes: 900 }),
+    ], { now });
+
+    assert.equal(pomodoro.cycleElapsedMs(now), 3 * 60_000);
+    assert.equal(pomodoro.isCycleOverrun(now), false);
+    assert.equal(pomodoro.targetMinutes('legacy-3-minute-target'), 3);
+    assert.equal(pomodoro.targetMinutes('legacy-13-minute-target'), 13);
+});
+
+test('parallel Session changes retain one cycle, while empty running state resets it', () => {
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const first = cycleEntry('parallel-1', startedAt);
+    const second = cycleEntry('parallel-2', startedAt + 8 * 60_000);
+    const third = cycleEntry('parallel-3', startedAt + 12 * 60_000);
+
+    const initial = pomodoro.reconcileCycle([first]);
+    assert.equal(pomodoro.reconcileCycle([first, second]).startedAt, initial.startedAt);
+    assert.equal(pomodoro.reconcileCycle([second, third]).startedAt, initial.startedAt);
+    assert.equal(pomodoro.reconcileCycle([third]).startedAt, initial.startedAt);
+    assert.equal(pomodoro.reconcileCycle([]), null);
+    assert.equal(pomodoro.getCycle(), null);
+
+    const resumed = pomodoro.reconcileCycle([third], { now: startedAt + 20 * 60_000 });
+    assert.equal(resumed.startedAt, third.start.getTime());
+    assert.notEqual(resumed.startedAt, initial.startedAt);
+});
+
+test('cycle reload restores a valid persisted cycle and falls back to the earliest open CLOCK', () => {
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const store = useSettings();
+    pomodoro.reconcileCycle([cycleEntry('reload-1', startedAt)]);
+    const persisted = JSON.parse(store.get('pomodoroCycle'));
+    assert.equal(persisted.data.startedAt, startedAt);
+
+    pomodoro.reset();
+    setExtensionAPI({ settings: { get: key => store.get(key), set: (key, value) => store.set(key, value) } });
+    pomodoro.load();
+    assert.equal(pomodoro.reconcileCycle([cycleEntry('reload-1', startedAt + 4 * 60_000)]).startedAt, startedAt);
+
+    // A confirmed empty graph is authoritative: a reload with no open CLOCK
+    // cannot keep presenting the previous cycle as active.
+    assert.equal(pomodoro.reconcileCycle([]), null);
+    assert.equal(pomodoro.getCycle(), null);
+
+    pomodoro.reset();
+    useSettings();
+    const later = cycleEntry('fallback-later', startedAt + 6 * 60_000);
+    const earliest = cycleEntry('fallback-earliest', startedAt + 2 * 60_000);
+    assert.equal(pomodoro.reconcileCycle([later, earliest]).startedAt, earliest.start.getTime());
+});
+
+test('active cycle threshold stays frozen until the next cycle', () => {
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const store = useSettings({ pomodoroMinutes: '30' });
+    const cycle = pomodoro.reconcileCycle([cycleEntry('freeze-1', startedAt)]);
+    store.set('pomodoroMinutes', '45');
+    assert.equal(pomodoro.reconcileCycle([cycleEntry('freeze-1', startedAt)]).thresholdMinutes, cycle.thresholdMinutes);
+    pomodoro.reconcileCycle([]);
+    assert.equal(pomodoro.reconcileCycle([cycleEntry('freeze-2', startedAt + 60_000)]).thresholdMinutes, 45);
+});
 
 test('a session without a pomodoro can never be overrun', () => {
     const now = Date.now();

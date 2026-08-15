@@ -81,7 +81,7 @@ Layering, innermost first:
     Shift+Clicking a task entry uses the native `rightSidebar.open()` plus
     `addWindow({ window: { type: 'block', 'block-uid': uid } })` seam; ordinary
     task clicks still use the main window and action buttons stop propagation.
-  - Dashboard is a beta.9 content-fit, Linear-inspired inspector with an
+  - Dashboard is a beta.10 content-fit, Linear-inspired inspector with an
     adaptive width and viewport max-height: its header is compact, its body
     scrolls only for long reports, and short reports end shortly after the final
     row. It uses exactly three low-contrast stat panels: Today, the selected
@@ -94,10 +94,17 @@ Layering, innermost first:
     row one, metadata on row two, and actions spanning both rows. Alignment is
     structural (`display: contents` plus explicit grid tracks), not a margin
     offset, so Chinese/English and one/two-line metadata share one geometry.
+- The topbar's visible Pomodoro timer is one persisted shared cycle, not a
+  per-clock target: the first confirmed running Session freezes the threshold
+  and action instant, parallel changes retain it, and a confirmed empty state,
+  Pause All, Clock Out All, or final Check Out clears it. Resume starts a new
+  cycle. The Roam sync indicator is host-owned and must not be selected by the
+  plugin's timer styles.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 Persisted internal state uses explicit envelopes: Pause Batch format 2,
-Pomodoro target format 1, and state-backup format 1. Legacy known formats may
+deprecated Pomodoro target compatibility format 1, shared Pomodoro cycle
+format 1, and state-backup format 1. Legacy known formats may
 migrate; unknown or corrupt values remain untouched and are backed up once.
 `CONTEXT.md` is the domain vocabulary authority for Task, Session, Own, Total,
 Pause Batch, and Pomodoro Target.
@@ -149,6 +156,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.9 clean run currently contains 234 tests).
+  (the beta.10 clean run currently contains 245 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

@@ -142,7 +142,7 @@ function createController({ extensionAPI }) {
                     id: SETTING_POMODORO_MINUTES,
                     name: 'Pomodoro duration (minutes)',
                     description:
-                        'Every new Session receives this target. Passing it turns elapsed time red; the clock keeps running.',
+                        'Sets the shared cycle threshold captured when the first Session starts. Passing it turns elapsed time red; the cycle keeps running.',
                     action: {
                         type: 'input',
                         placeholder: '30',

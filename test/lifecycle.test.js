@@ -56,7 +56,7 @@ const extensionAPI = {
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
-const { formatStamp } = await import('../src/time.js');
+const { formatElapsed, formatStamp } = await import('../src/time.js');
 
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 const dialog = () => document.getElementById('roam-logbook-dashboard');
@@ -98,7 +98,7 @@ test('onload mounts the topbar widget and registers every command', () => {
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.equal(document.querySelectorAll('#roam-logbook-styles').length, 1);
-    assert.match(css, /width: min\(1160px, calc\(100vw - 48px\)\)/);
+    assert.match(css, /width: min\(1120px, calc\(100vw - 48px\)\)/);
     assert.match(css, /max-height: min\(84vh, calc\(100vh - 48px\)\)/);
     assert.doesNotMatch(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);
@@ -199,7 +199,7 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
     assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
 });
 
-test('a Pomodoro overrun marks only the visible elapsed time', () => {
+test('the shared Pomodoro cycle stays overrun when a running CLOCK is edited', () => {
     const [entry] = clock.getRunning();
     assert.equal(pomodoro.targetMinutes(entry.clockUid), 30);
 
@@ -208,6 +208,7 @@ test('a Pomodoro overrun marks only the visible elapsed time', () => {
 
     // Backdate the CLOCK block itself — refresh re-reads from the graph, so
     // mutating the in-memory entry would simply be overwritten.
+    pomodoro.reconcileCycle([]);
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 31 * 60_000))}`;
     clock.refresh();
 
@@ -219,20 +220,22 @@ test('a Pomodoro overrun marks only the visible elapsed time', () => {
 
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
     clock.refresh();
-    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
 });
 
-test('a stale clock marks only the visible elapsed time', () => {
+test('the shared overrun state takes priority over stale metadata', () => {
     const [entry] = clock.getRunning();
     pomodoro.suppress(entry.clockUid);
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 9 * 60 * 60_000))}`;
     clock.refresh();
 
-    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--stale'));
-    assert.equal(topbarWidget().querySelector('.rlb-topbar__time--overrun'), null);
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__time--stale'), null);
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
-    assert.match(topbarWidget().textContent.trim(), /^9:\d{2}:\d{2}$/);
-    assert.match(topbarWidget().querySelector('button').title, /likely forgotten/);
+    const cycle = pomodoro.getCycle();
+    assert.ok(cycle, 'an external timestamp edit does not reset the shared cycle');
+    assert.equal(topbarWidget().textContent.trim(), formatElapsed(Date.now() - cycle.startedAt));
+    assert.doesNotMatch(topbarWidget().querySelector('button').title, /likely forgotten/);
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
@@ -243,7 +246,7 @@ test('a stale clock marks only the visible elapsed time', () => {
 
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
     clock.refresh();
-    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
+    assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
 });
 
 test('a long task name stays in the tooltip without entering visible topbar text', () => {
@@ -267,6 +270,7 @@ test('clock in is hidden and clock out offered while the clock runs', () => {
 
 test('multiple-clock mode leads with elapsed time and follows with a compact Session count', async () => {
     const [primary] = clock.getRunning();
+    pomodoro.reconcileCycle([]);
     graph.store.get(primary.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 10 * 60_000))}`;
     graph.store.set('tasktwo002', {
         uid: 'tasktwo002',
@@ -566,7 +570,7 @@ test('clocking out through the palette closes the entry', async () => {
     assert.match(topbarWidget().querySelector('button').title, /no Session running/);
 });
 
-test('automatic targets capture the configured duration per Session and recover missing state on reload', async () => {
+test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {
     const duration = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
     duration.action.onChange({ target: { value: '45' } });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
@@ -575,7 +579,7 @@ test('automatic targets capture the configured duration per Session and recover 
     assert.equal(pomodoro.isActive(before.clockUid), true);
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 45m/);
+    assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 45:00/);
     assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
 
     duration.action.onChange({ target: { value: '20' } });
@@ -593,9 +597,11 @@ test('automatic targets capture the configured duration per Session and recover 
     assert.equal(pomodoro.targetMinutes(next.clockUid), 20, 'the next Session gets the new duration');
 
     // A real reload with a running graph CLOCK but no target assignment: the
-    // session is discovered and receives the current duration from its original start.
+    // legacy assignment is repaired for compatibility, while the cycle uses
+    // the open CLOCK as its fallback when no persisted cycle exists.
     graph.store.get(next.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 21 * 60_000))}`;
     settingsStore.set('pomodoroTargets', '{}');
+    settingsStore.delete('pomodoroCycle');
     extension.onunload();
     extension.onload({ extensionAPI });
 
@@ -605,7 +611,7 @@ test('automatic targets capture the configured duration per Session and recover 
     assert.equal(clock.getRunning().length, 1, 'passing the repaired target never closes the CLOCK');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro 20m/);
+    assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 20:00/);
 
     duration.action.onChange({ target: { value: '-4' } });
     assert.equal(settingsStore.get('pomodoroMinutes'), '20', 'invalid input keeps the current safe value');

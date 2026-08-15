@@ -22,9 +22,9 @@ function formatStamp(date) {
   return `[${formatTimestamp(date)}]`;
 }
 var isValidDate = (value) => value instanceof Date && !Number.isNaN(value.getTime());
-function formatStarted(start2, now = /* @__PURE__ */ new Date()) {
-  const raw = isValidDate(start2) ? formatStamp(start2) : String(start2 ?? "");
-  const candidate = isValidDate(start2) ? start2 : parseTimestamp(raw.replace(/^\[|\]$/g, ""));
+function formatStarted(start, now = /* @__PURE__ */ new Date()) {
+  const raw = isValidDate(start) ? formatStamp(start) : String(start ?? "");
+  const candidate = isValidDate(start) ? start : parseTimestamp(raw.replace(/^\[|\]$/g, ""));
   if (!isValidDate(candidate)) {
     return { valid: false, raw, dateLabel: raw, timeLabel: "", datetime: null };
   }
@@ -105,9 +105,9 @@ function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 function startOfDaysAgo(date, days) {
-  const start2 = startOfDay(date);
-  start2.setDate(start2.getDate() - days);
-  return start2;
+  const start = startOfDay(date);
+  start.setDate(start.getDate() - days);
+  return start;
 }
 
 // src/org.js
@@ -146,8 +146,8 @@ function parseClockLineDetailed(string) {
       }
     } : { ok: false, issue: null };
   }
-  const start2 = parseTimestamp(match[1]);
-  if (!start2) {
+  const start = parseTimestamp(match[1]);
+  if (!start) {
     return {
       ok: false,
       issue: {
@@ -170,7 +170,7 @@ function parseClockLineDetailed(string) {
       }
     };
   }
-  if (end && end.getTime() < start2.getTime()) {
+  if (end && end.getTime() < start.getTime()) {
     return {
       ok: false,
       issue: {
@@ -190,7 +190,7 @@ function parseClockLineDetailed(string) {
       }
     };
   }
-  const computedMinutes = end ? durationMinutes(start2.getTime(), end.getTime()) : null;
+  const computedMinutes = end ? durationMinutes(start.getTime(), end.getTime()) : null;
   const effectiveMinutes = end ? declaredMinutes ?? computedMinutes : null;
   const issue = end && declaredMinutes !== null && declaredMinutes !== computedMinutes ? {
     code: "declared-duration-mismatch",
@@ -199,7 +199,7 @@ function parseClockLineDetailed(string) {
   return {
     ok: true,
     value: {
-      start: start2,
+      start,
       end,
       computedMinutes,
       declaredMinutes,
@@ -210,11 +210,11 @@ function parseClockLineDetailed(string) {
     }
   };
 }
-function formatClockLine(start2, end) {
+function formatClockLine(start, end) {
   if (!end)
-    return `${CLOCK_LABEL} ${formatStamp(start2)}`;
-  const minutes = durationMinutes(start2.getTime(), end.getTime());
-  return `${CLOCK_LABEL} ${formatStamp(start2)}--${formatStamp(end)} => ${formatDurationMinutes(minutes)}`;
+    return `${CLOCK_LABEL} ${formatStamp(start)}`;
+  const minutes = durationMinutes(start.getTime(), end.getTime());
+  return `${CLOCK_LABEL} ${formatStamp(start)}--${formatStamp(end)} => ${formatDurationMinutes(minutes)}`;
 }
 function referencedBlockUid(string) {
   if (typeof string !== "string")
@@ -655,10 +655,11 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.9";
+var PLUGIN_VERSION = "0.9.0-beta.10";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
+  pomodoroCycle: 1,
   stateBackups: 1
 });
 
@@ -669,6 +670,7 @@ var SETTING_TODO_ONLY = "todoBlocksOnly";
 var SETTING_STALE_HOURS = "staleHours";
 var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
 var SETTING_POMODORO_STATE = "pomodoroTargets";
+var SETTING_POMODORO_CYCLE = "pomodoroCycle";
 var SETTING_PAUSED_BATCH = "pausedBatch";
 var SETTING_STATE_BACKUPS = "stateBackups";
 var DEFAULTS = {
@@ -1031,7 +1033,7 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
         order,
         string: formatClockLine(now)
       });
-      const confirmation = refreshResult();
+      const confirmation = refreshResult({ notify: false });
       if (!confirmation.ok) {
         return {
           clockUid,
@@ -1043,7 +1045,15 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
         };
       }
       const result = { clockUid, taskUid };
-      publishAction({ type: "clock-in", source, clockUid, taskUid });
+      publishAction({
+        type: "clock-in",
+        source,
+        clockUid,
+        taskUid,
+        newCycle: open.length === 0,
+        cycleStartedAt: open.length === 0 ? now.getTime() : null
+      });
+      notify();
       return result;
     })
   );
@@ -1091,6 +1101,7 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
             });
           }
         }
+        notify();
         return result;
       });
     } catch (error) {
@@ -2143,9 +2154,12 @@ function createDashboard({
 
 // src/pomodoro.js
 var VERSION = STATE_FORMATS.pomodoroTargets;
+var CYCLE_VERSION = STATE_FORMATS.pomodoroCycle;
 var targets = /* @__PURE__ */ new Map();
+var cycle = null;
 var notice2 = "";
 var unsupportedRaw = null;
+var unsupportedCycleRaw = null;
 var isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
 var mapFromData = (data, { strict = false } = {}) => {
   if (!isRecord(data))
@@ -2165,6 +2179,67 @@ var mapFromData = (data, { strict = false } = {}) => {
   return { next, invalid };
 };
 var serialized = (values) => JSON.stringify({ version: VERSION, data: Object.fromEntries(values) });
+var serializedCycle = (value) => JSON.stringify({
+  version: CYCLE_VERSION,
+  data: value ? {
+    startedAt: value.startedAt,
+    thresholdMinutes: value.thresholdMinutes
+  } : null
+});
+var validCycle = (value) => {
+  if (!isRecord(value))
+    return false;
+  const startedAt = Number(value.startedAt);
+  const thresholdMinutes = Number(value.thresholdMinutes);
+  return Number.isFinite(startedAt) && startedAt >= 0 && Number.isFinite(thresholdMinutes) && thresholdMinutes > 0;
+};
+var cycleFromData = (data) => {
+  if (data === null)
+    return null;
+  if (!validCycle(data))
+    throw new Error("invalid Pomodoro cycle");
+  return {
+    version: CYCLE_VERSION,
+    startedAt: Number(data.startedAt),
+    thresholdMinutes: Number(data.thresholdMinutes)
+  };
+};
+function writeCycle(next) {
+  if (unsupportedCycleRaw !== null) {
+    notice2 || (notice2 = "Saved Pomodoro cycle uses an unsupported version and was kept.");
+    return false;
+  }
+  try {
+    writeSetting(SETTING_POMODORO_CYCLE, serializedCycle(next));
+    cycle = next ? { ...next } : null;
+    return true;
+  } catch (error) {
+    notice2 || (notice2 = "Pomodoro cycle could not be saved yet; the current cycle remains in memory.");
+    console.warn("[roam-logbook] could not persist Pomodoro cycle", error);
+    cycle = next ? { ...next } : null;
+    return false;
+  }
+}
+function loadCycle() {
+  const raw = readSetting(SETTING_POMODORO_CYCLE);
+  if (!raw)
+    return;
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!isRecord(parsed) || parsed.version !== CYCLE_VERSION || !("data" in parsed)) {
+      throw new Error("unsupported pomodoro cycle version");
+    }
+    cycle = cycleFromData(parsed.data);
+  } catch (error) {
+    unsupportedCycleRaw = raw;
+    const firstWarning = preserveStateBackup(SETTING_POMODORO_CYCLE, raw);
+    if (!notice2 && firstWarning) {
+      notice2 = "Saved Pomodoro cycle uses an unsupported or invalid version and was kept.";
+    }
+    if (firstWarning)
+      console.warn("[roam-logbook] could not read Pomodoro cycle", error);
+  }
+}
 function writeTargets(next) {
   if (unsupportedRaw !== null) {
     notice2 = "Saved Pomodoro state uses an unsupported version and was kept.";
@@ -2176,8 +2251,11 @@ function writeTargets(next) {
 }
 function load() {
   targets = /* @__PURE__ */ new Map();
+  cycle = null;
   notice2 = "";
   unsupportedRaw = null;
+  unsupportedCycleRaw = null;
+  loadCycle();
   const raw = readSetting(SETTING_POMODORO_STATE);
   if (!raw)
     return;
@@ -2217,39 +2295,63 @@ function load() {
       console.warn("[roam-logbook] could not read pomodoro state", error);
   }
 }
-function targetMinutes(clockUid) {
-  const minutes = targets.get(clockUid);
-  return minutes > 0 ? minutes : null;
+function getCycle() {
+  return cycle ? { ...cycle } : null;
 }
-function targetDurationMs(clockUid) {
-  const minutes = targetMinutes(clockUid);
-  return minutes === null ? null : minutes * 6e4;
+var instantMs = (value) => value instanceof Date ? value.getTime() : Number.isFinite(Number(value)) ? Number(value) : Date.now();
+function cycleElapsedMs(now = Date.now()) {
+  return cycle ? Math.max(0, instantMs(now) - cycle.startedAt) : 0;
 }
-function isAssigned(clockUid) {
-  return targets.has(clockUid);
+function cycleThresholdMinutes() {
+  return cycle?.thresholdMinutes ?? null;
 }
-function start(clockUid, minutes = pomodoroMinutes()) {
-  if (!clockUid || !(minutes > 0))
-    return false;
-  const next = new Map(targets);
-  next.set(clockUid, minutes);
-  return writeTargets(next);
+function cycleThresholdMs() {
+  return cycle ? cycle.thresholdMinutes * 6e4 : null;
 }
-function startDurationMs(clockUid, durationMs) {
-  if (!Number.isFinite(durationMs) || durationMs <= 0)
-    return false;
-  return start(clockUid, durationMs / 6e4);
+function isCycleOverrun(now = Date.now()) {
+  const threshold = cycleThresholdMs();
+  return threshold !== null && cycleElapsedMs(now) >= threshold;
 }
-function suppress(clockUid) {
-  if (!clockUid)
-    return false;
-  const next = new Map(targets);
-  next.set(clockUid, 0);
-  return writeTargets(next);
+function cycleOverrunMs(now = Date.now()) {
+  const threshold = cycleThresholdMs();
+  return threshold === null ? 0 : Math.max(0, cycleElapsedMs(now) - threshold);
+}
+function reconcileCycle(running2 = [], { now = Date.now() } = {}) {
+  const entries = Array.isArray(running2) ? running2 : [];
+  if (entries.length === 0) {
+    if (cycle !== null)
+      writeCycle(null);
+    return null;
+  }
+  if (cycle)
+    return getCycle();
+  const starts = entries.map((entry) => entry?.start instanceof Date ? entry.start.getTime() : Number(entry?.start)).filter((value) => Number.isFinite(value));
+  const startedAt = starts.length > 0 ? Math.min(...starts) : instantMs(now);
+  const next = {
+    version: CYCLE_VERSION,
+    startedAt,
+    thresholdMinutes: pomodoroMinutes()
+  };
+  writeCycle(next);
+  return getCycle();
+}
+function startCycleAt(running2 = [], startedAt = Date.now()) {
+  if (!Array.isArray(running2) || running2.length === 0)
+    return null;
+  const instant = instantMs(startedAt);
+  const next = {
+    version: CYCLE_VERSION,
+    startedAt: instant,
+    thresholdMinutes: pomodoroMinutes()
+  };
+  writeCycle(next);
+  return getCycle();
 }
 function reconcile(running2) {
+  const cycleBefore = getCycle();
+  const cycleAfter = reconcileCycle(running2);
   if (unsupportedRaw !== null)
-    return false;
+    return cycleBefore !== cycleAfter;
   const live = new Set(running2.map((entry) => entry.clockUid));
   const next = new Map(targets);
   for (const clockUid of [...next.keys()]) {
@@ -2261,34 +2363,37 @@ function reconcile(running2) {
       next.set(entry.clockUid, pomodoroMinutes());
   }
   if (next.size === targets.size && [...next].every(([uid, value]) => targets.get(uid) === value)) {
-    return false;
+    return cycleBefore?.startedAt !== cycleAfter?.startedAt || cycleBefore?.thresholdMinutes !== cycleAfter?.thresholdMinutes;
   }
   writeTargets(next);
   return true;
 }
-function overrunMs(entry, now = Date.now()) {
-  const minutes = entry && targets.get(entry.clockUid);
-  if (!minutes)
-    return 0;
-  return Math.max(0, now - entry.start.getTime() - minutes * 6e4);
-}
-function isOverrun(entry, now = Date.now()) {
-  return overrunMs(entry, now) > 0;
-}
 function attach() {
   let sawInitialReplay = false;
-  return subscribe((running2) => {
+  const unsubscribe = subscribe((running2) => {
     if (!sawInitialReplay) {
       sawInitialReplay = true;
       return;
     }
     reconcile(running2);
   });
+  const unsubscribeActions = subscribeActions((action) => {
+    if (action?.type !== "clock-in" || !action.newCycle || !Number.isFinite(action.cycleStartedAt)) {
+      return;
+    }
+    startCycleAt(getRunning(), action.cycleStartedAt);
+  });
+  return () => {
+    unsubscribe();
+    unsubscribeActions();
+  };
 }
 function reset2() {
   targets = /* @__PURE__ */ new Map();
+  cycle = null;
   notice2 = "";
   unsupportedRaw = null;
+  unsupportedCycleRaw = null;
 }
 
 // src/paused.js
@@ -2306,23 +2411,15 @@ var cleanRecord = (value) => {
   const taskUid = typeof value.taskUid === "string" ? value.taskUid.trim() : "";
   const title = typeof value.title === "string" ? value.title : "";
   const pausedAtMs = Number(value.pausedAtMs);
-  const remaining = value.pomodoroRemainingMs;
-  const pomodoroRemainingMs = remaining === null || remaining === void 0 ? null : Number(remaining);
-  const pomodoroSuppressed = value.pomodoroSuppressed === true;
   const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
   const reconciliationState = value.reconciliationState === "externally-replaced" || value.reconciliationState === "externally-clocked-out" ? value.reconciliationState : null;
   const externalClockUid = typeof value.externalClockUid === "string" && value.externalClockUid ? value.externalClockUid : null;
   if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
     return null;
-  if (pomodoroRemainingMs !== null && (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)) {
-    return null;
-  }
   return {
     taskUid,
     title,
     pausedAtMs,
-    pomodoroRemainingMs,
-    pomodoroSuppressed,
     ...clockUid ? { clockUid } : {},
     ...reconciliationState ? { reconciliationState } : {},
     ...externalClockUid ? { externalClockUid } : {}
@@ -2346,6 +2443,7 @@ var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
     }
   };
 };
+var hasLegacyPomodoroFields = (value) => Boolean(value && ("pomodoroRemainingMs" in value || "pomodoroSuppressed" in value));
 var serialized2 = () => JSON.stringify({
   version: VERSION2,
   data: {
@@ -2416,6 +2514,7 @@ function load2() {
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (parsed?.version === VERSION2 && parsed.data && Array.isArray(parsed.data.items)) {
+      const needsMigration = parsed.data.items.some(hasLegacyPomodoroFields) || Array.isArray(parsed.data.pendingResume) && parsed.data.pendingResume.some(hasLegacyPomodoroFields);
       const loadedItems = parsed.data.items.map(cleanRecord);
       const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map((value) => cleanPending(value, { version: VERSION2 })) : [];
       if (loadedItems.some((item) => !item) || loadedPending.some((item) => !item)) {
@@ -2429,6 +2528,8 @@ function load2() {
         const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
         notice3 = firstWarning ? "A current pending Resume has no exact Session association; it was retained as a conflict." : "";
       }
+      if (needsMigration)
+        persist();
       return getPaused();
     }
     if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
@@ -2454,20 +2555,6 @@ function load2() {
     return getPaused();
   }
 }
-var pomodoroSnapshot = (entry, nowMs) => {
-  const targetMs = targetDurationMs(entry.clockUid);
-  if (targetMs === null) {
-    return {
-      pomodoroRemainingMs: null,
-      pomodoroSuppressed: isAssigned(entry.clockUid)
-    };
-  }
-  const remaining = targetMs - Math.max(0, nowMs - entry.start.getTime());
-  return {
-    pomodoroRemainingMs: remaining > 0 ? remaining : null,
-    pomodoroSuppressed: remaining <= 0
-  };
-};
 var pausedRecord = (snapshot) => {
   const { clockUid: _clockUid, ...record } = snapshot;
   return record;
@@ -2548,7 +2635,6 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
           taskUid: entry.taskUid,
           title: entry.title,
           pausedAtMs: now.getTime(),
-          ...pomodoroSnapshot(entry, now.getTime()),
           clockUid: entry.clockUid
         }));
         for (const snapshot of snapshots) {
@@ -2628,16 +2714,6 @@ var existingTask = (record) => {
     throw error;
   }
 };
-var applyPomodoro = (record) => {
-  if (record.pomodoroRemainingMs) {
-    if (!startDurationMs(record.clockUid, record.pomodoroRemainingMs)) {
-      throw new Error("Pomodoro remainder could not be saved.");
-    }
-  } else if (record.pomodoroSuppressed) {
-    if (!suppress(record.clockUid))
-      throw new Error("Pomodoro suppression could not be saved.");
-  }
-};
 var removeTask = (taskUid) => {
   items = items.filter((item) => item.taskUid !== taskUid);
 };
@@ -2681,18 +2757,12 @@ async function recoverPending({ running: running2 = [] } = {}) {
       });
       continue;
     }
-    try {
-      applyPomodoro({ ...pending, clockUid: entry.clockUid });
-      pendingResume = pendingResume.filter((item) => item.taskUid !== pending.taskUid);
-      removeTask(pending.taskUid);
-      persist();
-      recovered += 1;
-      if (pending.legacy === true)
-        legacyRecovered += 1;
-    } catch (error) {
-      failed += 1;
-      console.error("[roam-logbook] could not recover paused task", pending.taskUid, error);
-    }
+    pendingResume = pendingResume.filter((item) => item.taskUid !== pending.taskUid);
+    removeTask(pending.taskUid);
+    persist();
+    recovered += 1;
+    if (pending.legacy === true)
+      legacyRecovered += 1;
   }
   return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
@@ -2815,7 +2885,6 @@ async function resumeRecord(record, now) {
   delete pending.recoveryState;
   delete pending.recoveryIssue;
   persist();
-  applyPomodoro({ ...record, clockUid: entry.clockUid });
   pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
   removeTask(record.taskUid);
   persist();
@@ -3157,7 +3226,6 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
       taskUid: entry.taskUid,
       title: entry.title,
       pausedAtMs: now.getTime(),
-      ...pomodoroSnapshot(entry, now.getTime()),
       clockUid: entry.clockUid
     });
   }
@@ -4237,7 +4305,7 @@ var STYLES = `
 }
 
 .rlb-dialog {
-    width: min(1160px, calc(100vw - 48px));
+    width: min(1120px, calc(100vw - 48px));
     height: auto;
     min-height: 0;
     max-height: min(84vh, calc(100vh - 48px));
@@ -4318,10 +4386,10 @@ var STYLES = `
     align-items: flex-start;
     gap: 7px;
     min-width: 0;
-    height: 144px;
-    min-height: 144px;
+    height: 116px;
+    min-height: 116px;
     box-sizing: border-box;
-    justify-content: space-between;
+    justify-content: center;
     padding: 10px 12px;
     border: 1px solid var(--rlb-border-light);
     border-radius: 7px;
@@ -4330,6 +4398,7 @@ var STYLES = `
 
 .rlb-overview__item--selected {
     min-width: 0;
+    justify-content: space-between;
 }
 
 .rlb-overview__panel {
@@ -4402,7 +4471,7 @@ var STYLES = `
     align-items: end;
     gap: 4px;
     width: 100%;
-    height: 60px;
+    height: 52px;
     min-width: 0;
     margin: 0;
     overflow: hidden;
@@ -4414,7 +4483,7 @@ var STYLES = `
     align-items: end;
     width: 100%;
     min-width: 0;
-    height: 60px;
+    height: 52px;
     margin: 0 !important;
     padding: 0 !important;
     border: 0;
@@ -4670,10 +4739,9 @@ var STYLES = `
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
 var rowFigures = (entry, now) => {
-  const target = targetMinutes(entry.clockUid);
   const elapsed = now.getTime() - entry.start.getTime();
   const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
-  return formatElapsed(elapsed) + (target ? ` \xB7 target ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
+  return `${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(total)} total`;
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var renderTitle = (row, onOpenTask) => {
@@ -4689,7 +4757,7 @@ var renderTitle = (row, onOpenTask) => {
 };
 var renderRunningRow = (row, now, options) => {
   const entry = row.entry;
-  const overrun = isOverrun(entry, now);
+  const overrun = isCycleOverrun(now);
   const node = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
   node.dataset.sessionState = "running";
   node.dataset.clockUid = entry.clockUid;
@@ -4912,7 +4980,7 @@ function updateSessionSurfaceElapsed(root, entries, now) {
       primary.textContent = rowFigures(entry, currentNow);
     const row = meta.closest(".rlb-run");
     if (row)
-      row.classList.toggle("rlb-run--overrun", isOverrun(entry, currentNow));
+      row.classList.toggle("rlb-run--overrun", isCycleOverrun(currentNow));
   }
 }
 
@@ -4971,7 +5039,6 @@ function createTopbar({
     return value instanceof Date ? value : new Date(value);
   };
   const sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-  const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
   const resetClockOutConfirmation = () => {
     confirmation?.reset();
   };
@@ -5274,7 +5341,10 @@ function createTopbar({
       return;
     const pausedItems = getPaused();
     const running2 = entries.length > 0;
-    const overrun = entries.some((entry) => isOverrun(entry, now));
+    if (running2)
+      reconcileCycle(entries, { now });
+    const cycleElapsed = cycleElapsedMs(now);
+    const overrun = isCycleOverrun(now);
     const stale = findStaleClocks(entries, now, staleHours()).length > 0;
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
@@ -5293,10 +5363,9 @@ function createTopbar({
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
     buttonNode.classList.remove("rlb-topbar__button--paused");
     const [first] = entries;
-    const elapsed = now - first.start.getTime();
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
-    timeNode.textContent = formatElapsed(elapsed);
+    timeNode.textContent = formatElapsed(cycleElapsed);
     if (entries.length > 1) {
       buttonNode.classList.add("rlb-topbar__button--parallel");
       parallelNode.textContent = sessionCount2(entries.length);
@@ -5311,14 +5380,14 @@ function createTopbar({
     if (entries.length > 1) {
       buttonNode.title = `${sessionCount2(entries.length)} Running
 Primary timer: ${first.title}
-This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
+Shared cycle ${formatElapsed(cycleElapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
-      const target = targetMinutes(first.clockUid);
-      const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
+      const totalMinutes2 = first.priorMinutes + Math.floor((now - first.start.getTime()) / 6e4);
+      const threshold = cycleThresholdMinutes();
       buttonNode.title = `${sessionCount2(entries.length)} Running
 Clocked in: ${first.title}
-This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
-Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
+Shared cycle ${formatElapsed(cycleElapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (threshold ? `
+Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
   };
@@ -5667,7 +5736,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
         {
           id: SETTING_POMODORO_MINUTES,
           name: "Pomodoro duration (minutes)",
-          description: "Every new Session receives this target. Passing it turns elapsed time red; the clock keeps running.",
+          description: "Sets the shared cycle threshold captured when the first Session starts. Passing it turns elapsed time red; the cycle keeps running.",
           action: {
             type: "input",
             placeholder: "30",
