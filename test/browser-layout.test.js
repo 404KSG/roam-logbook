@@ -15,7 +15,21 @@ body { margin: 0; color: #182026; font-family: -apple-system, BlinkMacSystemFont
 .bp3-icon-document-open::before { content: "↗"; margin-right: 7px; }
 `;
 
-const html = body => `<!doctype html><html><head><style>${HOST_CSS}</style><style>${STYLES}</style></head><body>${body}</body></html>`;
+// Roam can leave a more specific Blueprint rule in the page after an extension
+// reload. Keep this late layer in the fixture so the test catches the failure
+// users actually see, rather than only proving our preferred rules in isolation.
+const LATE_HOST_CSS = `
+.bp3-button.bp3-minimal.rlb-topbar__button--parallel > * {
+    margin: 0 12px 0 4px;
+    min-width: 4ch;
+}
+.rlb-task-table .rlb-task-link > .rlb-task-link__text {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+`;
+
+const htmlWithLateHost = body => `<!doctype html><html><head><style>${HOST_CSS}</style><style>${STYLES}</style><style>${LATE_HOST_CSS}</style></head><body>${body}</body></html>`;
 
 const geometryExpression = `(() => {
     const rect = node => {
@@ -91,19 +105,20 @@ const taskGeometryExpression = `(() => {
 test('topbar visible glyphs keep equal space around the separator', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        html(`<div class="rm-topbar"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Tasks</span></button></div></div>`),
+        htmlWithLateHost(`<div class="rm-topbar"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Tasks</span></button></div></div>`),
         geometryExpression
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.ok(Math.abs(geometry.leftGap - geometry.rightGap) <= 1, JSON.stringify(geometry));
     assert.ok(geometry.centerDelta <= 1, JSON.stringify(geometry));
+    assert.equal(geometry.separator.width, 3, JSON.stringify(geometry));
 });
 
 test('a collapsed long Task wraps without painting into its summary', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const title = "Graph Engineering: How to Build AI Agent Systems That Don't Break at Scale * 这是一个需要完整换行且不能和摘要粘连的超长任务标题";
     const geometry = await withChromium(
-        html(`<table class="rlb-table rlb-task-table" style="width:760px"><colgroup><col><col style="width:80px"><col style="width:88px"><col style="width:88px"></colgroup><tbody><tr><td class="rlb-tree__cell"><div class="rlb-tree__layout"><div class="rlb-tree__leading"><button class="bp3-button bp3-minimal bp3-small rlb-tree__toggle">›</button><span class="rlb-status"></span></div><div class="rlb-tree__content"><button class="bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link"><span class="rlb-task-link__text">${title}</span></button></div><span class="rlb-muted rlb-tree__hidden">+1 sub-task</span></div></td><td class="rlb-table__num">7</td><td class="rlb-table__num">1h 31m</td><td class="rlb-table__num">1h 31m</td></tr></tbody></table>`),
+        htmlWithLateHost(`<table class="rlb-table rlb-task-table" style="width:760px"><colgroup><col><col style="width:80px"><col style="width:88px"><col style="width:88px"></colgroup><tbody><tr><td class="rlb-tree__cell"><div class="rlb-tree__layout"><div class="rlb-tree__leading"><button class="bp3-button bp3-minimal bp3-small rlb-tree__toggle">›</button><span class="rlb-status"></span></div><div class="rlb-tree__content"><button class="bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link"><span class="rlb-task-link__text">${title}</span></button></div><span class="rlb-muted rlb-tree__hidden">+1 sub-task</span></div></td><td class="rlb-table__num">7</td><td class="rlb-table__num">1h 31m</td><td class="rlb-table__num">1h 31m</td></tr></tbody></table>`),
         taskGeometryExpression
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));

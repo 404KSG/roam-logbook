@@ -107,10 +107,10 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-topbar__time[^}]*font-weight: 500/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-variant-numeric: tabular-nums/s);
     assert.match(css, /\.rlb-topbar__button--parallel[^}]*display: inline-grid[^}]*grid-template-columns: max-content 3px max-content[^}]*column-gap: 5px/s);
-    assert.match(css, /\.rlb-topbar__button > \.rlb-topbar__time,[^}]*flex: 0 0 auto[^}]*width: auto[^}]*min-width: 0[^}]*margin: 0[^}]*padding: 0/s);
+    assert.match(css, /\.rlb-topbar__button\.rlb-topbar__button--parallel > \.rlb-topbar__time,[^}]*flex: 0 0 auto[^}]*width: max-content[^}]*min-width: 0[^}]*max-width: none[^}]*margin: 0[^}]*padding: 0/s);
     const timeRule = css.match(/\.rlb-topbar__time\s*\{([^}]*)\}/)?.[1] ?? '';
     assert.doesNotMatch(timeRule, /min-width:/, 'elapsed text has no invisible width reservation');
-    assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*flex: 0 0 auto[^}]*margin: 0/s);
+    assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*justify-self: center/s);
     assert.match(css, /\.rlb-topbar__time--neutral[^}]*#5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
     assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
@@ -475,10 +475,10 @@ test('the task tree collapses and expands from the caret', () => {
         'the fixed summary cannot overlap inside the wrapping title box'
     );
     const css = document.getElementById('roam-logbook-styles').textContent;
-    assert.match(css, /\.rlb-tree__layout\s*{[^}]*display: grid[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto[^}]*column-gap: 8px[^}]*width: 100%/s);
+    assert.match(css, /\.rlb-tree__layout\s*{[^}]*display: grid[^}]*grid-template-columns: auto minmax\(0, 1fr\) max-content[^}]*column-gap: 12px[^}]*width: 100%/s);
     assert.match(css, /\.rlb-tree__content\s*{[^}]*min-width: 0[^}]*flex-wrap: wrap/s);
     assert.match(css, /\.rlb-tree__hidden\s*{[^}]*white-space: nowrap/s);
-    assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text\s*{[^}]*flex: 1 1 0[^}]*width: 100%[^}]*min-width: 0[^}]*max-width: 100%[^}]*white-space: normal[^}]*overflow-wrap: anywhere[^}]*word-break: break-word/s);
+    assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text\s*{[^}]*flex: 1 1 auto[^}]*width: auto[^}]*min-width: 0[^}]*max-width: 100%[^}]*white-space: normal[^}]*overflow-wrap: anywhere[^}]*word-break: break-word/s);
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     dialog().querySelector('.rlb-tree__toggle').dispatchEvent(
