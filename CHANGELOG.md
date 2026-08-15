@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.6 — 2026-08-15
+
+- Simplified the Dashboard into a quiet Roam-native surface: summary metrics no longer read as cards, repeated table/track borders are removed, and By Day keeps one shared baseline with silent zero-value days.
+- Made the paused topbar state visible without adding a label: the history-clock identity remains compact and gains a muted warm pause badge plus an explicit paused accessible name.
+- Rebuilt current-session rows around a title-row grid so running, paused, and error status points align with the title rather than the metadata block.
+- Added public browser geometry and state coverage for the minimal Dashboard, shared chart baseline, paused-vs-idle topbar identity, and title-row status alignment.
+- The complete local suite now contains 224 tests, including browser geometry, accessibility, and final-bundle lifecycle coverage.
+
 ## 0.9.0-beta.5 — 2026-08-15
 
 - Moved the shared Current Sessions Refresh action back into the two-column footer grid, with one centered icon-only control and no header placeholder.

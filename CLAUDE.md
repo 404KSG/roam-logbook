@@ -63,7 +63,9 @@ Layering, innermost first:
     square icon-only hit target, while running preserves the elapsed/count unit.
     Session rows use a small, muted status bullet for alignment; the explicit
     `Check Out` action is a neutral log-out icon with an accessible text label,
-    and paused rows expose an icon-only `Resume` action. The shared Refresh
+    and paused rows expose an icon-only `Resume` action. A fully paused batch
+    keeps the history-clock identity and adds a small muted warm pause badge;
+    idle has no badge. The shared Refresh
     action belongs in the two-column footer grid, not the surface header.
   - `syncTopbarLayout` marks the actual navigation shell and search child found at
     attach time. The Logbook unit is `flex: 0 0 auto`/`min-width: max-content`
@@ -75,8 +77,15 @@ Layering, innermost first:
     removed on its close action and during extension unload; a missing host uses a
     visibly marked DOM fallback only for unusual shells/test fixtures.
   - Dashboard By Day is a compact seven-column chart: its range stays in the
-    heading, the bars use a quiet baseline/track and green intensity levels, and
-    By Task follows without an extra range row or large empty spacer.
+    heading, the bars use one quiet shared baseline and green intensity levels,
+    zero-value days are silent, and By Task follows without an extra range row
+    or large empty spacer. Dashboard summary/table rows avoid repeated card,
+    track, and per-row border treatment; section boundaries remain as orientation
+    cues.
+  - Current-session rows use a shared grid with the status point and title on
+    row one, metadata on row two, and actions spanning both rows. Alignment is
+    structural (`display: contents` plus explicit grid tracks), not a margin
+    offset, so Chinese/English and one/two-line metadata share one geometry.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 Persisted internal state uses explicit envelopes: Pause Batch format 2,
@@ -132,6 +141,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.5 visual slice currently has 220 tests).
+  (the beta.6 visual slice currently has 224 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

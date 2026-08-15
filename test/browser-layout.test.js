@@ -295,7 +295,7 @@ test('By Day is a compact weekly chart with an inline range and readable values'
         .map((minutes, index) => `<div class="rlb-bar rlb-bar--level-${minutes === 0 ? 0 : index === 3 ? 3 : 1}${minutes === 0 ? ' rlb-bar--empty' : ''}" role="listitem" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-bar__duration">${minutes ? `${minutes}m` : ''}</span><div class="rlb-bar__track"><div class="rlb-bar__fill" style="height:${minutes ? Math.max(4, Math.round((minutes / 120) * 100)) : 0}%"></div></div><span class="rlb-bar__label">Aug ${index + 9} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}</span></div>`)
         .join('');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-root rlb-root--open"><div class="rlb-dialog" style="width:760px;height:700px"><div class="rlb-body"><section class="rlb-section rlb-by-day"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" data-day-count="7" style="--rlb-day-count:7" role="list">${cells}</div></section><section class="rlb-section rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By task</h3></div></section></div></div></div>`),
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:760px;height:700px"><div class="rlb-body"><section class="rlb-section rlb-by-day"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" data-day-count="7" style="--rlb-day-count:7" role="list">${cells}</div></section><section class="rlb-section rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By task</h3></div></section></div></div></div>`),
         `(() => {
             const day = document.querySelector('.rlb-by-day');
             const chart = document.querySelector('.rlb-bars');
@@ -313,7 +313,8 @@ test('By Day is a compact weekly chart with an inline range and readable values'
                 labelsInside: labelRects.every(item => item.left >= rect(chart).left && item.right <= rect(chart).right + .5),
                 noLabelOverlap: labelRects.every((item, index) => labelRects.slice(index + 1).every(other => item.right <= other.left || other.right <= item.left || item.bottom <= other.top || other.bottom <= item.top)),
                 taskMovesUp: rect(task).top < rect(day).bottom + 24,
-                baseline: getComputedStyle(chart.querySelector('.rlb-bar__track')).borderBottomStyle
+                baseline: getComputedStyle(chart.querySelector('.rlb-bar__track')).borderBottomStyle,
+                sharedBaseline: getComputedStyle(chart, '::after').content
             };
         })()`
     );
@@ -326,7 +327,144 @@ test('By Day is a compact weekly chart with an inline range and readable values'
     assert.equal(geometry.labelsInside, true, JSON.stringify(geometry));
     assert.equal(geometry.noLabelOverlap, true, JSON.stringify(geometry));
     assert.equal(geometry.taskMovesUp, true, JSON.stringify(geometry));
-    assert.notEqual(geometry.baseline, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.baseline, 'none', JSON.stringify(geometry));
+    assert.notEqual(geometry.sharedBaseline, 'none', JSON.stringify(geometry));
+});
+
+test('beta.6 Dashboard keeps one quiet baseline and removes border soup', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const cells = [0, 30, 0, 120, 0, 60, 15]
+        .map((minutes, index) => `<div class="rlb-bar rlb-bar--level-${minutes ? (index === 3 ? 3 : 1) : 0}${minutes ? '' : ' rlb-bar--empty'}" role="listitem" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-bar__duration">${minutes ? `${minutes}m` : ''}</span><div class="rlb-bar__track"><div class="rlb-bar__fill" style="height:${minutes ? Math.max(4, Math.round((minutes / 120) * 100)) : 0}%"></div></div><span class="rlb-bar__label">Aug ${index + 9} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}</span></div>`)
+        .join('');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:760px;height:700px"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="rlb-header__title">Logbook</h2><p class="rlb-header__subtitle">Focus sessions, activity, and task rollups</p></div></header><div class="rlb-summary"><div class="rlb-stats"><div class="rlb-stat"><strong class="rlb-stat__value">2h 17m</strong><span class="rlb-stat__label">Today</span></div><div class="rlb-stat"><strong class="rlb-stat__value">13h 47m</strong><span class="rlb-stat__label">Last 7 days</span></div><div class="rlb-stat"><strong class="rlb-stat__value">3</strong><span class="rlb-stat__label">Tasks tracked</span></div></div></div><div class="rlb-body"><section class="rlb-section rlb-running"><h3 class="rlb-section__title">Running</h3><table class="rlb-table"><thead><tr><th>Task</th><th>Started</th><th>Elapsed</th></tr></thead><tbody><tr><td>Graph Engineering</td><td>Today 12:38</td><td>2:17</td></tr></tbody></table></section><section class="rlb-section rlb-by-day"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" data-day-count="7" style="--rlb-day-count:7" role="list">${cells}</div></section><section class="rlb-section rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By task</h3></div><table class="rlb-table"><tbody><tr><td>记得早点购买护肤品。</td><td>2</td></tr><tr><td>Graph Engineering: a long task title</td><td>7</td></tr></tbody></table></section></div></div></div>`),
+        `(() => {
+            const style = selector => getComputedStyle(document.querySelector(selector));
+            const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { top:r.top, bottom:r.bottom, height:r.height, left:r.left, right:r.right }; };
+            const chart = document.querySelector('.rlb-bars');
+            const tracks = [...chart.querySelectorAll('.rlb-bar__track')].map(node => getComputedStyle(node));
+            const rows = [...document.querySelectorAll('.rlb-running tbody tr, .rlb-by-task tbody tr')];
+            const rowBorders = rows.map(row => getComputedStyle(row.querySelector('td')).borderBottomStyle);
+            const task = document.querySelector('.rlb-by-task');
+            const chartRect = rect('.rlb-bars');
+            const taskRect = rect('.rlb-by-task');
+            return {
+                headerBorder: style('.rlb-header').borderBottomStyle,
+                summaryBorder: style('.rlb-summary').borderBottomStyle,
+                statDividers: [...document.querySelectorAll('.rlb-stat')].map(node => getComputedStyle(node).borderRightStyle),
+                rowBorders,
+                trackBorders: tracks.map(node => [node.borderTopStyle, node.borderBottomStyle]),
+                chartBorder: getComputedStyle(chart).borderBottomStyle,
+                sharedBaseline: { content: getComputedStyle(chart, '::after').content, height: parseFloat(getComputedStyle(chart, '::after').height) || 0 },
+                emptyFill: document.querySelector('.rlb-bar--empty .rlb-bar__fill').getBoundingClientRect().height,
+                chart: chartRect,
+                task: taskRect,
+                taskVisibleAfterChart: taskRect.top >= chartRect.bottom,
+                noClipping: taskRect.right <= document.querySelector('.rlb-body').getBoundingClientRect().right + .5 && taskRect.bottom <= document.querySelector('.rlb-body').getBoundingClientRect().bottom + .5
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.headerBorder, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.summaryBorder, 'none', JSON.stringify(geometry));
+    assert.ok(geometry.statDividers.every(value => value === 'none'), JSON.stringify(geometry));
+    assert.ok(geometry.rowBorders.every(value => value === 'none'), JSON.stringify(geometry));
+    assert.ok(geometry.trackBorders.every(([top, bottom]) => top === 'none' && bottom === 'none'), JSON.stringify(geometry));
+    assert.equal(geometry.chartBorder, 'none', JSON.stringify(geometry));
+    assert.notEqual(geometry.sharedBaseline.content, 'none', JSON.stringify(geometry));
+    assert.ok(geometry.sharedBaseline.height >= 1, JSON.stringify(geometry));
+    assert.equal(geometry.emptyFill, 0, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height <= 96, JSON.stringify(geometry));
+    assert.equal(geometry.taskVisibleAfterChart, true, JSON.stringify(geometry));
+    assert.equal(geometry.noClipping, true, JSON.stringify(geometry));
+});
+
+test('session status bullet aligns with the title row rather than the whole row', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Session"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
+        `(() => {
+            const rect = node => { const r = node.getBoundingClientRect(); return { top:r.top, bottom:r.bottom, left:r.left, right:r.right, width:r.width, height:r.height }; };
+            const row = document.querySelector('.rlb-run');
+            const status = document.querySelector('.rlb-run__status');
+            const title = document.querySelector('.rlb-run__title');
+            const meta = document.querySelector('.rlb-run__meta');
+            const actions = document.querySelector('.rlb-run__actions');
+            const bodyStyle = getComputedStyle(document.querySelector('.rlb-run__body'));
+            const statusStyle = getComputedStyle(status);
+            const titleRect = rect(title);
+            const statusRect = rect(status);
+            const rowRect = rect(row);
+            return {
+                status: statusRect,
+                title: titleRect,
+                meta: rect(meta),
+                actions: rect(actions),
+                row: rowRect,
+                bodyDisplay: bodyStyle.display,
+                statusGridRow: statusStyle.gridRow,
+                statusAlign: statusStyle.alignSelf,
+                statusMarginTop: statusStyle.marginTop,
+                centeredOnTitle: Math.abs((statusRect.top + statusRect.height / 2) - (titleRect.top + titleRect.height / 2)) <= 2,
+                notCenteredOnWholeRow: Math.abs((statusRect.top + statusRect.height / 2) - (rowRect.top + rowRect.height / 2)) > 2,
+                metadataBelowTitle: meta.getBoundingClientRect().top >= titleRect.bottom - .5,
+                titleBeforeActions: titleRect.right <= rect(actions).left + .5
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.bodyDisplay, 'contents', JSON.stringify(geometry));
+    assert.equal(geometry.statusGridRow, '1', JSON.stringify(geometry));
+    assert.equal(geometry.statusAlign, 'center', JSON.stringify(geometry));
+    assert.equal(geometry.statusMarginTop, '0px', JSON.stringify(geometry));
+    assert.equal(geometry.centeredOnTitle, true, JSON.stringify(geometry));
+    assert.equal(geometry.notCenteredOnWholeRow, true, JSON.stringify(geometry));
+    assert.equal(geometry.metadataBelowTitle, true, JSON.stringify(geometry));
+    assert.equal(geometry.titleBeforeActions, true, JSON.stringify(geometry));
+});
+
+test('paused icon-only topbar keeps clock identity and a visible quiet pause badge', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Logbook — no Session running"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused" aria-label="2 Sessions Paused — click to resume or review."><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span><span class="rlb-topbar__pause-badge" aria-hidden="true">Ⅱ</span></button></div>`),
+        `(() => {
+            const buttons = [...document.querySelectorAll('.rlb-topbar__button')];
+            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+            const idle = buttons[0];
+            const paused = buttons[1];
+            const badge = paused.querySelector('.rlb-topbar__pause-badge');
+            const idleRect = rect(idle);
+            const pausedRect = rect(paused);
+            const badgeRect = rect(badge);
+            const pausedStyle = getComputedStyle(paused);
+            const badgeStyle = getComputedStyle(badge);
+            return {
+                idle: idleRect,
+                paused: pausedRect,
+                badge: badgeRect,
+                idleHasBadge: Boolean(idle.querySelector('.rlb-topbar__pause-badge')),
+                pausedHasClock: Boolean(paused.querySelector('.bp3-icon-history')),
+                pausedLabel: paused.getAttribute('aria-label'),
+                pausedBackground: pausedStyle.backgroundColor,
+                pausedRing: pausedStyle.boxShadow,
+                badgeColor: badgeStyle.color,
+                badgeBackground: badgeStyle.backgroundColor,
+                badgeInside: badgeRect.left >= pausedRect.left && badgeRect.right <= pausedRect.right && badgeRect.top >= pausedRect.top && badgeRect.bottom <= pausedRect.bottom,
+                square: Math.abs(pausedRect.width - pausedRect.height) <= 1
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.idleHasBadge, false, JSON.stringify(geometry));
+    assert.equal(geometry.pausedHasClock, true, JSON.stringify(geometry));
+    assert.match(geometry.pausedLabel, /2 Sessions Paused/i, JSON.stringify(geometry));
+    assert.notEqual(geometry.pausedBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
+    assert.notEqual(geometry.pausedRing, 'none', JSON.stringify(geometry));
+    assert.ok(geometry.badge.width >= 8 && geometry.badge.height >= 8, JSON.stringify(geometry));
+    assert.equal(geometry.badgeInside, true, JSON.stringify(geometry));
+    assert.notEqual(geometry.badgeColor, 'rgb(194, 48, 48)', JSON.stringify(geometry));
+    assert.notEqual(geometry.badgeBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
+    assert.equal(geometry.square, true, JSON.stringify(geometry));
 });
 
 test('popover rows stay within 340px and 320px with two metadata lines and a two-row footer', async t => {
@@ -389,7 +527,7 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
     }
 });
 
-test('beta.5 keeps session surfaces and dashboard readable while reducing local density', async t => {
+test('beta.6 keeps session surfaces and dashboard readable while reducing local density', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
         htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Paused</div></header><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused"></span><div class="rlb-run__body"><button class="rlb-run__title">一个较长的中文 paused task 标题</button><div class="rlb-run__meta"><time class="rlb-run__started">Today 15:59</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Resume All</button><button class="bp3-button bp3-small">Clock Out All</button><button class="bp3-button bp3-small bp3-icon-refresh rlb-surface__refresh" title="Refresh" aria-label="Refresh"></button></div></div><div class="rlb-root rlb-dashboard rlb-root--open"><div class="rlb-dialog"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="bp3-heading rlb-header__title">Logbook</h2><p class="rlb-header__subtitle">Focus sessions, activity, and task rollups</p></div><button class="bp3-button rlb-icon-button">Refresh</button></header><div class="rlb-summary"><div class="rlb-stat"><span class="rlb-stat__value">2h 17m</span><span class="rlb-stat__label">Today</span></div></div><div class="rlb-body"><section class="rlb-section"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" style="--rlb-day-count:7;height:82px"></div></section><table class="rlb-table"><thead><tr><th>Task</th></tr></thead><tbody><tr><td>一个长任务标题</td></tr></tbody></table></div></div></div>`),

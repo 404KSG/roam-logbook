@@ -237,6 +237,28 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
     assert.equal([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Resume All'), false);
 });
 
+test('paused topbar keeps its clock identity while visibly distinguishing paused state from idle', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    const idleButton = topbarButton();
+    assert.equal(idleButton.classList.contains('rlb-topbar__button--paused'), false);
+    assert.equal(idleButton.querySelector('.rlb-topbar__pause-badge'), null);
+
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    const surface = openPopover();
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    await settle();
+
+    const pausedButton = topbarButton();
+    assert.ok(pausedButton.classList.contains('rlb-topbar__button--icon-only'));
+    assert.ok(pausedButton.classList.contains('rlb-topbar__button--paused'));
+    assert.ok(pausedButton.querySelector('.bp3-icon-history'), 'paused state keeps the clock identity');
+    const badge = pausedButton.querySelector('.rlb-topbar__pause-badge');
+    assert.ok(badge);
+    assert.equal(badge.getAttribute('aria-hidden'), 'true');
+    assert.match(pausedButton.getAttribute('aria-label'), /1 Session Paused/i);
+    assert.equal(pausedButton.textContent, 'Ⅱ');
+});
+
 test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);

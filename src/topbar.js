@@ -52,6 +52,7 @@ export function createTopbar({
     let container = null;
     let timeNode = null;
     let iconNode = null;
+    let pauseBadgeNode = null;
     let parallelNode = null;
     let separatorNode = null;
     let buttonNode = null;
@@ -365,6 +366,7 @@ export function createTopbar({
     const syncButtonLayout = mode => {
         if (layoutMode === mode) return;
         if (mode === 'idle') buttonNode.replaceChildren(iconNode);
+        else if (mode === 'paused') buttonNode.replaceChildren(iconNode, pauseBadgeNode);
         else if (mode === 'parallel') buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         else buttonNode.replaceChildren(timeNode);
         layoutMode = mode;
@@ -380,12 +382,14 @@ export function createTopbar({
         if (!running) {
             buttonNode.classList.add('rlb-topbar__button--icon-only');
             buttonNode.classList.remove('rlb-topbar__button--parallel');
+            buttonNode.classList.toggle('rlb-topbar__button--paused', pausedItems.length > 0);
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             parallelNode.textContent = '';
             separatorNode.textContent = '';
-            syncButtonLayout('idle');
+            pauseBadgeNode.textContent = pausedItems.length > 0 ? 'Ⅱ' : '';
+            syncButtonLayout(pausedItems.length > 0 ? 'paused' : 'idle');
             buttonNode.title = pausedItems.length
                 ? `${sessionCount(pausedItems.length)} Paused — click to resume or review.`
                 : 'Logbook — no Session running. Click for details.';
@@ -394,6 +398,7 @@ export function createTopbar({
         }
 
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
+        buttonNode.classList.remove('rlb-topbar__button--paused');
         const [first] = entries;
         const elapsed = now - first.start.getTime();
         // The topbar is a timing-state entry, not a task summary. Overrun
@@ -456,6 +461,8 @@ export function createTopbar({
         container.id = WIDGET_ID;
 
         iconNode = el('span', 'bp3-icon bp3-icon-history rlb-topbar__icon');
+        pauseBadgeNode = el('span', 'rlb-topbar__pause-badge', 'Ⅱ');
+        pauseBadgeNode.setAttribute('aria-hidden', 'true');
         parallelNode = el('span', 'rlb-topbar__parallel');
         separatorNode = el('span', 'rlb-topbar__separator');
         separatorNode.setAttribute('aria-hidden', 'true');
