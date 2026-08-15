@@ -60,6 +60,53 @@ function notify() {
     }
 }
 
+const uncertainCloseResult = error => {
+    const pendingClockUids = running.map(entry => entry.clockUid);
+    return {
+        action: 'close-sessions',
+        ok: false,
+        item: 'Session',
+        completedVerb: 'ended',
+        entries: running,
+        results: [],
+        closed: 0,
+        count: 0,
+        completed: 0,
+        failed: pendingClockUids.length,
+        pending: pendingClockUids.length,
+        pendingClockUids,
+        uncertain: true,
+        partial: false,
+        retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
+        error,
+    };
+};
+
+const uncertainPauseResult = error => {
+    const pendingClockUids = running.map(entry => entry.clockUid);
+    return {
+        action: 'pause-sessions',
+        ok: false,
+        item: 'Session',
+        completedVerb: 'paused',
+        entries: running,
+        records: [],
+        results: [],
+        closed: 0,
+        count: 0,
+        completed: 0,
+        failed: pendingClockUids.length,
+        pending: pendingClockUids.length,
+        pendingClockUids,
+        pendingTaskUids: running.map(entry => entry.taskUid),
+        uncertain: true,
+        partial: false,
+        retry: { action: 'pause', retryClockUids: pendingClockUids, retryTaskUids: running.map(entry => entry.taskUid) },
+        error,
+        preflight: true,
+    };
+};
+
 /**
  * Re-read the graph and publish the current set of open clocks.
  *
@@ -187,17 +234,30 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
         }
     }
 
-    const attempted = new Set(results.map(result => result.clockUid));
-    const retryClockUids = ids.filter(clockUid => !attempted.has(clockUid));
+    const retryClockUids = ids.filter(clockUid => {
+        const result = results.find(item => item.clockUid === clockUid);
+        return !result || Boolean(result.error);
+    });
     const closed = results.filter(result => result.closed).length;
+    const failed = results.filter(result => result.error).length;
+    const pending = retryClockUids.length;
+    const incomplete = Boolean(uncertain) || failed > 0 || pending > 0;
     if (publish && (closed > 0 || uncertain)) notify();
     return {
+        action: 'close-sessions',
+        ok: !incomplete,
+        item: 'Session',
+        completedVerb: 'ended',
         results,
         closed,
-        failed: results.filter(result => result.error).length,
+        count: closed,
+        completed: closed,
+        failed,
+        pending,
+        pendingClockUids: retryClockUids,
         uncertain: Boolean(uncertain),
-        partial: Boolean(uncertain && results.some(result => result.closed)),
-        retry: uncertain
+        partial: Boolean(incomplete && closed > 0),
+        retry: incomplete
             ? {
                   action: 'close',
                   retryClockUids,
@@ -205,7 +265,7 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
               }
             : null,
         refresh: uncertain,
-        error: uncertain?.error || null,
+        error: uncertain?.error || results.find(result => result.error)?.error || null,
     };
 }
 
@@ -307,13 +367,18 @@ export async function clockOut(clockUid, { now = new Date() } = {}) {
 
 /** Close a selected set, or every currently running clock when omitted. */
 export async function clockOutEntries(clockUids = null, { now = new Date() } = {}) {
-    return enqueueMutation(() =>
-        withGraphGuard(async () => {
-            const entries = readAllEntries();
-            const outcome = await closeEntriesNow(entries, clockUids, now);
-            return { ...outcome, entries };
-        })
-    );
+    return enqueueMutation(async () => {
+        try {
+            return await withGraphGuard(async () => {
+                const entries = readAllEntries();
+                const outcome = await closeEntriesNow(entries, clockUids, now);
+                return { ...outcome, entries };
+            });
+        } catch (error) {
+            notice = GRAPH_UNCERTAIN;
+            return uncertainCloseResult(error);
+        }
+    });
 }
 
 /**
@@ -324,32 +389,63 @@ export async function clockOutEntries(clockUids = null, { now = new Date() } = {
  * closes without allowing another local graph mutation to interleave.
  */
 export async function pauseEntries({ now = new Date(), prepare } = {}) {
-    return enqueueMutation(() =>
-        withGraphGuard(async () => {
-            const entries = readAllEntries().filter(entry => entry.running);
-            const records = prepare ? await prepare(entries.map(entry => ({ ...entry }))) : [];
-            const outcome = await closeEntriesNow(
-                entries,
-                records.map(record => record.clockUid),
-                now,
-                { publish: false }
-            );
-            return { entries, records, ...outcome };
-        })
-    );
+    return enqueueMutation(async () => {
+        try {
+            return await withGraphGuard(async () => {
+                const entries = readAllEntries().filter(entry => entry.running);
+                const records = prepare ? await prepare(entries.map(entry => ({ ...entry }))) : [];
+                const outcome = await closeEntriesNow(
+                    entries,
+                    records.map(record => record.clockUid),
+                    now,
+                    { publish: false }
+                );
+                return { entries, records, ...outcome };
+            });
+        } catch (error) {
+            notice = GRAPH_UNCERTAIN;
+            return uncertainPauseResult(error);
+        }
+    });
 }
 
-/** Close all currently running clocks. The legacy return value is the count closed. */
+/** Close all currently running clocks and return a structured batch result. */
 export async function clockOutAll({ now = new Date() } = {}) {
-    const outcome = await clockOutEntries(null, { now });
+    let outcome;
+    try {
+        outcome = await clockOutEntries(null, { now });
+    } catch (error) {
+        notice = GRAPH_UNCERTAIN;
+        const pendingClockUids = running.map(entry => entry.clockUid);
+        return {
+            action: 'clock-out-all',
+            ok: false,
+            item: 'Session',
+            completedVerb: 'ended',
+            count: 0,
+            completed: 0,
+            failed: pendingClockUids.length,
+            pending: pendingClockUids.length,
+            pendingClockUids,
+            uncertain: true,
+            partial: false,
+            retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
+            error,
+        };
+    }
     if (outcome.uncertain) {
         notice = GRAPH_UNCERTAIN;
-        return outcome;
-    }
-    if (outcome.failed > 0) {
+    } else if (outcome.failed > 0) {
         notice = `${outcome.failed} Session${outcome.failed === 1 ? '' : 's'} could not be closed.`;
     }
-    return outcome.closed;
+    return {
+        ...outcome,
+        action: 'clock-out-all',
+        item: 'Session',
+        completedVerb: 'ended',
+        count: outcome.closed,
+        completed: outcome.closed,
+    };
 }
 
 /** Close whichever clock belongs to this block, if any. */

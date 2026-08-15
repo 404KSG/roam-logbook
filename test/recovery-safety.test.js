@@ -57,6 +57,8 @@ test.after(() => uninstallGraph());
 
 test('Clock Out All retains only the still-running Pause Batch records after a partial failure', async () => {
     const { clock, paused, pomodoro } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
     await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
     await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
@@ -70,12 +72,19 @@ test('Clock Out All retains only the still-running Pause Batch records after a p
         return originalUpdate(args);
     };
 
+    let result;
     try {
-        await paused.clockOutAll({ now: new Date(T0.getTime() + 7 * 60_000) });
+        result = await paused.clockOutAll({ now: new Date(T0.getTime() + 7 * 60_000) });
     } finally {
         graph.api.data.block.update = originalUpdate;
     }
 
+    assert.equal(result.ok, false);
+    assert.equal(result.count, 1);
+    assert.equal(result.completed, 1);
+    assert.equal(result.failed, 1);
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.pendingClockUids, [failedUid]);
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].taskUid, OTHER.uid);
     assert.deepEqual(
@@ -84,6 +93,122 @@ test('Clock Out All retains only the still-running Pause Batch records after a p
     );
     assert.match(paused.getNotice(), /could not be closed|could not be finished/i);
     assert.equal(pomodoro.getNotice(), '');
+});
+
+test('Pause All returns a structured partial result and retries only the remaining Session', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === OTHER.uid).clockUid;
+    const originalUpdate = graph.api.data.block.update;
+    let failed = true;
+    let updateCount = 0;
+    graph.api.data.block.update = async args => {
+        updateCount += 1;
+        if (failed && args.block.uid === failedUid) throw new Error('one pause failed');
+        return originalUpdate(args);
+    };
+
+    let first;
+    try {
+        first = await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+    } finally {
+        failed = false;
+    }
+
+    assert.equal(first.ok, false);
+    assert.equal(first.partial, true);
+    assert.equal(first.completed, 1);
+    assert.equal(first.failed, 1);
+    assert.equal(first.pending, 1);
+    assert.deepEqual(first.retry.retryClockUids, [failedUid]);
+    assert.equal(paused.getPaused().length, 2, 'the failed Task remains in the recoverable Pause Batch');
+    assert.equal(clock.getRunning().length, 1);
+
+    const retry = await paused.pauseAll({ now: new Date(T0.getTime() + 6 * 60_000) });
+    graph.api.data.block.update = originalUpdate;
+    assert.equal(retry.ok, true);
+    assert.equal(retry.count, 1);
+    assert.equal(retry.failed, 0);
+    assert.equal(paused.getPaused().length, 2);
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(updateCount, 3, 'the successful Session is not written again on retry');
+});
+
+test('Pause All keeps the existing Pause Batch when its preflight snapshot is uncertain', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 6 * 60_000) });
+
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('preflight snapshot unavailable');
+    };
+    let result;
+    try {
+        result = await paused.pauseAll({ now: new Date(T0.getTime() + 7 * 60_000) });
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+
+    assert.equal(result.uncertain, true);
+    assert.equal(result.completed, 0);
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [TASK.uid]);
+    assert.equal(clock.getRunning().length, 1, 'preflight uncertainty performs no pause write');
+});
+
+test('Resume All returns a structured partial result and retries only the retained Task', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+
+    const originalCreate = graph.api.data.block.create;
+    let failed = true;
+    graph.api.data.block.create = async args => {
+        const parent = graph.store.get(args.location['parent-uid']);
+        if (failed && parent?.parent === OTHER.uid) throw new Error('one resume failed');
+        return originalCreate(args);
+    };
+
+    let first;
+    try {
+        first = await paused.resumeAll({ now: new Date(T0.getTime() + 6 * 60_000) });
+    } finally {
+        failed = false;
+    }
+
+    assert.equal(first.ok, false);
+    assert.equal(first.partial, true);
+    assert.equal(first.completed, 1);
+    assert.equal(first.resumed, 1);
+    assert.equal(first.failed, 1);
+    assert.equal(first.pending, 1);
+    assert.deepEqual(first.pendingTaskUids, [OTHER.uid]);
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [OTHER.uid]);
+    assert.equal(clock.getRunning().length, 1);
+
+    const retry = await paused.resumeAll({ now: new Date(T0.getTime() + 7 * 60_000) });
+    graph.api.data.block.create = originalCreate;
+    assert.equal(retry.ok, true);
+    assert.equal(retry.count, 1);
+    assert.equal(retry.failed, 0);
+    assert.equal(paused.getPaused().length, 0);
+    assert.equal(clock.getRunning().length, 2, 'retry adds only the retained Task');
+    assert.equal(
+        graph.childrenOf(graph.childrenOf(TASK.uid).find(block => block.string === 'LOGBOOK::').uid).filter(block =>
+            block.string.startsWith('CLOCK::')
+        ).length,
+        2,
+        'the already resumed Task keeps exactly one new Session'
+    );
 });
 
 test('Clock Out All stops after a post-write refresh failure and keeps an exact retryable remainder', async () => {
@@ -167,7 +292,11 @@ test('Pause All stops after a post-write refresh failure and resumes the exact r
                 .filter(line => !line.includes('--')).length,
             1
         );
-        assert.equal(paused.getPaused().length, 1, 'only the confirmed closed Session is in the Pause Batch');
+        assert.equal(
+            paused.getPaused().length,
+            2,
+            'the Pause Batch keeps the confirmed Session and the exact unconfirmed remainder'
+        );
         assert.match(paused.getNotice(), /Graph state could not be confirmed/i);
     } finally {
         graph.api.data.q = originalQuery;

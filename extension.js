@@ -752,6 +752,51 @@ function notify() {
     }
   }
 }
+var uncertainCloseResult = (error) => {
+  const pendingClockUids = running.map((entry) => entry.clockUid);
+  return {
+    action: "close-sessions",
+    ok: false,
+    item: "Session",
+    completedVerb: "ended",
+    entries: running,
+    results: [],
+    closed: 0,
+    count: 0,
+    completed: 0,
+    failed: pendingClockUids.length,
+    pending: pendingClockUids.length,
+    pendingClockUids,
+    uncertain: true,
+    partial: false,
+    retry: { action: "close", retryClockUids: pendingClockUids, writtenClockUids: [] },
+    error
+  };
+};
+var uncertainPauseResult = (error) => {
+  const pendingClockUids = running.map((entry) => entry.clockUid);
+  return {
+    action: "pause-sessions",
+    ok: false,
+    item: "Session",
+    completedVerb: "paused",
+    entries: running,
+    records: [],
+    results: [],
+    closed: 0,
+    count: 0,
+    completed: 0,
+    failed: pendingClockUids.length,
+    pending: pendingClockUids.length,
+    pendingClockUids,
+    pendingTaskUids: running.map((entry) => entry.taskUid),
+    uncertain: true,
+    partial: false,
+    retry: { action: "pause", retryClockUids: pendingClockUids, retryTaskUids: running.map((entry) => entry.taskUid) },
+    error,
+    preflight: true
+  };
+};
 function refresh({ entries, notify: shouldNotify = true } = {}) {
   let all;
   try {
@@ -842,24 +887,37 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
       results.push({ clockUid, closed: false, error });
     }
   }
-  const attempted = new Set(results.map((result) => result.clockUid));
-  const retryClockUids = ids.filter((clockUid) => !attempted.has(clockUid));
+  const retryClockUids = ids.filter((clockUid) => {
+    const result = results.find((item) => item.clockUid === clockUid);
+    return !result || Boolean(result.error);
+  });
   const closed = results.filter((result) => result.closed).length;
+  const failed = results.filter((result) => result.error).length;
+  const pending = retryClockUids.length;
+  const incomplete = Boolean(uncertain) || failed > 0 || pending > 0;
   if (publish && (closed > 0 || uncertain))
     notify();
   return {
+    action: "close-sessions",
+    ok: !incomplete,
+    item: "Session",
+    completedVerb: "ended",
     results,
     closed,
-    failed: results.filter((result) => result.error).length,
+    count: closed,
+    completed: closed,
+    failed,
+    pending,
+    pendingClockUids: retryClockUids,
     uncertain: Boolean(uncertain),
-    partial: Boolean(uncertain && results.some((result) => result.closed)),
-    retry: uncertain ? {
+    partial: Boolean(incomplete && closed > 0),
+    retry: incomplete ? {
       action: "close",
       retryClockUids,
       writtenClockUids: results.filter((result) => result.closed).map((result) => result.clockUid)
     } : null,
     refresh: uncertain,
-    error: uncertain?.error || null
+    error: uncertain?.error || results.find((result) => result.error)?.error || null
   };
 }
 async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
@@ -947,28 +1005,38 @@ async function clockOut(clockUid, { now = /* @__PURE__ */ new Date() } = {}) {
   );
 }
 async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date() } = {}) {
-  return enqueueMutation(
-    () => withGraphGuard(async () => {
-      const entries = readAllEntries();
-      const outcome = await closeEntriesNow(entries, clockUids, now);
-      return { ...outcome, entries };
-    })
-  );
+  return enqueueMutation(async () => {
+    try {
+      return await withGraphGuard(async () => {
+        const entries = readAllEntries();
+        const outcome = await closeEntriesNow(entries, clockUids, now);
+        return { ...outcome, entries };
+      });
+    } catch (error) {
+      notice = GRAPH_UNCERTAIN;
+      return uncertainCloseResult(error);
+    }
+  });
 }
 async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) {
-  return enqueueMutation(
-    () => withGraphGuard(async () => {
-      const entries = readAllEntries().filter((entry) => entry.running);
-      const records = prepare ? await prepare(entries.map((entry) => ({ ...entry }))) : [];
-      const outcome = await closeEntriesNow(
-        entries,
-        records.map((record) => record.clockUid),
-        now,
-        { publish: false }
-      );
-      return { entries, records, ...outcome };
-    })
-  );
+  return enqueueMutation(async () => {
+    try {
+      return await withGraphGuard(async () => {
+        const entries = readAllEntries().filter((entry) => entry.running);
+        const records = prepare ? await prepare(entries.map((entry) => ({ ...entry }))) : [];
+        const outcome = await closeEntriesNow(
+          entries,
+          records.map((record) => record.clockUid),
+          now,
+          { publish: false }
+        );
+        return { entries, records, ...outcome };
+      });
+    } catch (error) {
+      notice = GRAPH_UNCERTAIN;
+      return uncertainPauseResult(error);
+    }
+  });
 }
 async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
   return enqueueMutation(
@@ -2163,11 +2231,52 @@ var pomodoroSnapshot = (entry, nowMs) => {
     pomodoroSuppressed: remaining <= 0
   };
 };
+var pausedRecord = (snapshot) => {
+  const { clockUid: _clockUid, ...record } = snapshot;
+  return record;
+};
+var pauseBatchResult = ({
+  completed = 0,
+  failed = 0,
+  pendingClockUids = [],
+  pendingTaskUids = [],
+  uncertain = false,
+  error = null,
+  retry = null,
+  ...extra
+} = {}) => {
+  const clockUids = [...new Set(pendingClockUids.filter(Boolean))];
+  const taskUids = [...new Set(pendingTaskUids.filter(Boolean))];
+  const incomplete = uncertain || failed > 0 || clockUids.length > 0 || taskUids.length > 0;
+  return {
+    action: "pause-all",
+    ok: !incomplete,
+    paused: completed,
+    count: completed,
+    completed,
+    failed,
+    pending: Math.max(clockUids.length, taskUids.length),
+    pendingClockUids: clockUids,
+    pendingTaskUids: taskUids,
+    uncertain: Boolean(uncertain),
+    partial: Boolean(incomplete && completed > 0),
+    retry: retry || (incomplete ? { action: "pause", retryClockUids: clockUids, retryTaskUids: taskUids } : null),
+    error: error || (failed > 0 ? new Error("One or more Sessions could not be paused.") : null),
+    item: "Session",
+    completedVerb: "paused",
+    ...extra
+  };
+};
 async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
   if (unsupportedRaw2 !== null) {
     notice3 = "Saved paused-task state is unsupported; no Tasks were paused.";
     notify2();
-    return { paused: 0, failed: 0, uncertain: true };
+    return pauseBatchResult({
+      failed: items.length,
+      pendingTaskUids: items.map((item) => item.taskUid),
+      uncertain: true,
+      error: new Error(notice3)
+    });
   }
   notice3 = "";
   const originalItems = items.map((item) => ({ ...item }));
@@ -2182,7 +2291,15 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
   } catch {
     notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
     notify2();
-    return { paused: 0, failed: 0, uncertain: true };
+    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
+    const pendingTaskUids2 = getRunning().map((entry) => entry.taskUid);
+    return pauseBatchResult({
+      failed: pendingClockUids2.length,
+      pendingClockUids: pendingClockUids2,
+      pendingTaskUids: pendingTaskUids2,
+      uncertain: true,
+      error: new Error(notice3)
+    });
   }
   const merged = new Map(previous);
   let outcome;
@@ -2198,7 +2315,7 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
           clockUid: entry.clockUid
         }));
         for (const snapshot of snapshots) {
-          const { clockUid: _clockUid, ...record } = snapshot;
+          const record = pausedRecord(snapshot);
           merged.set(record.taskUid, record);
         }
         items = [...merged.values()];
@@ -2210,7 +2327,15 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
     items = originalItems;
     notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
     notify2();
-    return { paused: 0, failed: 0, uncertain: true };
+    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
+    const pendingTaskUids2 = getRunning().map((entry) => entry.taskUid);
+    return pauseBatchResult({
+      failed: pendingClockUids2.length,
+      pendingClockUids: pendingClockUids2,
+      pendingTaskUids: pendingTaskUids2,
+      uncertain: true,
+      error: new Error(notice3)
+    });
   }
   let failed = 0;
   const byClockUid = new Map(outcome.results.map((result) => [result.clockUid, result]));
@@ -2222,7 +2347,7 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
     if (previous.has(snapshot.taskUid))
       merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
     else
-      merged.delete(snapshot.taskUid);
+      merged.set(snapshot.taskUid, pausedRecord(snapshot));
     console.error("[roam-logbook] could not pause task", snapshot.taskUid, result?.error);
   }
   items = [...merged.values()];
@@ -2233,13 +2358,27 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   persist();
   notify2();
-  return {
-    paused: outcome.closed,
+  const pendingSnapshots = outcome.records.filter((snapshot) => {
+    const result = byClockUid.get(snapshot.clockUid);
+    return !result?.closed;
+  });
+  const pendingClockUids = pendingSnapshots.map((snapshot) => snapshot.clockUid);
+  const pendingTaskUids = pendingSnapshots.map((snapshot) => snapshot.taskUid);
+  const incomplete = Boolean(outcome.uncertain) || failed > 0 || pendingSnapshots.length > 0;
+  return pauseBatchResult({
+    completed: outcome.closed,
     failed,
+    pendingClockUids,
+    pendingTaskUids,
     uncertain: Boolean(outcome.uncertain),
-    partial: Boolean(outcome.partial),
-    retry: outcome.retry
-  };
+    retry: incomplete ? {
+      ...outcome.retry || { action: "pause" },
+      action: "pause",
+      retryClockUids: pendingClockUids,
+      retryTaskUids: pendingTaskUids
+    } : null,
+    error: outcome.error || pendingSnapshots.find((snapshot) => byClockUid.get(snapshot.clockUid)?.error)?.error || null
+  });
 }
 var existingTask = (record) => {
   try {
@@ -2321,6 +2460,37 @@ async function recoverPending({ running: running2 = [] } = {}) {
   return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
 var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
+var resumeBatchResult = ({
+  completed = 0,
+  failed = 0,
+  pendingTaskUids = [],
+  uncertain = false,
+  blocked = false,
+  error = null,
+  retry = null,
+  ...extra
+} = {}) => {
+  const pending = [...new Set(pendingTaskUids.filter(Boolean))];
+  const incomplete = blocked || uncertain || failed > 0 || pending.length > 0;
+  return {
+    action: "resume-all",
+    ok: !incomplete,
+    count: completed,
+    completed,
+    resumed: completed,
+    failed,
+    pending: pending.length,
+    pendingTaskUids: pending,
+    uncertain: Boolean(uncertain),
+    partial: Boolean(incomplete && completed > 0),
+    retry: retry || (incomplete ? { action: "resume", retryTaskUids: pending } : null),
+    error: error || (failed > 0 ? new Error("One or more Tasks could not be resumed.") : null),
+    item: "Task",
+    completedVerb: "resumed",
+    blocked,
+    ...extra
+  };
+};
 async function resumeRecord(record, now) {
   let pending = pendingResume.find((item) => item.taskUid === record.taskUid);
   let createdPending = false;
@@ -2352,7 +2522,16 @@ async function resumeRecord(record, now) {
     throw conflict;
   }
   if (!entry) {
-    const result = await clockIn(record.taskUid, { now });
+    let result;
+    try {
+      result = await clockIn(record.taskUid, { now });
+    } catch (error) {
+      if (createdPending && !error?.uncertain) {
+        pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
+        persist();
+      }
+      throw error;
+    }
     if (result?.uncertain) {
       if (result.clockUid) {
         pending.clockUid = result.clockUid;
@@ -2380,21 +2559,28 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   if (unsupportedRaw2 !== null) {
     notice3 = "Saved paused-task state is unsupported; no Tasks were resumed.";
     notify2();
-    return { resumed: 0, failed: 0, pruned: 0, satisfied: 0, blocked: true };
+    return resumeBatchResult({
+      blocked: true,
+      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
+      error: new Error(notice3),
+      pruned: 0,
+      satisfied: 0
+    });
   }
   notice3 = "";
   const initial = refreshResult();
   if (!initial.ok) {
     notice3 = getNotice() || "Graph state could not be confirmed; no further changes were made.";
     notify2();
-    return {
-      resumed: 0,
+    return resumeBatchResult({
       failed: pendingResume.length + items.length,
+      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
       pruned: 0,
       satisfied: 0,
       blocked: true,
-      uncertain: true
-    };
+      uncertain: true,
+      error: initial.error
+    });
   }
   const recovered = await recoverPending({ running: initial.running });
   const runningEntries = getRunning();
@@ -2460,11 +2646,15 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       persist();
       notify2();
       return {
-        resumed: recovered.recovered,
-        failed: recovered.failed + recovered.conflicts.length,
-        pruned,
-        satisfied,
-        blocked: true,
+        ...resumeBatchResult({
+          completed: recovered.recovered,
+          failed: recovered.failed + recovered.conflicts.length + ready.length,
+          pendingTaskUids: [...retained, ...ready, ...pendingResume].map((item) => item.taskUid),
+          blocked: true,
+          error: new Error(notice3),
+          pruned,
+          satisfied
+        }),
         conflicts: recovered.conflicts
       };
     }
@@ -2473,6 +2663,8 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let resumed = recovered.recovered;
   let failed = recovered.failed + uncertain + recovered.conflicts.length;
   let legacyRecovered = recovered.legacyRecovered;
+  let mutationUncertain = uncertain > 0;
+  let firstError = null;
   const legacyRecovery = recovered.legacyRecovered > 0 || recovered.legacyToCreate.length > 0;
   const completedTasks = /* @__PURE__ */ new Set();
   for (const record of ready) {
@@ -2486,7 +2678,9 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       failed += 1;
       retained.push(record);
       console.error("[roam-logbook] could not resume task", record.taskUid, error);
+      firstError || (firstError = error);
       if (error?.uncertain) {
+        mutationUncertain = true;
         for (const remaining of ready.slice(ready.indexOf(record) + 1))
           retained.push(remaining);
         break;
@@ -2517,15 +2711,18 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   notice3 = messages.join(" ");
   persist();
   notify2();
-  return {
-    resumed,
+  return resumeBatchResult({
+    completed: resumed,
     failed,
+    pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
+    uncertain: mutationUncertain,
+    error: firstError,
     pruned,
     satisfied,
     blocked: false,
     legacyRecovery,
     legacyRecovered
-  };
+  });
 }
 async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let outcome;
@@ -2534,7 +2731,22 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   } catch {
     notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
     notify2();
-    return 0;
+    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
+    return {
+      action: "clock-out-all",
+      ok: false,
+      count: 0,
+      completed: 0,
+      failed: pendingClockUids2.length,
+      pending: pendingClockUids2.length,
+      pendingClockUids: pendingClockUids2,
+      partial: false,
+      uncertain: true,
+      error: new Error(notice3),
+      retry: { action: "close", retryClockUids: pendingClockUids2, writtenClockUids: [] },
+      item: "Session",
+      completedVerb: "ended"
+    };
   }
   const closedUids = new Set(
     outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
@@ -2548,7 +2760,16 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
     notice3 = "";
     persist();
     notify2();
-    return outcome.closed;
+    return {
+      ...outcome,
+      action: "clock-out-all",
+      item: "Session",
+      completedVerb: "ended",
+      count: outcome.closed,
+      completed: outcome.closed,
+      pending: 0,
+      pendingClockUids: []
+    };
   }
   const retained = new Map(
     items.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid)).map((item) => [item.taskUid, item])
@@ -2567,7 +2788,24 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   notice3 = outcome.uncertain ? GRAPH_UNCERTAIN : `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
   persist();
   notify2();
-  return outcome.uncertain ? { ...outcome, retry: outcome.retry } : outcome.closed;
+  const pendingClockUids = stillRunning.map((entry) => entry.clockUid);
+  return {
+    ...outcome,
+    action: "clock-out-all",
+    ok: false,
+    item: "Session",
+    completedVerb: "ended",
+    count: outcome.closed,
+    completed: outcome.closed,
+    pending: pendingClockUids.length,
+    pendingClockUids,
+    partial: Boolean(outcome.partial || outcome.closed > 0 && pendingClockUids.length > 0),
+    retry: {
+      ...outcome.retry || { action: "close" },
+      retryClockUids: pendingClockUids,
+      writtenClockUids: outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
+    }
+  };
 }
 function reset3() {
   items = [];
@@ -2584,8 +2822,19 @@ function mutationResultNotice(result) {
   if (!result)
     return "";
   const message = typeof result?.message === "string" ? result.message : result?.error?.message;
-  if (result?.uncertain === true || result?.partial === true || result?.retry || typeof message === "string" && /Graph state could not be confirmed/i.test(message)) {
+  if (result?.uncertain === true || typeof message === "string" && /Graph state could not be confirmed/i.test(message)) {
     return GRAPH_SYNC_RETRY_NOTICE;
+  }
+  const failed = Number.isFinite(Number(result?.failed)) ? Number(result.failed) : 0;
+  const pending = Number.isFinite(Number(result?.pending)) ? Number(result.pending) : 0;
+  if (result?.partial === true || failed > 0 || pending > 0 || result?.retry) {
+    const completed = Number.isFinite(Number(result?.completed)) ? Number(result.completed) : Number.isFinite(Number(result?.count)) ? Number(result.count) : 0;
+    const noun = result?.item || "Session";
+    const completedVerb = result?.completedVerb || "updated";
+    const failedCount = failed || pending;
+    const completedText = `${completed} ${noun}${completed === 1 ? "" : "s"} ${completedVerb}`;
+    const failedText = `${failedCount} could not be updated`;
+    return completed > 0 ? `${completedText}; ${failedText}. Retry after Roam finishes syncing.` : `${failedText[0].toUpperCase()}${failedText.slice(1)}. Retry after Roam finishes syncing.`;
   }
   return "";
 }
@@ -3654,6 +3903,7 @@ function createTopbar({
   let attachCount = 0;
   let tickCount = 0;
   let layoutMode = null;
+  let actionNotice = "";
   const nowDate = () => {
     const value = nowFn();
     return value instanceof Date ? value : new Date(value);
@@ -3673,6 +3923,7 @@ function createTopbar({
   const closePopover = ({ restoreFocus = true } = {}) => {
     resetClockOutConfirmation();
     resetDiscardConfirmation();
+    actionNotice = "";
     popover?.remove();
     popover = null;
     document.removeEventListener("mousedown", onDocumentMouseDown, true);
@@ -3809,12 +4060,14 @@ function createTopbar({
   const run = async (action) => {
     try {
       const result = await action();
+      actionNotice = mutationResultNotice(result);
       onMutationResult(result);
       if (popover)
         renderPopover();
       return result;
     } catch (error) {
       console.error("[roam-logbook]", error);
+      actionNotice = mutationResultNotice(error);
       onMutationResult(error);
     }
     if (popover)
@@ -3867,7 +4120,7 @@ function createTopbar({
       }
       popover.appendChild(list);
     }
-    const notices = [getNotice(), getNotice2()].filter(Boolean);
+    const notices = actionNotice ? [actionNotice] : [getNotice(), getNotice2()].filter(Boolean);
     for (const notice4 of notices) {
       popover.appendChild(
         el("div", "rlb-popover__notice bp3-text-small", notice4)

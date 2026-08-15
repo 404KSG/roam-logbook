@@ -14,6 +14,7 @@ import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
 import { openBlock } from './roam.js';
+import { mutationResultNotice } from './action-result.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
@@ -66,6 +67,7 @@ export function createTopbar({
     let attachCount = 0;
     let tickCount = 0;
     let layoutMode = null;
+    let actionNotice = '';
 
     const nowDate = () => {
         const value = nowFn();
@@ -92,6 +94,7 @@ export function createTopbar({
     const closePopover = ({ restoreFocus = true } = {}) => {
         resetClockOutConfirmation();
         resetDiscardConfirmation();
+        actionNotice = '';
         popover?.remove();
         popover = null;
         document.removeEventListener('mousedown', onDocumentMouseDown, true);
@@ -247,11 +250,13 @@ export function createTopbar({
     const run = async action => {
         try {
             const result = await action();
+            actionNotice = mutationResultNotice(result);
             onMutationResult(result);
             if (popover) renderPopover();
             return result;
         } catch (error) {
             console.error('[roam-logbook]', error);
+            actionNotice = mutationResultNotice(error);
             onMutationResult(error);
         }
         if (popover) renderPopover();
@@ -311,7 +316,7 @@ export function createTopbar({
             popover.appendChild(list);
         }
 
-        const notices = [clock.getNotice(), paused.getNotice()].filter(Boolean);
+        const notices = actionNotice ? [actionNotice] : [clock.getNotice(), paused.getNotice()].filter(Boolean);
         for (const notice of notices) {
             popover.appendChild(
                 el('div', 'rlb-popover__notice bp3-text-small', notice)

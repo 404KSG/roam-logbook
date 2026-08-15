@@ -204,3 +204,39 @@ test('subscribers see the running list immediately and on change', async () => {
 
     assert.deepEqual(seen, [0, 1]);
 });
+
+test('Clock Out All keeps the legacy count as structured batch result fields', async () => {
+    seed([TASK]);
+    await clock.clockIn('taskone01', { now: AT_1558 });
+
+    const result = await clock.clockOutAll({ now: AT_1658 });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.count, 1);
+    assert.equal(result.completed, 1);
+    assert.equal(result.closed, 1, 'internal close count remains available to the clock seam');
+    assert.equal(result.failed, 0);
+    assert.equal(result.pending, 0);
+    assert.equal(result.partial, false);
+});
+
+test('Clock Out All returns a structured uncertain result when the preflight read fails', async () => {
+    const graph = seed([TASK]);
+    await clock.clockIn('taskone01', { now: AT_1558 });
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('graph unavailable before batch close');
+    };
+
+    try {
+        const result = await clock.clockOutAll({ now: AT_1658 });
+        assert.equal(result.ok, false);
+        assert.equal(result.uncertain, true);
+        assert.equal(result.failed, 1);
+        assert.equal(result.pending, 1);
+        assert.ok(result.error);
+        assert.deepEqual(result.retry.retryClockUids, [clock.getRunning()[0].clockUid]);
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+});

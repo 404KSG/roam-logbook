@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
+import { presentMutationResult } from '../src/action-result.js';
 
 const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
 globalThis.window = dom.window;
@@ -156,6 +157,95 @@ test('Command Palette Clock Out All requires a second invocation before writing'
 
     await command();
     assert.equal(clock.getRunning().length, 0, 'the second command invocation performs the confirmed action');
+    assert.doesNotMatch(toasts.join(' '), /could not be updated|Retry after Roam finishes syncing/i);
+});
+
+test('Command Palette reports a partial Clock Out All and retains the failed Session for retry', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    const command = paletteCommands.get('Logbook: Clock out all running clocks');
+    await command();
+    toasts.length = 0;
+
+    const originalUpdate = graph.api.data.block.update;
+    let updateCount = 0;
+    graph.api.data.block.update = async args => {
+        updateCount += 1;
+        if (updateCount === 2) throw new Error('second Session update failed');
+        return originalUpdate(args);
+    };
+    try {
+        await command();
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(updateCount, 2);
+    assert.equal(clock.getRunning().length, 1, 'the failed Session remains running');
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [clock.getRunning()[0].taskUid]);
+    assert.deepEqual(toasts, [
+        '1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.',
+    ]);
+});
+
+test('Popover reports the same partial Clock Out All exactly once', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    const popover = openPopover();
+    click(footerAction('Clock Out All'));
+    await settle();
+    toasts.length = 0;
+
+    const originalUpdate = graph.api.data.block.update;
+    let updateCount = 0;
+    graph.api.data.block.update = async args => {
+        updateCount += 1;
+        if (updateCount === 2) throw new Error('second Session update failed');
+        return originalUpdate(args);
+    };
+    try {
+        click(footerAction('Confirm Clock Out All'));
+        await settle();
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(updateCount, 2);
+    assert.equal(clock.getRunning().length, 1);
+    assert.deepEqual(toasts, [
+        '1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.',
+    ]);
+    assert.deepEqual(
+        [...popover.querySelectorAll('.rlb-popover__notice')].map(node => node.textContent),
+        ['1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.']
+    );
+});
+
+test('the public batch close helper uses the shared partial presenter contract', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === OTHER.uid).clockUid;
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async args => {
+        if (args.block.uid === failedUid) throw new Error('batch helper update failed');
+        return originalUpdate(args);
+    };
+
+    let result;
+    try {
+        result = await clock.clockOutEntries(null, { now: new Date('2026-08-15T09:02:00') });
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    const messages = [];
+    presentMutationResult(result, message => messages.push(message));
+    assert.equal(result.partial, true);
+    assert.equal(result.completed, 1);
+    assert.equal(result.failed, 1);
+    assert.deepEqual(messages, [
+        '1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.',
+    ]);
 });
 
 test('Command Palette presents an uncertain mutation result once and preserves success silence', async () => {

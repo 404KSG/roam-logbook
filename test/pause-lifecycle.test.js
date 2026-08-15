@@ -242,7 +242,7 @@ test('a failed resume retains only the failed Task for retry', async t => {
     assert.equal(clock.getRunning().length, 1);
     const retained = JSON.parse(settingsStore.get('pausedBatch')).data.items;
     assert.deepEqual(retained.map(item => item.taskUid), ['pausetwo2']);
-    assert.match(popover().textContent, /1 Task could not be resumed/);
+    assert.match(popover().textContent, /1 Task resumed; 1 could not be updated\. Retry after Roam finishes syncing\./);
 });
 
 test('an overrun Pomodoro is not restarted after pause and resume', async t => {

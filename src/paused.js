@@ -188,12 +188,59 @@ const pomodoroSnapshot = (entry, nowMs) => {
     };
 };
 
+const pausedRecord = snapshot => {
+    const { clockUid: _clockUid, ...record } = snapshot;
+    return record;
+};
+
+const pauseBatchResult = ({
+    completed = 0,
+    failed = 0,
+    pendingClockUids = [],
+    pendingTaskUids = [],
+    uncertain = false,
+    error = null,
+    retry = null,
+    ...extra
+} = {}) => {
+    const clockUids = [...new Set(pendingClockUids.filter(Boolean))];
+    const taskUids = [...new Set(pendingTaskUids.filter(Boolean))];
+    const incomplete = uncertain || failed > 0 || clockUids.length > 0 || taskUids.length > 0;
+    return {
+        action: 'pause-all',
+        ok: !incomplete,
+        paused: completed,
+        count: completed,
+        completed,
+        failed,
+        pending: Math.max(clockUids.length, taskUids.length),
+        pendingClockUids: clockUids,
+        pendingTaskUids: taskUids,
+        uncertain: Boolean(uncertain),
+        partial: Boolean(incomplete && completed > 0),
+        retry:
+            retry ||
+            (incomplete
+                ? { action: 'pause', retryClockUids: clockUids, retryTaskUids: taskUids }
+                : null),
+        error: error || (failed > 0 ? new Error('One or more Sessions could not be paused.') : null),
+        item: 'Session',
+        completedVerb: 'paused',
+        ...extra,
+    };
+};
+
 /** Close every current CLOCK while preserving enough state for a later resume. */
 export async function pauseAll({ now = new Date() } = {}) {
     if (unsupportedRaw !== null) {
         notice = 'Saved paused-task state is unsupported; no Tasks were paused.';
         notify();
-        return { paused: 0, failed: 0, uncertain: true };
+        return pauseBatchResult({
+            failed: items.length,
+            pendingTaskUids: items.map(item => item.taskUid),
+            uncertain: true,
+            error: new Error(notice),
+        });
     }
 
     notice = '';
@@ -209,7 +256,15 @@ export async function pauseAll({ now = new Date() } = {}) {
     } catch {
         notice = clock.getNotice() || 'Unable to pause Tasks because the graph is unavailable.';
         notify();
-        return { paused: 0, failed: 0, uncertain: true };
+        const pendingClockUids = clock.getRunning().map(entry => entry.clockUid);
+        const pendingTaskUids = clock.getRunning().map(entry => entry.taskUid);
+        return pauseBatchResult({
+            failed: pendingClockUids.length,
+            pendingClockUids,
+            pendingTaskUids,
+            uncertain: true,
+            error: new Error(notice),
+        });
     }
     const merged = new Map(previous);
     let outcome;
@@ -227,7 +282,7 @@ export async function pauseAll({ now = new Date() } = {}) {
                 // Persist before the first graph mutation. A reload then has the
                 // durable intent even if a later CLOCK update fails.
                 for (const snapshot of snapshots) {
-                    const { clockUid: _clockUid, ...record } = snapshot;
+                    const record = pausedRecord(snapshot);
                     merged.set(record.taskUid, record);
                 }
                 items = [...merged.values()];
@@ -239,7 +294,15 @@ export async function pauseAll({ now = new Date() } = {}) {
         items = originalItems;
         notice = clock.getNotice() || 'Unable to pause Tasks because the graph is unavailable.';
         notify();
-        return { paused: 0, failed: 0, uncertain: true };
+        const pendingClockUids = clock.getRunning().map(entry => entry.clockUid);
+        const pendingTaskUids = clock.getRunning().map(entry => entry.taskUid);
+        return pauseBatchResult({
+            failed: pendingClockUids.length,
+            pendingClockUids,
+            pendingTaskUids,
+            uncertain: true,
+            error: new Error(notice),
+        });
     }
 
     let failed = 0;
@@ -249,7 +312,7 @@ export async function pauseAll({ now = new Date() } = {}) {
         if (result?.closed) continue;
         failed += 1;
         if (previous.has(snapshot.taskUid)) merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
-        else merged.delete(snapshot.taskUid);
+        else merged.set(snapshot.taskUid, pausedRecord(snapshot));
         console.error('[roam-logbook] could not pause task', snapshot.taskUid, result?.error);
     }
 
@@ -261,13 +324,32 @@ export async function pauseAll({ now = new Date() } = {}) {
     }
     persist();
     notify();
-    return {
-        paused: outcome.closed,
+    const pendingSnapshots = outcome.records.filter(snapshot => {
+        const result = byClockUid.get(snapshot.clockUid);
+        return !result?.closed;
+    });
+    const pendingClockUids = pendingSnapshots.map(snapshot => snapshot.clockUid);
+    const pendingTaskUids = pendingSnapshots.map(snapshot => snapshot.taskUid);
+    const incomplete = Boolean(outcome.uncertain) || failed > 0 || pendingSnapshots.length > 0;
+    return pauseBatchResult({
+        completed: outcome.closed,
         failed,
+        pendingClockUids,
+        pendingTaskUids,
         uncertain: Boolean(outcome.uncertain),
-        partial: Boolean(outcome.partial),
-        retry: outcome.retry,
-    };
+        retry: incomplete
+            ? {
+                  ...(outcome.retry || { action: 'pause' }),
+                  action: 'pause',
+                  retryClockUids: pendingClockUids,
+                  retryTaskUids: pendingTaskUids,
+              }
+            : null,
+        error:
+            outcome.error ||
+            pendingSnapshots.find(snapshot => byClockUid.get(snapshot.clockUid)?.error)?.error ||
+            null,
+    });
 }
 
 const existingTask = record => {
@@ -359,6 +441,39 @@ async function recoverPending({ running = [] } = {}) {
 
 const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
 
+const resumeBatchResult = ({
+    completed = 0,
+    failed = 0,
+    pendingTaskUids = [],
+    uncertain = false,
+    blocked = false,
+    error = null,
+    retry = null,
+    ...extra
+} = {}) => {
+    const pending = [...new Set(pendingTaskUids.filter(Boolean))];
+    const incomplete = blocked || uncertain || failed > 0 || pending.length > 0;
+    return {
+        action: 'resume-all',
+        ok: !incomplete,
+        count: completed,
+        completed,
+        resumed: completed,
+        failed,
+        pending: pending.length,
+        pendingTaskUids: pending,
+        uncertain: Boolean(uncertain),
+        partial: Boolean(incomplete && completed > 0),
+        retry:
+            retry || (incomplete ? { action: 'resume', retryTaskUids: pending } : null),
+        error: error || (failed > 0 ? new Error('One or more Tasks could not be resumed.') : null),
+        item: 'Task',
+        completedVerb: 'resumed',
+        blocked,
+        ...extra,
+    };
+};
+
 /** Start a fresh CLOCK and make its recovery association durable before migration. */
 async function resumeRecord(record, now) {
     let pending = pendingResume.find(item => item.taskUid === record.taskUid);
@@ -396,7 +511,19 @@ async function resumeRecord(record, now) {
         throw conflict;
     }
     if (!entry) {
-        const result = await clock.clockIn(record.taskUid, { now });
+        let result;
+        try {
+            result = await clock.clockIn(record.taskUid, { now });
+        } catch (error) {
+            // A confirmed ordinary write failure did not create a Session. Drop
+            // only this new in-flight marker so the Task can be retried; an
+            // uncertain write keeps its exact marker for reload recovery.
+            if (createdPending && !error?.uncertain) {
+                pendingResume = pendingResume.filter(item => item.taskUid !== record.taskUid);
+                persist();
+            }
+            throw error;
+        }
         if (result?.uncertain) {
             if (result.clockUid) {
                 pending.clockUid = result.clockUid;
@@ -429,7 +556,13 @@ export async function resumeAll({ now = new Date() } = {}) {
     if (unsupportedRaw !== null) {
         notice = 'Saved paused-task state is unsupported; no Tasks were resumed.';
         notify();
-        return { resumed: 0, failed: 0, pruned: 0, satisfied: 0, blocked: true };
+        return resumeBatchResult({
+            blocked: true,
+            pendingTaskUids: [...items, ...pendingResume].map(item => item.taskUid),
+            error: new Error(notice),
+            pruned: 0,
+            satisfied: 0,
+        });
     }
 
     notice = '';
@@ -440,14 +573,15 @@ export async function resumeAll({ now = new Date() } = {}) {
     if (!initial.ok) {
         notice = clock.getNotice() || 'Graph state could not be confirmed; no further changes were made.';
         notify();
-        return {
-            resumed: 0,
+        return resumeBatchResult({
             failed: pendingResume.length + items.length,
+            pendingTaskUids: [...items, ...pendingResume].map(item => item.taskUid),
             pruned: 0,
             satisfied: 0,
             blocked: true,
             uncertain: true,
-        };
+            error: initial.error,
+        });
     }
 
     const recovered = await recoverPending({ running: initial.running });
@@ -517,11 +651,15 @@ export async function resumeAll({ now = new Date() } = {}) {
             persist();
             notify();
             return {
-                resumed: recovered.recovered,
-                failed: recovered.failed + recovered.conflicts.length,
-                pruned,
-                satisfied,
-                blocked: true,
+                ...resumeBatchResult({
+                    completed: recovered.recovered,
+                    failed: recovered.failed + recovered.conflicts.length + ready.length,
+                    pendingTaskUids: [...retained, ...ready, ...pendingResume].map(item => item.taskUid),
+                    blocked: true,
+                    error: new Error(notice),
+                    pruned,
+                    satisfied,
+                }),
                 conflicts: recovered.conflicts,
             };
         }
@@ -531,6 +669,8 @@ export async function resumeAll({ now = new Date() } = {}) {
     let resumed = recovered.recovered;
     let failed = recovered.failed + uncertain + recovered.conflicts.length;
     let legacyRecovered = recovered.legacyRecovered;
+    let mutationUncertain = uncertain > 0;
+    let firstError = null;
     const legacyRecovery =
         recovered.legacyRecovered > 0 || recovered.legacyToCreate.length > 0;
     const completedTasks = new Set();
@@ -544,7 +684,9 @@ export async function resumeAll({ now = new Date() } = {}) {
             failed += 1;
             retained.push(record);
             console.error('[roam-logbook] could not resume task', record.taskUid, error);
+            firstError ||= error;
             if (error?.uncertain) {
+                mutationUncertain = true;
                 // The graph may contain the just-created CLOCK, but the read
                 // could not confirm it. Do not perform another destructive step.
                 for (const remaining of ready.slice(ready.indexOf(record) + 1)) retained.push(remaining);
@@ -574,15 +716,18 @@ export async function resumeAll({ now = new Date() } = {}) {
     notice = messages.join(' ');
     persist();
     notify();
-    return {
-        resumed,
+    return resumeBatchResult({
+        completed: resumed,
         failed,
+        pendingTaskUids: [...items, ...pendingResume].map(item => item.taskUid),
+        uncertain: mutationUncertain,
+        error: firstError,
         pruned,
         satisfied,
         blocked: false,
         legacyRecovery,
         legacyRecovered,
-    };
+    });
 }
 
 /**
@@ -596,7 +741,22 @@ export async function clockOutAll({ now = new Date() } = {}) {
     } catch {
         notice = clock.getNotice() || 'Unable to finish Sessions because the graph is unavailable.';
         notify();
-        return 0;
+        const pendingClockUids = clock.getRunning().map(entry => entry.clockUid);
+        return {
+            action: 'clock-out-all',
+            ok: false,
+            count: 0,
+            completed: 0,
+            failed: pendingClockUids.length,
+            pending: pendingClockUids.length,
+            pendingClockUids,
+            partial: false,
+            uncertain: true,
+            error: new Error(notice),
+            retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
+            item: 'Session',
+            completedVerb: 'ended',
+        };
     }
 
     const closedUids = new Set(
@@ -611,7 +771,16 @@ export async function clockOutAll({ now = new Date() } = {}) {
         notice = '';
         persist();
         notify();
-        return outcome.closed;
+        return {
+            ...outcome,
+            action: 'clock-out-all',
+            item: 'Session',
+            completedVerb: 'ended',
+            count: outcome.closed,
+            completed: outcome.closed,
+            pending: 0,
+            pendingClockUids: [],
+        };
     }
 
     const retained = new Map(
@@ -633,7 +802,24 @@ export async function clockOutAll({ now = new Date() } = {}) {
         : `${stillRunning.length} Session${stillRunning.length === 1 ? '' : 's'} could not be closed.`;
     persist();
     notify();
-    return outcome.uncertain ? { ...outcome, retry: outcome.retry } : outcome.closed;
+    const pendingClockUids = stillRunning.map(entry => entry.clockUid);
+    return {
+        ...outcome,
+        action: 'clock-out-all',
+        ok: false,
+        item: 'Session',
+        completedVerb: 'ended',
+        count: outcome.closed,
+        completed: outcome.closed,
+        pending: pendingClockUids.length,
+        pendingClockUids,
+        partial: Boolean(outcome.partial || (outcome.closed > 0 && pendingClockUids.length > 0)),
+        retry: {
+            ...(outcome.retry || { action: 'close' }),
+            retryClockUids: pendingClockUids,
+            writtenClockUids: outcome.results.filter(result => result.closed).map(result => result.clockUid),
+        },
+    };
 }
 
 export function clear() {
