@@ -111,12 +111,11 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(clock.getRunning().length, 0);
     assert.ok(clockLines('pauseone1')[0].includes('--'));
     assert.ok(clockLines('pausetwo2')[0].includes('--'));
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
     assert.ok(action('Resume All'));
     const footer = [...popover().querySelectorAll('.rlb-popover__footer button')];
-    assert.ok(footer.slice(0, -1).every(button => !/\bbp3-icon-/.test(button.className)));
-    assert.match(footer.at(-1).className, /\bbp3-icon-refresh\b/);
-    assert.equal(footer.at(-1).textContent, '');
+    assert.ok(footer.every(button => !/\bbp3-icon-/.test(button.className)));
+    assert.match(popover().querySelector('.rlb-surface__header [data-action="refresh"]').className, /\bbp3-icon-refresh\b/);
 
     const persisted = JSON.parse(settingsStore.get('pausedBatch'));
     assert.equal(persisted.version, 2);
@@ -129,7 +128,7 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     extension.onunload();
     extension.onload({ extensionAPI });
     click(topbarButton());
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
 
     t.mock.timers.tick(10 * 60_000);
     click(action('Resume All'));
@@ -146,6 +145,24 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
         .find(row => row.textContent.includes('first paused task'));
     assert.match(resumedRow.querySelector('.rlb-run__meta').textContent, /24:43/);
     assert.equal(resumedRow.querySelector('.bp3-icon-stopwatch'), null);
+});
+
+test('Resume All reconciles a paused Task explicitly clocked in and out during the pause', async () => {
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
+    click(topbarButton());
+    click(action('Pause All'));
+    await settle();
+
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
+    await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'pauseone1' });
+    assert.equal(clock.getRunning().length, 0);
+
+    click(action('Resume All'));
+    await settle();
+
+    assert.equal(clock.getRunning().length, 0, 'explicitly finished work is not resumed again');
+    assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
+    assert.match(popover().textContent, /explicitly clocked out|reconciled/i);
 });
 
 test('a persisted string true setting permits an all-or-nothing multi-task resume', async () => {
@@ -304,5 +321,5 @@ test('a later Pause All merges newly running Tasks into the older batch', async 
         JSON.parse(settingsStore.get('pausedBatch')).data.items.map(item => item.taskUid).sort(),
         ['pauseone1', 'pausetwo2']
     );
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
 });

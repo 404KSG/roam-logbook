@@ -305,12 +305,12 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Ses
             'Dashboard',
             'Pause All',
             'Clock Out All',
-            '',
         ]);
-        assert.ok(footer.slice(0, -1).every(node => !/\bbp3-icon-/.test(node.className)));
-        assert.match(footer.at(-1).className, /\bbp3-icon-refresh\b/);
-        assert.equal(footer.at(-1).title, 'Re-read clocks from the graph');
-        assert.equal(footer.at(-1).getAttribute('aria-label'), 'Re-read clocks from the graph');
+        assert.ok(footer.every(node => !/\bbp3-icon-/.test(node.className)));
+        const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+        assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
+        assert.equal(headerRefresh.title, 'Refresh current Sessions');
+        assert.equal(headerRefresh.getAttribute('aria-label'), 'Refresh current Sessions');
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -342,25 +342,26 @@ test('the popover lists the running clock', () => {
     assert.equal(popover.querySelector('.rlb-popover__title').textContent, '1 Session Running');
     assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
     assert.equal(popover.querySelector('.bp3-icon-stopwatch'), null);
-    for (const selector of ['.bp3-icon-stop', '.bp3-icon-trash']) {
-        const action = popover.querySelector(selector);
-        assert.ok(action, `${selector} action should be present`);
-        assert.ok(action.title);
-        assert.equal(action.getAttribute('aria-label'), action.title);
-    }
+    const checkout = popover.querySelector('[data-action="clock-out"]');
+    assert.equal(checkout.textContent, 'Check Out');
+    assert.ok(checkout.title);
+    assert.equal(checkout.getAttribute('aria-label'), checkout.title);
+    const discard = popover.querySelector('.bp3-icon-trash');
+    assert.ok(discard, 'discard action should be present');
+    assert.ok(discard.title);
+    assert.equal(discard.getAttribute('aria-label'), discard.title);
     const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
     assert.deepEqual(footerActions.map(action => action.textContent), [
         'Dashboard',
         'Pause All',
-        '',
     ]);
-    for (const action of footerActions.slice(0, -1)) {
+    for (const action of footerActions) {
         assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
-    const refresh = footerActions.at(-1);
+    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(refresh.title, 'Re-read clocks from the graph');
-    assert.equal(refresh.getAttribute('aria-label'), 'Re-read clocks from the graph');
+    assert.equal(refresh.title, 'Refresh current Sessions');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh current Sessions');
 
     click(topbarWidget().querySelector('button'));
     assert.equal(document.querySelector('.rlb-popover'), null, 'second click closes it');

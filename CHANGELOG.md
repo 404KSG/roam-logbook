@@ -1,32 +1,9 @@
 # Changelog
 
-## 0.9.0-beta.2
+## 0.9.0-beta.3 — 2026-08-15
 
-- Fixed Roam Datalog compatibility for optional Task and page metadata by using
-  supported empty defaults instead of `nil`.
-- Dashboard graph-read failures are now classified as graph read issues rather
-  than timing records, and the Topbar no longer presents an uncertain read as a
-  confirmed empty Session list.
-- Added a read-only official CLI Datalog live verifier and regression coverage
-  for the real query boundary.
-
-## 0.9.0-beta.1
-
-- Final-review safety fixes: post-write graph uncertainty stops follow-up writes,
-  Resume associations require exact Session uids, and every Clock Out All entry
-  point uses short-lived confirmation.
-- Dashboard retains its last successful snapshot on read failure; Popover focus is
-  modal and Task controls expose complete accessible names.
-- Mixed legacy Pomodoro maps are backed up without dropping invalid raw entries;
-  outer-shell recovery and the workflow contract are covered.
-
-## 0.9.0-beta
-
-- Reduced Topbar observer work to the Roam topbar seam with filtered recovery and
-  stable one-second DOM updates.
-- Added single-snapshot Dashboard reads, strict CLOCK timestamp diagnostics,
-  orphan-session retention, and a collapsed Data issues review surface.
-- Preserved versioned Pause Batch and Pomodoro state, backing up unknown/corrupt
-  composite state without overwriting the source.
-- Added deterministic bundle verification, final-bundle lifecycle smoke coverage,
-  and required-Chromium CI layout checks.
+- Kept the Logbook topbar unit stable while Roam Search expands or the window narrows.
+- Added a singleton Shift+Click **Current Sessions** panel in Roam's right sidebar, using the same view model and renderer as the popover.
+- Moved Refresh into each surface header and replaced the ambiguous per-row stop icon with an explicit **Check Out** action.
+- Preserved paused batch rows in place, added deterministic reconciliation for explicit clock-in/out during a pause, and kept retryable partial results visible.
+- Added high-DPI/narrow-width geometry and sidebar lifecycle/accessibility coverage; the suite now contains 212 tests.

@@ -47,6 +47,8 @@ const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+const shiftClick = node =>
+    node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, shiftKey: true }));
 const settle = async () => {
     await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
@@ -104,15 +106,88 @@ test('running rows expose compact explicit target metadata and complete accessib
     );
     assert.doesNotMatch(row.textContent, /Project Page|\[2026-08-15 Sat 09:00\]/);
 
-    const stop = row.querySelector('[data-action="clock-out"]');
-    assert.ok(stop.classList.contains('bp3-icon-stop'));
-    assert.equal(stop.classList.contains('bp3-intent-success'), false);
-    assert.equal(stop.getAttribute('aria-label'), stop.title);
+    const checkout = row.querySelector('[data-action="clock-out"]');
+    assert.equal(checkout.textContent, 'Check Out');
+    assert.equal(checkout.classList.contains('bp3-icon-stop'), false);
+    assert.equal(checkout.classList.contains('bp3-intent-success'), false);
+    assert.equal(checkout.getAttribute('aria-label'), checkout.title);
 
     const discard = row.querySelector('[data-action="discard"]');
     assert.match(discard.title, /Discard this CLOCK|discard this Session/i);
     assert.equal(discard.getAttribute('aria-label'), discard.title);
     await settle();
+});
+
+test('Session surfaces put Refresh in the header and expose a textual Check Out action', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+
+    const popover = openPopover();
+    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+    const checkout = popover.querySelector('[data-action="clock-out"]');
+
+    assert.ok(refresh, 'Refresh belongs in the surface header');
+    assert.equal(refresh.title, 'Refresh current Sessions');
+    assert.equal(refresh.getAttribute('aria-label'), refresh.title);
+    assert.equal(refresh.closest('.rlb-popover__footer'), null);
+    assert.equal(checkout.textContent, 'Check Out');
+    assert.match(checkout.getAttribute('aria-label'), /Check Out this Session/);
+});
+
+test('Shift+Click opens one shared Current Sessions sidebar without graph writes', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
+
+    const writes = { create: 0, update: 0, delete: 0 };
+    const original = {
+        create: graph.api.data.block.create,
+        update: graph.api.data.block.update,
+        delete: graph.api.data.block.delete,
+    };
+    for (const name of Object.keys(writes)) {
+        graph.api.data.block[name] = async (...args) => {
+            writes[name] += 1;
+            return original[name](...args);
+        };
+    }
+    try {
+        const trigger = topbarButton();
+        shiftClick(trigger);
+        const sidebar = document.querySelector('#roam-logbook-current-sessions');
+        assert.ok(sidebar);
+        assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
+        assert.equal(sidebar.getAttribute('role'), 'region');
+        assert.match(sidebar.textContent, /1 Session Running/);
+        assert.ok(sidebar.querySelector('.rlb-surface__header [data-action="refresh"]'));
+        assert.ok(sidebar.querySelector('[data-action="clock-out"]'));
+        assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+
+        shiftClick(trigger);
+        assert.equal(document.querySelectorAll('#roam-logbook-current-sessions').length, 1);
+        assert.equal(document.activeElement, sidebar.querySelector('button'));
+        assert.deepEqual(writes, { create: 0, update: 0, delete: 0 });
+
+        click(sidebar.querySelector('[data-action="close"]'));
+        assert.equal(document.querySelector('#roam-logbook-current-sessions'), null);
+        assert.equal(document.activeElement, trigger);
+        assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+    } finally {
+        for (const name of Object.keys(writes)) graph.api.data.block[name] = original[name];
+    }
+});
+
+test('Current Sessions sidebar is removed completely on extension unload', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
+    shiftClick(topbarButton());
+    assert.ok(document.querySelector('#roam-logbook-current-sessions'));
+
+    extension.onunload();
+
+    assert.equal(document.querySelector('#roam-logbook-current-sessions'), null);
+    assert.equal(document.querySelector('#roam-logbook-topbar'), null);
 });
 
 test('topbar does not present a confirmed empty state when graph refresh fails', () => {

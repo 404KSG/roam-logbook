@@ -16,6 +16,7 @@ let running = [];
 let lastRefreshStatus = { ok: true, error: null };
 let notice = '';
 const listeners = new Set();
+const actionListeners = new Set();
 
 export const GRAPH_UNCERTAIN = 'Graph state could not be confirmed; no further changes were made.';
 
@@ -36,6 +37,22 @@ export function subscribe(listener) {
     listeners.add(listener);
     listener(running);
     return () => listeners.delete(listener);
+}
+
+/** Observe confirmed clock actions without coupling graph state to Pause Batch. */
+export function subscribeActions(listener) {
+    actionListeners.add(listener);
+    return () => actionListeners.delete(listener);
+}
+
+function publishAction(action) {
+    for (const listener of actionListeners) {
+        try {
+            listener(action);
+        } catch (error) {
+            console.error('[roam-logbook] clock action listener failed', error);
+        }
+    }
 }
 
 export function getRunning() {
@@ -168,6 +185,7 @@ export function reset() {
     lastRefreshStatus = { ok: true, error: null };
     notice = '';
     listeners.clear();
+    actionListeners.clear();
     resetMutationQueue();
 }
 
@@ -274,7 +292,7 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
  *
  * @returns {Promise<{clockUid: string, taskUid: string}>}
  */
-export async function clockIn(blockUid, { now = new Date() } = {}) {
+export async function clockIn(blockUid, { now = new Date(), source = 'user' } = {}) {
     return enqueueMutation(() =>
         withGraphGuard(async () => {
             const taskUid = resolveTaskUid(blockUid);
@@ -338,13 +356,15 @@ export async function clockIn(blockUid, { now = new Date() } = {}) {
                     retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid, clockUid },
                 };
             }
-            return { clockUid, taskUid };
+            const result = { clockUid, taskUid };
+            publishAction({ type: 'clock-in', source, clockUid, taskUid });
+            return result;
         })
     );
 }
 
 /** Close one confirmed clock and return whether it was still running. */
-export async function clockOut(clockUid, { now = new Date() } = {}) {
+export async function clockOut(clockUid, { now = new Date(), source = 'user' } = {}) {
     return enqueueMutation(() =>
         withGraphGuard(async () => {
             const entries = readAllEntries();
@@ -360,19 +380,38 @@ export async function clockOut(clockUid, { now = new Date() } = {}) {
                     retry: outcome.retry,
                 };
             }
+            if (result?.closed === true) {
+                const entry = entries.find(item => item.clockUid === clockUid);
+                publishAction({ type: 'clock-out', source, clockUid, taskUid: entry?.taskUid });
+            }
             return result?.closed === true;
         })
     );
 }
 
 /** Close a selected set, or every currently running clock when omitted. */
-export async function clockOutEntries(clockUids = null, { now = new Date() } = {}) {
+export async function clockOutEntries(
+    clockUids = null,
+    { now = new Date(), source = 'user' } = {}
+) {
     return enqueueMutation(async () => {
         try {
             return await withGraphGuard(async () => {
                 const entries = readAllEntries();
                 const outcome = await closeEntriesNow(entries, clockUids, now);
-                return { ...outcome, entries };
+                const result = { ...outcome, entries };
+                if (!outcome.uncertain) {
+                    for (const closed of outcome.results.filter(item => item.closed)) {
+                        const entry = entries.find(item => item.clockUid === closed.clockUid);
+                        publishAction({
+                            type: 'clock-out',
+                            source,
+                            clockUid: closed.clockUid,
+                            taskUid: entry?.taskUid,
+                        });
+                    }
+                }
+                return result;
             });
         } catch (error) {
             notice = GRAPH_UNCERTAIN;
@@ -388,7 +427,7 @@ export async function clockOutEntries(clockUids = null, { now = new Date() } = {
  * graph. This lets Pause All save its recovery record before the first CLOCK
  * closes without allowing another local graph mutation to interleave.
  */
-export async function pauseEntries({ now = new Date(), prepare } = {}) {
+export async function pauseEntries({ now = new Date(), prepare, source = 'pause' } = {}) {
     return enqueueMutation(async () => {
         try {
             return await withGraphGuard(async () => {
@@ -400,7 +439,19 @@ export async function pauseEntries({ now = new Date(), prepare } = {}) {
                     now,
                     { publish: false }
                 );
-                return { entries, records, ...outcome };
+                const result = { entries, records, ...outcome };
+                if (!outcome.uncertain) {
+                    for (const closed of outcome.results.filter(item => item.closed)) {
+                        const entry = entries.find(item => item.clockUid === closed.clockUid);
+                        publishAction({
+                            type: 'clock-out',
+                            source,
+                            clockUid: closed.clockUid,
+                            taskUid: entry?.taskUid,
+                        });
+                    }
+                }
+                return result;
             });
         } catch (error) {
             notice = GRAPH_UNCERTAIN;
@@ -410,10 +461,10 @@ export async function pauseEntries({ now = new Date(), prepare } = {}) {
 }
 
 /** Close all currently running clocks and return a structured batch result. */
-export async function clockOutAll({ now = new Date() } = {}) {
+export async function clockOutAll({ now = new Date(), source = 'user' } = {}) {
     let outcome;
     try {
-        outcome = await clockOutEntries(null, { now });
+        outcome = await clockOutEntries(null, { now, source });
     } catch (error) {
         notice = GRAPH_UNCERTAIN;
         const pendingClockUids = running.map(entry => entry.clockUid);
@@ -449,7 +500,7 @@ export async function clockOutAll({ now = new Date() } = {}) {
 }
 
 /** Close whichever clock belongs to this block, if any. */
-export async function clockOutBlock(blockUid, { now = new Date() } = {}) {
+export async function clockOutBlock(blockUid, { now = new Date(), source = 'user' } = {}) {
     return enqueueMutation(() =>
         withGraphGuard(async () => {
             const taskUid = resolveTaskUid(blockUid);
@@ -467,6 +518,14 @@ export async function clockOutBlock(blockUid, { now = new Date() } = {}) {
                     notice: GRAPH_UNCERTAIN,
                     retry: outcome.retry,
                 };
+            }
+            if (result?.closed === true) {
+                publishAction({
+                    type: 'clock-out',
+                    source,
+                    clockUid: entry.clockUid,
+                    taskUid: entry.taskUid,
+                });
             }
             return result?.closed === true;
         })

@@ -27,6 +27,7 @@ let pendingResume = [];
 let notice = '';
 let unsupportedRaw = null;
 const listeners = new Set();
+let unsubscribeClockActions = null;
 
 const cleanRecord = value => {
     if (!value || typeof value !== 'object') return null;
@@ -37,6 +38,15 @@ const cleanRecord = value => {
     const pomodoroRemainingMs = remaining === null || remaining === undefined ? null : Number(remaining);
     const pomodoroSuppressed = value.pomodoroSuppressed === true;
     const clockUid = typeof value.clockUid === 'string' && value.clockUid ? value.clockUid : null;
+    const reconciliationState =
+        value.reconciliationState === 'externally-replaced' ||
+        value.reconciliationState === 'externally-clocked-out'
+            ? value.reconciliationState
+            : null;
+    const externalClockUid =
+        typeof value.externalClockUid === 'string' && value.externalClockUid
+            ? value.externalClockUid
+            : null;
     if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0) return null;
     if (
         pomodoroRemainingMs !== null &&
@@ -44,7 +54,16 @@ const cleanRecord = value => {
     ) {
         return null;
     }
-    return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed, ...(clockUid ? { clockUid } : {}) };
+    return {
+        taskUid,
+        title,
+        pausedAtMs,
+        pomodoroRemainingMs,
+        pomodoroSuppressed,
+        ...(clockUid ? { clockUid } : {}),
+        ...(reconciliationState ? { reconciliationState } : {}),
+        ...(externalClockUid ? { externalClockUid } : {}),
+    };
 };
 
 const cleanPending = (value, { version = VERSION, legacy = false } = {}) => {
@@ -97,6 +116,32 @@ function notify() {
     }
 }
 
+const handleClockAction = action => {
+    if (!action || action.source === 'pause' || action.source === 'resume') return;
+    const item = items.find(record => record.taskUid === action.taskUid);
+    if (!item) return;
+
+    if (action.type === 'clock-in') {
+        item.reconciliationState = 'externally-replaced';
+        item.externalClockUid = action.clockUid;
+        notice = 'A paused Session was replaced by explicit clock activity; Resume All will not duplicate it.';
+        persist();
+        notify();
+        return;
+    }
+    if (action.type === 'clock-out' && item.externalClockUid === action.clockUid) {
+        item.reconciliationState = 'externally-clocked-out';
+        notice = 'A paused Session was explicitly clocked out; Resume All will not recreate it.';
+        persist();
+        notify();
+    }
+};
+
+const ensureClockActionSubscription = () => {
+    unsubscribeClockActions?.();
+    unsubscribeClockActions = clock.subscribeActions(handleClockAction);
+};
+
 export function subscribe(listener) {
     listeners.add(listener);
     listener(getPaused());
@@ -121,6 +166,7 @@ export function load() {
     pendingResume = [];
     notice = '';
     unsupportedRaw = null;
+    ensureClockActionSubscription();
     const raw = readSetting(SETTING_PAUSED_BATCH);
     if (!raw) return getPaused();
 
@@ -513,7 +559,7 @@ async function resumeRecord(record, now) {
     if (!entry) {
         let result;
         try {
-            result = await clock.clockIn(record.taskUid, { now });
+            result = await clock.clockIn(record.taskUid, { now, source: 'resume' });
         } catch (error) {
             // A confirmed ordinary write failure did not create a Session. Drop
             // only this new in-flight marker so the Task can be retried; an
@@ -594,6 +640,7 @@ export async function resumeAll({ now = new Date() } = {}) {
     let pruned = 0;
     let satisfied = 0;
     let uncertain = 0;
+    let reconciled = 0;
 
     for (const pending of recovered.legacyToCreate) {
         const valid = existingTask(pending);
@@ -615,6 +662,10 @@ export async function resumeAll({ now = new Date() } = {}) {
     }
 
     for (const record of [...items]) {
+        if (record.reconciliationState) {
+            reconciled += 1;
+            continue;
+        }
         const valid = existingTask(record);
         if (valid?.uncertain) {
             uncertain += 1;
@@ -712,6 +763,12 @@ export async function resumeAll({ now = new Date() } = {}) {
     }
     if (legacyRecovery) {
         messages.push('Legacy Resume recovery used explicit Task matching.');
+    }
+    if (reconciled > 0) {
+        messages.push(
+            `${reconciled} paused Session${reconciled === 1 ? ' was' : 's were'} reconciled with explicit clock activity.`
+        );
+        items = items.filter(item => !item.reconciliationState);
     }
     notice = messages.join(' ');
     persist();
@@ -843,4 +900,6 @@ export function reset() {
     notice = '';
     unsupportedRaw = null;
     listeners.clear();
+    unsubscribeClockActions?.();
+    unsubscribeClockActions = null;
 }

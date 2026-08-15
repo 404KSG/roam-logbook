@@ -131,6 +131,51 @@ test('topbar visible glyphs keep equal space around the separator', async t => {
     assert.equal(geometry.separator.width, 3, JSON.stringify(geometry));
 });
 
+test('topbar remains a stable unit while Roam search expands and at narrow widths', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const width of [720, 480, 360]) {
+        const geometry = await withChromium(
+            htmlWithLateHost(`<div class="rm-topbar" style="width:${width}px"><div class="rlb-topbar__layout" style="width:100%"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar rlb-topbar__widget"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button></div><div class="rlb-topbar__search"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
+            `(() => {
+                const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+                const layout = document.querySelector('.rlb-topbar__layout');
+                const widget = document.querySelector('.rlb-topbar__widget');
+                const search = document.querySelector('.rlb-topbar__search');
+                const right = document.querySelector('.rlb-right');
+                const time = document.querySelector('.rlb-topbar__time');
+                const separator = document.querySelector('.rlb-topbar__separator');
+                const parallel = document.querySelector('.rlb-topbar__parallel');
+                const range = document.createRange();
+                range.selectNodeContents(time);
+                const timeInk = range.getBoundingClientRect();
+                range.selectNodeContents(parallel);
+                const parallelInk = range.getBoundingClientRect();
+                const separatorRect = separator.getBoundingClientRect();
+                return {
+                    width: ${width}, layout: rect(layout), widget: rect(widget), search: rect(search), right: rect(right),
+                    noOverlap: rect(widget).left >= rect(layout).left && rect(widget).right <= rect(search).left + .5 && rect(search).right <= rect(right).left + .5,
+                    widgetFits: rect(widget).right <= rect(layout).right + .5,
+                    timeVisible: timeInk.width > 0 && timeInk.right <= rect(widget).right + .5,
+                    narrowKeepsTime: timeInk.width > 0 && timeInk.right <= rect(widget).right + .5,
+                    centeredDot: parallel.getBoundingClientRect().width === 0 || Math.abs((separatorRect.top + separatorRect.height / 2) - (time.getBoundingClientRect().top + time.getBoundingClientRect().height / 2)) <= 1,
+                    fullLabel: ${width} > 420 ? parallelInk.width > 0 && parallel.textContent === '3 Sessions' : true,
+                    computed: { widgetFlex:getComputedStyle(widget).flex, widgetMin:getComputedStyle(widget).minWidth, widgetWhiteSpace:getComputedStyle(widget).whiteSpace, searchFlex:getComputedStyle(search).flex, searchMin:getComputedStyle(search).minWidth }
+                };
+            })()`
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+        assert.equal(geometry.noOverlap, true, JSON.stringify(geometry));
+        assert.equal(geometry.widgetFits, true, JSON.stringify(geometry));
+        assert.equal(geometry.timeVisible, true, JSON.stringify(geometry));
+        assert.equal(geometry.narrowKeepsTime, true, JSON.stringify(geometry));
+        assert.equal(geometry.fullLabel, true, JSON.stringify(geometry));
+        assert.equal(geometry.computed.widgetFlex, '0 0 auto', JSON.stringify(geometry));
+        assert.equal(geometry.computed.widgetMin, 'max-content', JSON.stringify(geometry));
+        assert.equal(geometry.computed.widgetWhiteSpace, 'nowrap', JSON.stringify(geometry));
+        assert.equal(geometry.computed.searchMin, '0px', JSON.stringify(geometry));
+    }
+});
+
 test('a collapsed long Task wraps without painting into its summary', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const title = "Graph Engineering: How to Build AI Agent Systems That Don't Break at Scale * 这是一个需要完整换行且不能和摘要粘连的超长任务标题";
@@ -237,7 +282,7 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__title">1 Session Running</div><div class="rlb-run"><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop" data-action="clock-out" title="Clock out this Session" aria-label="Clock out this Session"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" title="Re-read clocks from the graph" aria-label="Re-read clocks from the graph"></button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh" data-action="refresh" title="Refresh current Sessions" aria-label="Refresh current Sessions"></button></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal rlb-run__checkout" data-action="clock-out" title="Check Out this Session" aria-label="Check Out this Session">Check Out</button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));

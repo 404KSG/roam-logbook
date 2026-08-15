@@ -94,6 +94,8 @@ test('lands after a nested Back/Forward navigation wrapper and before main contr
 
     assert.deepEqual(placement.topbarOrder, ['shell']);
     assert.deepEqual(placement.shellOrder, ['navigation', 'WIDGET', 'main', 'right']);
+    assert.equal(document.querySelector('[data-name="shell"]').classList.contains('rlb-topbar__layout'), true);
+    assert.equal(document.querySelector('[data-name="main"]').classList.contains('rlb-topbar__search'), true);
 });
 
 test('lands after the back/forward arrows, before the rest of the topbar', async () => {

@@ -10,15 +10,22 @@ import { createConfirmationController } from './confirmation.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
-import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { formatElapsed, formatMinutesHuman } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
 import { openBlock } from './roam.js';
 import { mutationResultNotice } from './action-result.js';
+import {
+    buildSessionSurfaceModel,
+    renderSessionSurface,
+    updateSessionSurfaceElapsed,
+} from './session-surface.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
 const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
+const SIDEBAR_ID = 'roam-logbook-current-sessions';
+const SIDEBAR_TITLE_ID = 'roam-logbook-current-sessions-title';
 const TOPBAR_SELECTOR = '.rm-topbar';
 
 /**
@@ -49,6 +56,8 @@ export function createTopbar({
     let separatorNode = null;
     let buttonNode = null;
     let popover = null;
+    let sidebar = null;
+    let sidebarHost = null;
     let observer = null;
     let hostObserver = null;
     let recoveryObserver = null;
@@ -68,13 +77,14 @@ export function createTopbar({
     let tickCount = 0;
     let layoutMode = null;
     let actionNotice = '';
+    const layoutHosts = new Set();
+    const searchHosts = new Set();
 
     const nowDate = () => {
         const value = nowFn();
         return value instanceof Date ? value : new Date(value);
     };
 
-    const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
     const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
     const pomodoroLabel = minutes =>
         Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 60_000);
@@ -100,7 +110,7 @@ export function createTopbar({
         document.removeEventListener('mousedown', onDocumentMouseDown, true);
         document.removeEventListener('keydown', onPopoverKeyDown, true);
         window.removeEventListener('resize', closePopover);
-        buttonNode?.setAttribute('aria-expanded', 'false');
+        if (!sidebar) syncSurfaceAria(null);
         if (restoreFocus && buttonNode?.isConnected) buttonNode.focus();
     };
 
@@ -163,88 +173,20 @@ export function createTopbar({
         popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
     };
 
-    /** `12:34 · target 30:00 · 2h 05m total` — the live half of a row's meta line. */
-    const rowFigures = (entry, now) => {
-        const target = pomodoro.targetMinutes(entry.clockUid);
-        const elapsed = now - entry.start.getTime();
-        const total = entry.priorMinutes + Math.floor(elapsed / 60_000);
-        return (
-            formatElapsed(elapsed) +
-            (target ? ` · target ${formatElapsed(target * 60_000)}` : '') +
-            ` · ${formatMinutesHuman(total)} total`
-        );
-    };
+    const sessionModel = () =>
+        buildSessionSurfaceModel({
+            entries: clock.getRunning(),
+            pausedItems: paused.getPaused(),
+            now: nowDate(),
+            staleHours: staleHours(),
+        });
 
-    const runningRow = (entry, now = nowDate()) => {
-        const overrun = pomodoro.isOverrun(entry, now);
-        const row = el('div', `rlb-run${overrun ? ' rlb-run--overrun' : ''}`);
+    const surfaceNotices = () =>
+        actionNotice ? [actionNotice] : [clock.getNotice(), paused.getNotice()].filter(Boolean);
 
-        const body = el('div', 'rlb-run__body');
-        const taskLabel = `Open this block: ${entry.title}`;
-        const title = button(
-            'bp3-button bp3-minimal bp3-icon-document-open rlb-run__title',
-            entry.title,
-            () => {
-                closePopover();
-                void openBlock(entry.taskUid);
-            },
-            { title: taskLabel }
-        );
-        const started = formatStarted(entry.start, new Date(now));
-        const startedDetails =
-            `Started ${started.raw}` + (entry.pageTitle ? ` · Page: ${entry.pageTitle}` : '');
-        const meta = el('div', 'rlb-run__meta');
-        const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', rowFigures(entry, now));
-        const startedNode = el(
-            'time',
-            'rlb-run__meta-line rlb-run__started',
-            started.valid ? `${started.dateLabel} ${started.timeLabel}` : started.raw
-        );
-        startedNode.title = startedDetails;
-        startedNode.setAttribute('aria-label', startedDetails);
-        if (started.datetime) startedNode.dateTime = started.datetime;
-        meta.append(primary, startedNode);
-        meta.dataset.clockUid = entry.clockUid;
-        body.append(title, meta);
-
-        const actions = el('div', 'rlb-run__actions');
-        const discarding = discardConfirmUid === entry.clockUid;
-        const discardTitle = discarding
-            ? 'Confirm discard of this CLOCK entry'
-            : 'Discard this CLOCK entry (cannot be undone)';
-        const discard = button(
-            `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
-            '',
-            () => {
-                if (!discarding) {
-                    discardConfirmUid = entry.clockUid;
-                    if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
-                    discardConfirmTimer = setTimeout(() => {
-                        resetDiscardConfirmation();
-                        renderPopover();
-                    }, 5000);
-                    renderPopover();
-                    return;
-                }
-                resetDiscardConfirmation();
-                void run(() => clock.discardClock(entry.clockUid));
-            },
-            { title: discardTitle }
-        );
-        discard.dataset.action = 'discard';
-        actions.append(
-            button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop',
-                '',
-                () => void run(() => clock.clockOut(entry.clockUid)),
-                { title: 'Clock out this Session' }
-            ),
-            discard
-        );
-        actions.firstElementChild.dataset.action = 'clock-out';
-
-        row.append(body, actions);
-        return row;
+    const renderSurfaces = () => {
+        if (popover) renderPopover();
+        if (sidebar) renderSidebar();
     };
 
     const run = async action => {
@@ -252,133 +194,141 @@ export function createTopbar({
             const result = await action();
             actionNotice = mutationResultNotice(result);
             onMutationResult(result);
-            if (popover) renderPopover();
+            renderSurfaces();
             return result;
         } catch (error) {
             console.error('[roam-logbook]', error);
             actionNotice = mutationResultNotice(error);
             onMutationResult(error);
         }
-        if (popover) renderPopover();
+        renderSurfaces();
+    };
+
+    const surfaceOptions = surface => {
+        const scope = 'session-surface';
+        return {
+            titleId: surface === 'sidebar' ? SIDEBAR_TITLE_ID : POPOVER_TITLE_ID,
+            staleHours: staleHours(),
+            notices: surfaceNotices(),
+            clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
+            onRefresh: () => run(() => clock.refreshResult()),
+            onOpenTask: taskUid => {
+                closePopover({ restoreFocus: false });
+                closeSidebar({ restoreFocus: false });
+                void openBlock(taskUid);
+            },
+            onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
+            onDiscard: entry => {
+                if (discardConfirmUid !== entry.clockUid) {
+                    discardConfirmUid = entry.clockUid;
+                    if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
+                    discardConfirmTimer = setTimeout(() => {
+                        resetDiscardConfirmation();
+                        renderSurfaces();
+                    }, 5000);
+                    renderSurfaces();
+                    return;
+                }
+                resetDiscardConfirmation();
+                void run(() => clock.discardClock(entry.clockUid));
+            },
+            onOpenDashboard: () => {
+                closePopover({ restoreFocus: false });
+                closeSidebar({ restoreFocus: false });
+                onOpenDashboard?.(buttonNode);
+            },
+            onPauseAll: () => void run(() => paused.pauseAll()),
+            onResumeAll: () => void run(() => paused.resumeAll()),
+            onClockOutAll: () => {
+                if (!confirmation?.arm('clock-out-all', scope)) {
+                    renderSurfaces();
+                    return;
+                }
+                resetClockOutConfirmation();
+                void run(() => paused.clockOutAll());
+            },
+            onClose: surface === 'sidebar' ? () => closeSidebar() : null,
+            discardingClockUid: discardConfirmUid,
+        };
     };
 
     function renderPopover() {
         if (!popover) return;
-        const entries = clock.getRunning();
-        const pausedItems = paused.getPaused();
+        const model = sessionModel();
         const refreshStatus = clock.getLastRefreshStatus();
-        if (entries.length <= 1 && confirmation?.isArmed('clock-out-all', 'popover')) {
-            resetClockOutConfirmation();
-        }
-        popover.replaceChildren();
-
-        const titleText = entries.length
-            ? `${sessionCount(entries.length)} Running`
-            : pausedItems.length
-              ? `${taskCount(pausedItems.length)} Paused`
-              : 'Logbook';
-        const heading = el('div', 'rlb-popover__title', titleText);
-        heading.id = POPOVER_TITLE_ID;
-        popover.appendChild(heading);
-
-        if (entries.length === 0 && pausedItems.length === 0) {
-            popover.appendChild(
-                el(
-                    'div',
-                    'rlb-popover__empty',
-                    refreshStatus.ok
-                        ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
-                        : 'Session state could not be confirmed. Retry after Roam finishes syncing.'
-                )
-            );
-        } else {
-            const stale = findStaleClocks(entries, nowDate(), staleHours());
-            if (stale.length > 0) {
-                popover.appendChild(
-                    el(
-                        'div',
-                        'rlb-popover__empty bp3-text-small',
-                        `${sessionCount(stale.length)} ${stale.length > 1 ? 'have' : 'has'} been open for over ` +
-                            `${staleHours()}h — likely forgotten.`
-                    )
-                );
-            }
-            for (const entry of entries) popover.appendChild(runningRow(entry, nowDate()));
-        }
-
-        if (pausedItems.length > 0) {
-            if (entries.length > 0) {
-                popover.appendChild(
-                    el('div', 'rlb-popover__subheading', `${taskCount(pausedItems.length)} Paused`)
-                );
-            }
-            const list = el('div', 'rlb-paused-list');
-            for (const item of pausedItems) {
-                list.appendChild(el('div', 'rlb-paused-row', item.title || item.taskUid));
-            }
-            popover.appendChild(list);
-        }
-
-        const notices = actionNotice ? [actionNotice] : [clock.getNotice(), paused.getNotice()].filter(Boolean);
-        for (const notice of notices) {
-            popover.appendChild(
-                el('div', 'rlb-popover__notice bp3-text-small', notice)
-            );
-        }
-
-        const footer = el('div', 'rlb-popover__footer');
-        footer.appendChild(
-            button('bp3-button bp3-small', 'Dashboard', () => {
-                closePopover({ restoreFocus: false });
-                onOpenDashboard?.(buttonNode);
-            })
-        );
-        if (entries.length > 0) {
-            footer.appendChild(
-                button('bp3-button bp3-small', 'Pause All', () =>
-                    run(() => paused.pauseAll())
-                )
-            );
-        }
-        if (entries.length > 1) {
-            const clockOutAllConfirm = confirmation?.isArmed('clock-out-all', 'popover');
-            const confirmLabel = clockOutAllConfirm ? 'Confirm Clock Out All' : 'Clock Out All';
-            const confirmTitle = clockOutAllConfirm
-                ? 'Confirm permanent Clock Out All'
-                : 'Permanently close all running Sessions';
-            footer.appendChild(
-                button(
-                    `bp3-button bp3-small${clockOutAllConfirm ? ' bp3-intent-danger' : ''}`,
-                    confirmLabel,
-                    () => {
-                        if (!confirmation?.arm('clock-out-all', 'popover')) {
-                            renderPopover();
-                            return;
-                        }
-                        resetClockOutConfirmation();
-                        void run(() => paused.clockOutAll());
-                    },
-                    { title: confirmTitle }
-                )
-            );
-        }
-        if (pausedItems.length > 0) {
-            footer.appendChild(button(
-                'bp3-button bp3-small',
-                'Resume All',
-                () => run(() => paused.resumeAll()),
-                { title: 'Resume paused Tasks with fresh Sessions' }
-            ));
-        }
-        footer.appendChild(
-            button('bp3-button bp3-small bp3-minimal bp3-icon-refresh', '', () => run(async () => clock.refresh()), {
-                title: 'Re-read clocks from the graph',
-            })
-        );
-        popover.appendChild(footer);
+        const options = surfaceOptions('popover');
+        options.emptyMessage = refreshStatus.ok
+            ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+            : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
+        renderSessionSurface(popover, model, options);
     }
 
-    const togglePopover = () => {
+    function renderSidebar() {
+        if (!sidebar) return;
+        const model = sessionModel();
+        const refreshStatus = clock.getLastRefreshStatus();
+        const options = surfaceOptions('sidebar');
+        options.emptyMessage = refreshStatus.ok
+            ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+            : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
+        renderSessionSurface(sidebar, model, options);
+    }
+
+    const syncSurfaceAria = targetId => {
+        buttonNode?.setAttribute('aria-expanded', targetId ? 'true' : 'false');
+        buttonNode?.setAttribute('aria-controls', targetId || POPOVER_ID);
+    };
+
+    const closeSidebar = ({ restoreFocus = true } = {}) => {
+        sidebar?.remove();
+        sidebar = null;
+        sidebarHost = null;
+        if (!popover) syncSurfaceAria(null);
+        if (restoreFocus && buttonNode?.isConnected) buttonNode.focus();
+    };
+
+    const findSidebarHost = () =>
+        document.querySelector(
+            '#right-sidebar-content, #roam-right-sidebar-content, #right-sidebar .rm-right-sidebar__content, #right-sidebar, .rm-right-sidebar'
+        ) || document.body;
+
+    const requestRoamSidebarOpen = () => {
+        try {
+            window.roamAlphaAPI?.ui?.rightSidebar?.open?.();
+        } catch (error) {
+            // A missing Roam UI helper is harmless; the existing right-sidebar
+            // host (or the fixture fallback) remains the DOM seam we own.
+            console.debug('[roam-logbook] right sidebar open helper unavailable', error);
+        }
+    };
+
+    const openSidebar = () => {
+        if (sidebar?.isConnected) {
+            sidebar.querySelector('.rlb-surface__close, button')?.focus();
+            return;
+        }
+        closePopover({ restoreFocus: false });
+        requestRoamSidebarOpen();
+        sidebarHost = findSidebarHost();
+        sidebar = el('section', 'bp3-card rlb-sidebar');
+        if (sidebarHost === document.body) sidebar.classList.add('rlb-sidebar--fallback');
+        sidebar.id = SIDEBAR_ID;
+        sidebar.setAttribute('role', 'region');
+        sidebar.setAttribute('aria-labelledby', SIDEBAR_TITLE_ID);
+        sidebarHost.appendChild(sidebar);
+        syncSurfaceAria(SIDEBAR_ID);
+        clock.refresh();
+        renderSidebar();
+        sidebar.querySelector('button')?.focus();
+    };
+
+    const togglePopover = event => {
+        if (event?.shiftKey) {
+            event.preventDefault();
+            openSidebar();
+            return;
+        }
+        closeSidebar({ restoreFocus: false });
         if (popover) {
             closePopover();
             return;
@@ -391,8 +341,7 @@ export function createTopbar({
         popover.setAttribute('aria-labelledby', POPOVER_TITLE_ID);
         document.body.appendChild(popover);
         buttonNode?.setAttribute('aria-haspopup', 'dialog');
-        buttonNode?.setAttribute('aria-controls', POPOVER_ID);
-        buttonNode?.setAttribute('aria-expanded', 'true');
+        syncSurfaceAria(POPOVER_ID);
         renderPopover();
         positionPopover();
         document.addEventListener('mousedown', onDocumentMouseDown, true);
@@ -407,7 +356,7 @@ export function createTopbar({
     };
 
     confirmation?.setOnChange(() => {
-        if (popover) renderPopover();
+        renderSurfaces();
     });
 
     // ---- widget ----
@@ -436,7 +385,7 @@ export function createTopbar({
             separatorNode.textContent = '';
             syncButtonLayout('idle');
             buttonNode.title = pausedItems.length
-                ? `${taskCount(pausedItems.length)} Paused — click to resume or review.`
+                ? `${sessionCount(pausedItems.length)} Paused — click to resume or review.`
                 : 'Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
@@ -495,20 +444,8 @@ export function createTopbar({
         if (entries.length === 0) return;
         const now = nowDate();
         renderButton(entries, now);
-        if (popover) {
-            const byUid = new Map(entries.map(entry => [entry.clockUid, entry]));
-            for (const meta of popover.querySelectorAll('.rlb-run__meta')) {
-                const entry = byUid.get(meta.dataset.clockUid);
-                if (!entry) continue;
-                const primary = meta.querySelector('.rlb-run__meta-primary');
-                if (primary) primary.textContent = rowFigures(entry, now);
-                // Crossing the target mid-tick has to repaint the row, not just the text.
-                const row = meta.closest('.rlb-run');
-                if (row) {
-                    row.classList.toggle('rlb-run--overrun', pomodoro.isOverrun(entry, now));
-                }
-            }
-        }
+        updateSessionSurfaceElapsed(popover, entries, now);
+        updateSessionSurfaceElapsed(sidebar, entries, now);
     };
 
     const build = () => {
@@ -545,6 +482,7 @@ export function createTopbar({
         if (!container) build();
 
         const placement = afterNavigation(topbar);
+        syncTopbarLayout(placement);
         if (
             container.parentNode !== placement.parent ||
             container.nextSibling !== placement.before
@@ -710,6 +648,31 @@ export function createTopbar({
         element.matches?.('input, textarea, select, [contenteditable="true"]') ||
         MAIN_CONTROL_PATTERN.test(controlSignals(element));
 
+    const containsMainControl = element =>
+        isMainControl(element) ||
+        Boolean(
+            element.querySelector?.('input, textarea, select, [contenteditable="true"]') ||
+                [...(element.querySelectorAll?.('*') || [])].some(isMainControl)
+        );
+
+    const syncTopbarLayout = placement => {
+        for (const host of layoutHosts) host.classList.remove('rlb-topbar__layout');
+        for (const host of searchHosts) host.classList.remove('rlb-topbar__search');
+        layoutHosts.clear();
+        searchHosts.clear();
+
+        const host = placement.parent;
+        if (!host?.classList) return;
+        host.classList.add('rlb-topbar__layout');
+        layoutHosts.add(host);
+        for (const child of host.children) {
+            if (child === container || !containsMainControl(child)) continue;
+            child.classList.add('rlb-topbar__search');
+            searchHosts.add(child);
+            break;
+        }
+    };
+
     /** Climb through icon/button wrappers, but stop before the main/right shell. */
     const navigationCluster = (signal, topbar) => {
         let anchor = signal.closest?.('button, a, [role="button"]') || signal;
@@ -738,6 +701,11 @@ export function createTopbar({
 
     const remove = () => {
         closePopover();
+        closeSidebar({ restoreFocus: false });
+        for (const host of layoutHosts) host.classList.remove('rlb-topbar__layout');
+        for (const host of searchHosts) host.classList.remove('rlb-topbar__search');
+        layoutHosts.clear();
+        searchHosts.clear();
         container?.remove();
     };
 
@@ -745,11 +713,11 @@ export function createTopbar({
         mount() {
             unsubscribe = clock.subscribe(() => {
                 renderButton();
-                if (popover) renderPopover();
+                renderSurfaces();
             });
             unsubscribePaused = paused.subscribe(() => {
                 renderButton();
-                if (popover) renderPopover();
+                renderSurfaces();
             });
             ticker = setIntervalFn(tick, 1000);
             attach();

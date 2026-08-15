@@ -42,8 +42,11 @@ Layering, innermost first:
   graph: a pomodoro is an intention, not a record, and the LOGBOOK drawer stays a
   faithful org clock log. Lives in extension settings, keyed by clock uid, and is
   pruned when its session ends. Overrunning never stops a clock.
-- `topbar.js`, `dashboard.js`, `styles.js` — plain DOM with Blueprint (`bp3-*`)
-  classes. No React, no colour values that Blueprint already defines, so Roam's
+- `session-surface.js`, `topbar.js`, `dashboard.js`, `styles.js` — plain DOM with
+  Blueprint (`bp3-*`) classes. `session-surface.js` is the shared current-session
+  view model/renderer used by both the popover and the Shift+Click right-sidebar
+  panel; graph actions are injected callbacks, not duplicated UI logic. No React,
+  no colour values that Blueprint already defines, so Roam's
   light/dark themes come for free.
 
   Two traps here, both of which have already cost a release:
@@ -56,7 +59,17 @@ Layering, innermost first:
     `aria-hidden="true"`; its visual spacing is CSS `gap`. Do not reintroduce
     leading whitespace into text nodes. Elapsed state uses neutral Blueprint
     gray, restrained amber stale state, and restrained red Pomodoro overrun state;
-    there is no success-green running dot.
+    there is no success-green running dot in the topbar. Session rows use a small,
+    muted status bullet for alignment; the explicit text action is `Check Out`.
+  - `syncTopbarLayout` marks the actual navigation shell and search child found at
+    attach time. The Logbook unit is `flex: 0 0 auto`/`min-width: max-content`
+    while Search owns only remaining space. Do not replace this with a global
+    fixed-position hack; the narrow-width rule hides only the secondary count,
+    never the elapsed value.
+  - A Shift+Click on the trigger mounts one DOM-only `Current Sessions` panel in
+    Roam's existing right-sidebar host. It creates no page or block. The panel is
+    removed on its close action and during extension unload; a missing host uses a
+    visibly marked DOM fallback only for unusual shells/test fixtures.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 Persisted internal state uses explicit envelopes: Pause Batch format 2,
@@ -64,6 +77,12 @@ Pomodoro target format 1, and state-backup format 1. Legacy known formats may
 migrate; unknown or corrupt values remain untouched and are backed up once.
 `CONTEXT.md` is the domain vocabulary authority for Task, Session, Own, Total,
 Pause Batch, and Pomodoro Target.
+
+While a Pause Batch exists, confirmed user clock-in/clock-out actions are observed
+through a small clock-action seam. A paused Task explicitly replaced or finished
+during the break is marked as reconciled and is consumed by Resume All rather than
+being created a second time; resume-originated and pause-originated writes are
+tagged so they do not self-reconcile.
 
 ## Testing
 
@@ -105,6 +124,7 @@ ones, and real Roam uids are 9.
   check. GitHub Actions separately runs the real pinned Docker actionlint image
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
-- Inspect the Roam Depot build and update the final PR test count only at release.
+- Inspect the Roam Depot build and update the final PR test count only at release
+  (the beta.3 UI slice currently has 212 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

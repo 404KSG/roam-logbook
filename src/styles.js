@@ -12,7 +12,10 @@ export const STYLES = `
     display: flex;
     align-items: center;
     position: relative;
-    min-width: 0;
+    flex: 0 0 auto;
+    min-width: max-content;
+    max-width: 100%;
+    white-space: nowrap;
     /* Roam's controls carry no margin of their own, so the widget has to keep
        its own distance rather than butt up against the one beside it. */
     margin: 0 3px;
@@ -20,6 +23,7 @@ export const STYLES = `
 
 .rlb-topbar__button {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
     min-width: 30px;
@@ -27,8 +31,59 @@ export const STYLES = `
     min-height: 30px;
     padding: 0 4px;
     overflow: visible;
+    min-width: max-content;
+    max-width: 100%;
+    white-space: nowrap;
     background: transparent;
     font-variant-numeric: tabular-nums;
+}
+
+/* The widget shares the left navigation row with Roam's expanding search.
+   These classes are applied to the actual host/child found at attach time, so
+   the search can shrink into remaining space without ever shrinking this unit. */
+.rlb-topbar__layout {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    container-type: inline-size;
+    container-name: rlb-topbar;
+}
+
+.rlb-topbar__layout > .rlb-topbar {
+    flex: 0 0 auto;
+    min-width: max-content;
+    white-space: nowrap;
+}
+
+.rlb-topbar__search {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* At genuinely narrow widths the elapsed value is the useful invariant. The
+   session count remains available in the surface header rather than forcing a
+   second line or overlapping Roam's search control. */
+@container rlb-topbar (max-width: 420px) {
+    .rlb-topbar__button--parallel {
+        grid-template-columns: max-content !important;
+    }
+
+    .rlb-topbar__button--parallel > .rlb-topbar__separator,
+    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
+        display: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rlb-topbar__button--parallel {
+        grid-template-columns: max-content !important;
+    }
+
+    .rlb-topbar__button--parallel > .rlb-topbar__separator,
+    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
+        display: none !important;
+    }
 }
 
 .rlb-topbar__button--parallel {
@@ -152,12 +207,53 @@ export const STYLES = `
 }
 
 .rlb-popover__title {
+    min-width: 0;
     padding: 4px 6px 8px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
     opacity: 0.6;
+}
+
+.rlb-surface__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    align-items: center;
+    column-gap: 4px;
+    min-width: 0;
+}
+
+.rlb-surface__header .rlb-popover__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-surface__header .bp3-button {
+    flex: 0 0 auto;
+    color: #5c7080;
+}
+
+.bp3-dark .rlb-surface__header .bp3-button {
+    color: #a7b6c2;
+}
+
+.rlb-sidebar {
+    width: min(360px, 100%);
+    max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 10px;
+    text-align: left;
+}
+
+.rlb-sidebar--fallback {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    z-index: 30;
+    max-height: calc(100vh - 56px);
 }
 
 .rlb-popover__empty {
@@ -236,8 +332,9 @@ export const STYLES = `
 }
 
 .rlb-run {
-    display: flex;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) max-content;
+    align-items: start;
     gap: 6px;
     padding: 6px;
     border-radius: 3px;
@@ -257,8 +354,20 @@ export const STYLES = `
 }
 
 .rlb-run__body {
-    flex: 1 1 auto;
     min-width: 0;
+}
+
+.rlb-run__status {
+    width: 7px;
+    height: 7px;
+    margin-top: 7px;
+    border-radius: 50%;
+    background: #7a9e87;
+    opacity: 0.75;
+}
+
+.rlb-run__status--paused {
+    background: #8a9ba8;
 }
 
 .rlb-run__title {
@@ -293,17 +402,24 @@ export const STYLES = `
 
 .rlb-run__actions {
     display: flex;
+    align-items: center;
     gap: 2px;
     flex: 0 0 auto;
 }
 
-.rlb-run__actions .rlb-run__stop {
+.rlb-run__actions .rlb-run__checkout {
     color: #5c7080;
 }
 
-.rlb-run__actions .rlb-run__stop:hover,
-.rlb-run__actions .rlb-run__stop:focus {
+.rlb-run__actions .rlb-run__checkout:hover,
+.rlb-run__actions .rlb-run__checkout:focus {
     color: #c23030;
+}
+
+.rlb-run--paused .rlb-run__meta,
+.rlb-run__state {
+    color: #5c7080;
+    opacity: 0.75;
 }
 
 .rlb-run__actions .bp3-icon-trash {

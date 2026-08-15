@@ -610,7 +610,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.2";
+var PLUGIN_VERSION = "0.9.0-beta.3";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -720,6 +720,7 @@ var running = [];
 var lastRefreshStatus = { ok: true, error: null };
 var notice = "";
 var listeners = /* @__PURE__ */ new Set();
+var actionListeners = /* @__PURE__ */ new Set();
 var GRAPH_UNCERTAIN = "Graph state could not be confirmed; no further changes were made.";
 async function withGraphGuard(action) {
   try {
@@ -736,6 +737,19 @@ function subscribe(listener) {
   listeners.add(listener);
   listener(running);
   return () => listeners.delete(listener);
+}
+function subscribeActions(listener) {
+  actionListeners.add(listener);
+  return () => actionListeners.delete(listener);
+}
+function publishAction(action) {
+  for (const listener of actionListeners) {
+    try {
+      listener(action);
+    } catch (error) {
+      console.error("[roam-logbook] clock action listener failed", error);
+    }
+  }
 }
 function getRunning() {
   return running;
@@ -844,6 +858,7 @@ function reset() {
   lastRefreshStatus = { ok: true, error: null };
   notice = "";
   listeners.clear();
+  actionListeners.clear();
   resetMutationQueue();
 }
 function resolveTaskUid(uid) {
@@ -923,7 +938,7 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
     error: uncertain?.error || results.find((result) => result.error)?.error || null
   };
 }
-async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
+async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
   return enqueueMutation(
     () => withGraphGuard(async () => {
       const taskUid = resolveTaskUid(blockUid);
@@ -951,7 +966,7 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
             };
           }
           if (outcome.failed > 0)
-            throw outcome.results.find((result) => result.error).error;
+            throw outcome.results.find((result2) => result2.error).error;
         }
       }
       const drawer = await ensureDrawer(taskUid);
@@ -982,11 +997,13 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
           retry: { action: "clock-in", taskUid, drawerUid: drawer.uid, clockUid }
         };
       }
-      return { clockUid, taskUid };
+      const result = { clockUid, taskUid };
+      publishAction({ type: "clock-in", source, clockUid, taskUid });
+      return result;
     })
   );
 }
-async function clockOut(clockUid, { now = /* @__PURE__ */ new Date() } = {}) {
+async function clockOut(clockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
   return enqueueMutation(
     () => withGraphGuard(async () => {
       const entries = readAllEntries();
@@ -1003,17 +1020,33 @@ async function clockOut(clockUid, { now = /* @__PURE__ */ new Date() } = {}) {
           retry: outcome.retry
         };
       }
+      if (result?.closed === true) {
+        const entry = entries.find((item) => item.clockUid === clockUid);
+        publishAction({ type: "clock-out", source, clockUid, taskUid: entry?.taskUid });
+      }
       return result?.closed === true;
     })
   );
 }
-async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date() } = {}) {
+async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
   return enqueueMutation(async () => {
     try {
       return await withGraphGuard(async () => {
         const entries = readAllEntries();
         const outcome = await closeEntriesNow(entries, clockUids, now);
-        return { ...outcome, entries };
+        const result = { ...outcome, entries };
+        if (!outcome.uncertain) {
+          for (const closed of outcome.results.filter((item) => item.closed)) {
+            const entry = entries.find((item) => item.clockUid === closed.clockUid);
+            publishAction({
+              type: "clock-out",
+              source,
+              clockUid: closed.clockUid,
+              taskUid: entry?.taskUid
+            });
+          }
+        }
+        return result;
       });
     } catch (error) {
       notice = GRAPH_UNCERTAIN;
@@ -1021,7 +1054,7 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
     }
   });
 }
-async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) {
+async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare, source = "pause" } = {}) {
   return enqueueMutation(async () => {
     try {
       return await withGraphGuard(async () => {
@@ -1033,7 +1066,19 @@ async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) 
           now,
           { publish: false }
         );
-        return { entries, records, ...outcome };
+        const result = { entries, records, ...outcome };
+        if (!outcome.uncertain) {
+          for (const closed of outcome.results.filter((item) => item.closed)) {
+            const entry = entries.find((item) => item.clockUid === closed.clockUid);
+            publishAction({
+              type: "clock-out",
+              source,
+              clockUid: closed.clockUid,
+              taskUid: entry?.taskUid
+            });
+          }
+        }
+        return result;
       });
     } catch (error) {
       notice = GRAPH_UNCERTAIN;
@@ -1041,7 +1086,7 @@ async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) 
     }
   });
 }
-async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
+async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
   return enqueueMutation(
     () => withGraphGuard(async () => {
       const taskUid = resolveTaskUid(blockUid);
@@ -1061,6 +1106,14 @@ async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date() } = {}
           notice: GRAPH_UNCERTAIN,
           retry: outcome.retry
         };
+      }
+      if (result?.closed === true) {
+        publishAction({
+          type: "clock-out",
+          source,
+          clockUid: entry.clockUid,
+          taskUid: entry.taskUid
+        });
       }
       return result?.closed === true;
     })
@@ -2119,6 +2172,7 @@ var pendingResume = [];
 var notice3 = "";
 var unsupportedRaw2 = null;
 var listeners2 = /* @__PURE__ */ new Set();
+var unsubscribeClockActions = null;
 var cleanRecord = (value) => {
   if (!value || typeof value !== "object")
     return null;
@@ -2129,12 +2183,23 @@ var cleanRecord = (value) => {
   const pomodoroRemainingMs = remaining === null || remaining === void 0 ? null : Number(remaining);
   const pomodoroSuppressed = value.pomodoroSuppressed === true;
   const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
+  const reconciliationState = value.reconciliationState === "externally-replaced" || value.reconciliationState === "externally-clocked-out" ? value.reconciliationState : null;
+  const externalClockUid = typeof value.externalClockUid === "string" && value.externalClockUid ? value.externalClockUid : null;
   if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
     return null;
   if (pomodoroRemainingMs !== null && (!Number.isFinite(pomodoroRemainingMs) || pomodoroRemainingMs <= 0)) {
     return null;
   }
-  return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed, ...clockUid ? { clockUid } : {} };
+  return {
+    taskUid,
+    title,
+    pausedAtMs,
+    pomodoroRemainingMs,
+    pomodoroSuppressed,
+    ...clockUid ? { clockUid } : {},
+    ...reconciliationState ? { reconciliationState } : {},
+    ...externalClockUid ? { externalClockUid } : {}
+  };
 };
 var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
   const record = cleanRecord(value);
@@ -2176,6 +2241,31 @@ function notify2() {
     }
   }
 }
+var handleClockAction = (action) => {
+  if (!action || action.source === "pause" || action.source === "resume")
+    return;
+  const item = items.find((record) => record.taskUid === action.taskUid);
+  if (!item)
+    return;
+  if (action.type === "clock-in") {
+    item.reconciliationState = "externally-replaced";
+    item.externalClockUid = action.clockUid;
+    notice3 = "A paused Session was replaced by explicit clock activity; Resume All will not duplicate it.";
+    persist();
+    notify2();
+    return;
+  }
+  if (action.type === "clock-out" && item.externalClockUid === action.clockUid) {
+    item.reconciliationState = "externally-clocked-out";
+    notice3 = "A paused Session was explicitly clocked out; Resume All will not recreate it.";
+    persist();
+    notify2();
+  }
+};
+var ensureClockActionSubscription = () => {
+  unsubscribeClockActions?.();
+  unsubscribeClockActions = subscribeActions(handleClockAction);
+};
 function subscribe2(listener) {
   listeners2.add(listener);
   listener(getPaused());
@@ -2192,6 +2282,7 @@ function load2() {
   pendingResume = [];
   notice3 = "";
   unsupportedRaw2 = null;
+  ensureClockActionSubscription();
   const raw = readSetting(SETTING_PAUSED_BATCH);
   if (!raw)
     return getPaused();
@@ -2543,7 +2634,7 @@ async function resumeRecord(record, now) {
   if (!entry) {
     let result;
     try {
-      result = await clockIn(record.taskUid, { now });
+      result = await clockIn(record.taskUid, { now, source: "resume" });
     } catch (error) {
       if (createdPending && !error?.uncertain) {
         pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
@@ -2611,6 +2702,7 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let pruned = 0;
   let satisfied = 0;
   let uncertain = 0;
+  let reconciled = 0;
   for (const pending of recovered.legacyToCreate) {
     const valid = existingTask(pending);
     if (valid?.uncertain) {
@@ -2630,6 +2722,10 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     }
   }
   for (const record of [...items]) {
+    if (record.reconciliationState) {
+      reconciled += 1;
+      continue;
+    }
     const valid = existingTask(record);
     if (valid?.uncertain) {
       uncertain += 1;
@@ -2726,6 +2822,12 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   if (legacyRecovery) {
     messages.push("Legacy Resume recovery used explicit Task matching.");
+  }
+  if (reconciled > 0) {
+    messages.push(
+      `${reconciled} paused Session${reconciled === 1 ? " was" : "s were"} reconciled with explicit clock activity.`
+    );
+    items = items.filter((item) => !item.reconciliationState);
   }
   notice3 = messages.join(" ");
   persist();
@@ -2832,6 +2934,8 @@ function reset3() {
   notice3 = "";
   unsupportedRaw2 = null;
   listeners2.clear();
+  unsubscribeClockActions?.();
+  unsubscribeClockActions = null;
 }
 
 // src/action-result.js
@@ -2876,7 +2980,10 @@ var STYLES = `
     display: flex;
     align-items: center;
     position: relative;
-    min-width: 0;
+    flex: 0 0 auto;
+    min-width: max-content;
+    max-width: 100%;
+    white-space: nowrap;
     /* Roam's controls carry no margin of their own, so the widget has to keep
        its own distance rather than butt up against the one beside it. */
     margin: 0 3px;
@@ -2884,6 +2991,7 @@ var STYLES = `
 
 .rlb-topbar__button {
     display: inline-flex;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
     min-width: 30px;
@@ -2891,8 +2999,59 @@ var STYLES = `
     min-height: 30px;
     padding: 0 4px;
     overflow: visible;
+    min-width: max-content;
+    max-width: 100%;
+    white-space: nowrap;
     background: transparent;
     font-variant-numeric: tabular-nums;
+}
+
+/* The widget shares the left navigation row with Roam's expanding search.
+   These classes are applied to the actual host/child found at attach time, so
+   the search can shrink into remaining space without ever shrinking this unit. */
+.rlb-topbar__layout {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    container-type: inline-size;
+    container-name: rlb-topbar;
+}
+
+.rlb-topbar__layout > .rlb-topbar {
+    flex: 0 0 auto;
+    min-width: max-content;
+    white-space: nowrap;
+}
+
+.rlb-topbar__search {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* At genuinely narrow widths the elapsed value is the useful invariant. The
+   session count remains available in the surface header rather than forcing a
+   second line or overlapping Roam's search control. */
+@container rlb-topbar (max-width: 420px) {
+    .rlb-topbar__button--parallel {
+        grid-template-columns: max-content !important;
+    }
+
+    .rlb-topbar__button--parallel > .rlb-topbar__separator,
+    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
+        display: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rlb-topbar__button--parallel {
+        grid-template-columns: max-content !important;
+    }
+
+    .rlb-topbar__button--parallel > .rlb-topbar__separator,
+    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
+        display: none !important;
+    }
 }
 
 .rlb-topbar__button--parallel {
@@ -3016,12 +3175,53 @@ var STYLES = `
 }
 
 .rlb-popover__title {
+    min-width: 0;
     padding: 4px 6px 8px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
     opacity: 0.6;
+}
+
+.rlb-surface__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    align-items: center;
+    column-gap: 4px;
+    min-width: 0;
+}
+
+.rlb-surface__header .rlb-popover__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-surface__header .bp3-button {
+    flex: 0 0 auto;
+    color: #5c7080;
+}
+
+.bp3-dark .rlb-surface__header .bp3-button {
+    color: #a7b6c2;
+}
+
+.rlb-sidebar {
+    width: min(360px, 100%);
+    max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 10px;
+    text-align: left;
+}
+
+.rlb-sidebar--fallback {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    z-index: 30;
+    max-height: calc(100vh - 56px);
 }
 
 .rlb-popover__empty {
@@ -3100,8 +3300,9 @@ var STYLES = `
 }
 
 .rlb-run {
-    display: flex;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) max-content;
+    align-items: start;
     gap: 6px;
     padding: 6px;
     border-radius: 3px;
@@ -3121,8 +3322,20 @@ var STYLES = `
 }
 
 .rlb-run__body {
-    flex: 1 1 auto;
     min-width: 0;
+}
+
+.rlb-run__status {
+    width: 7px;
+    height: 7px;
+    margin-top: 7px;
+    border-radius: 50%;
+    background: #7a9e87;
+    opacity: 0.75;
+}
+
+.rlb-run__status--paused {
+    background: #8a9ba8;
 }
 
 .rlb-run__title {
@@ -3157,17 +3370,24 @@ var STYLES = `
 
 .rlb-run__actions {
     display: flex;
+    align-items: center;
     gap: 2px;
     flex: 0 0 auto;
 }
 
-.rlb-run__actions .rlb-run__stop {
+.rlb-run__actions .rlb-run__checkout {
     color: #5c7080;
 }
 
-.rlb-run__actions .rlb-run__stop:hover,
-.rlb-run__actions .rlb-run__stop:focus {
+.rlb-run__actions .rlb-run__checkout:hover,
+.rlb-run__actions .rlb-run__checkout:focus {
     color: #c23030;
+}
+
+.rlb-run--paused .rlb-run__meta,
+.rlb-run__state {
+    color: #5c7080;
+    opacity: 0.75;
 }
 
 .rlb-run__actions .bp3-icon-trash {
@@ -3879,10 +4099,242 @@ var STYLES = `
 }
 `;
 
+// src/session-surface.js
+var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var rowFigures = (entry, now) => {
+  const target = targetMinutes(entry.clockUid);
+  const elapsed = now.getTime() - entry.start.getTime();
+  const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
+  return formatElapsed(elapsed) + (target ? ` \xB7 target ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
+};
+var fullTaskLabel = (title) => `Open this block: ${title}`;
+var renderTitle = (row, onOpenTask) => {
+  const title = row.title || row.taskUid;
+  const taskButton = button(
+    "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
+    title,
+    () => onOpenTask?.(row.taskUid),
+    { title: fullTaskLabel(title) }
+  );
+  taskButton.setAttribute("aria-label", fullTaskLabel(title));
+  return taskButton;
+};
+var renderRunningRow = (row, now, options) => {
+  const entry = row.entry;
+  const overrun = isOverrun(entry, now);
+  const node = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
+  node.dataset.sessionState = "running";
+  node.dataset.clockUid = entry.clockUid;
+  const status = el("span", "rlb-run__status rlb-run__status--running");
+  status.setAttribute("aria-hidden", "true");
+  const body = el("div", "rlb-run__body");
+  const meta = el("div", "rlb-run__meta");
+  meta.dataset.clockUid = entry.clockUid;
+  meta.appendChild(el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now)));
+  const started = formatStarted(entry.start, now);
+  const startedDetails = `Started ${started.raw}` + (entry.pageTitle ? ` \xB7 Page: ${entry.pageTitle}` : "");
+  const startedNode = el(
+    "time",
+    "rlb-run__meta-line rlb-run__started",
+    started.valid ? `${started.dateLabel} ${started.timeLabel}` : started.raw
+  );
+  startedNode.title = startedDetails;
+  startedNode.setAttribute("aria-label", startedDetails);
+  if (started.datetime)
+    startedNode.dateTime = started.datetime;
+  meta.appendChild(startedNode);
+  body.append(renderTitle(row, options.onOpenTask), meta);
+  const actions = el("div", "rlb-run__actions");
+  const checkout = button(
+    "bp3-button bp3-small bp3-minimal rlb-run__checkout",
+    "Check Out",
+    () => void options.onCheckOut?.(entry),
+    { title: "Check Out this Session" }
+  );
+  checkout.dataset.action = "clock-out";
+  const discarding = options.discardingClockUid === entry.clockUid;
+  const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
+  const discard = button(
+    `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
+    "",
+    () => void options.onDiscard?.(entry),
+    { title: discardTitle }
+  );
+  discard.dataset.action = "discard";
+  actions.append(checkout, discard);
+  node.append(status, body, actions);
+  return node;
+};
+var renderPausedRow = (row, now, options) => {
+  const item = row.item;
+  const node = el("div", "rlb-run rlb-run--paused");
+  node.dataset.sessionState = "paused";
+  node.dataset.taskUid = item.taskUid;
+  const status = el("span", "rlb-run__status rlb-run__status--paused");
+  status.setAttribute("aria-label", "Paused Session");
+  const body = el("div", "rlb-run__body");
+  const meta = el("div", "rlb-run__meta");
+  meta.appendChild(el("div", "rlb-run__meta-line rlb-run__meta-primary", "Paused"));
+  const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
+  const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : "Paused Session";
+  const pausedNode = el(
+    "time",
+    "rlb-run__meta-line rlb-run__started",
+    pausedAt.valid ? `${pausedAt.dateLabel} ${pausedAt.timeLabel}` : pausedDetails
+  );
+  pausedNode.title = pausedDetails;
+  pausedNode.setAttribute("aria-label", pausedDetails);
+  if (pausedAt.datetime)
+    pausedNode.dateTime = pausedAt.datetime;
+  meta.appendChild(pausedNode);
+  body.append(renderTitle(row, options.onOpenTask), meta);
+  const actions = el("div", "rlb-run__actions");
+  const state = el("span", "rlb-run__state", "Paused");
+  state.setAttribute("aria-label", "Paused Session");
+  actions.appendChild(state);
+  node.append(status, body, actions);
+  return node;
+};
+function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, staleHours: staleHours2 = 8 }) {
+  const currentNow = now instanceof Date ? now : new Date(now);
+  const runningRows = entries.map((entry) => ({
+    kind: "running",
+    key: `running:${entry.clockUid}`,
+    taskUid: entry.taskUid,
+    title: entry.title,
+    entry
+  }));
+  const pausedRows = pausedItems.map((item) => ({
+    kind: "paused",
+    key: `paused:${item.taskUid}`,
+    taskUid: item.taskUid,
+    title: item.title,
+    item
+  }));
+  return {
+    now: currentNow,
+    entries: entries.slice(),
+    pausedItems: pausedItems.slice(),
+    rows: [...runningRows, ...pausedRows],
+    runningCount: entries.length,
+    pausedCount: pausedItems.length,
+    staleEntries: findStaleClocks(entries, currentNow, staleHours2)
+  };
+}
+var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${sessionCount(model.pausedCount)} Paused` : "Logbook";
+function renderSessionSurface(root, model, options = {}) {
+  const title = el("div", "rlb-popover__title", surfaceTitle(model));
+  if (options.titleId)
+    title.id = options.titleId;
+  const header = el("header", "rlb-surface__header");
+  header.appendChild(title);
+  if (options.onRefresh) {
+    header.appendChild(
+      button(
+        "bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh",
+        "",
+        () => void options.onRefresh(),
+        { title: "Refresh current Sessions" }
+      )
+    );
+    header.lastElementChild.dataset.action = "refresh";
+  }
+  if (options.onClose) {
+    header.appendChild(
+      button(
+        "bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__close",
+        "",
+        () => options.onClose(),
+        { title: "Close Current Sessions" }
+      )
+    );
+    header.lastElementChild.dataset.action = "close";
+  }
+  root.replaceChildren(header);
+  if (model.rows.length === 0) {
+    root.appendChild(el("div", "rlb-popover__empty", options.emptyMessage || "No Session is running."));
+  } else {
+    if (model.staleEntries.length > 0) {
+      root.appendChild(
+        el(
+          "div",
+          "rlb-popover__empty bp3-text-small",
+          `${sessionCount(model.staleEntries.length)} ${model.staleEntries.length > 1 ? "have" : "has"} been open for over ${options.staleHours || 8}h \u2014 likely forgotten.`
+        )
+      );
+    }
+    for (const row of model.rows) {
+      root.appendChild(
+        row.kind === "running" ? renderRunningRow(row, model.now, options) : renderPausedRow(row, model.now, options)
+      );
+    }
+  }
+  for (const notice4 of options.notices || []) {
+    if (notice4)
+      root.appendChild(el("div", "rlb-popover__notice bp3-text-small", notice4));
+  }
+  const footer = el("div", "rlb-popover__footer");
+  footer.appendChild(
+    button("bp3-button bp3-small", "Dashboard", () => options.onOpenDashboard?.(), {
+      title: "Open Logbook Dashboard"
+    })
+  );
+  if (model.runningCount > 0 || model.pausedCount > 0) {
+    if (model.runningCount > 0) {
+      footer.appendChild(
+        button("bp3-button bp3-small", "Pause All", () => options.onPauseAll?.(), {
+          title: "Pause all running Sessions"
+        })
+      );
+    }
+    if (model.pausedCount > 0) {
+      footer.appendChild(
+        button("bp3-button bp3-small", "Resume All", () => options.onResumeAll?.(), {
+          title: "Resume paused Sessions with fresh CLOCK entries"
+        })
+      );
+    }
+    if (model.runningCount > 1 || model.pausedCount > 0) {
+      const confirming = Boolean(options.clockOutAllConfirm);
+      footer.appendChild(
+        button(
+          `bp3-button bp3-small${confirming ? " bp3-intent-danger" : ""}`,
+          confirming ? "Confirm Clock Out All" : "Clock Out All",
+          () => options.onClockOutAll?.(),
+          {
+            title: confirming ? "Confirm permanent Clock Out All" : "Permanently close all running Sessions and clear the Pause Batch"
+          }
+        )
+      );
+    }
+  }
+  root.appendChild(footer);
+  return root;
+}
+function updateSessionSurfaceElapsed(root, entries, now) {
+  if (!root)
+    return;
+  const currentNow = now instanceof Date ? now : new Date(now);
+  const byUid = new Map(entries.map((entry) => [entry.clockUid, entry]));
+  for (const meta of root.querySelectorAll('.rlb-run[data-session-state="running"] .rlb-run__meta')) {
+    const entry = byUid.get(meta.dataset.clockUid);
+    if (!entry)
+      continue;
+    const primary = meta.querySelector(".rlb-run__meta-primary");
+    if (primary)
+      primary.textContent = rowFigures(entry, currentNow);
+    const row = meta.closest(".rlb-run");
+    if (row)
+      row.classList.toggle("rlb-run--overrun", isOverrun(entry, currentNow));
+  }
+}
+
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
+var SIDEBAR_ID = "roam-logbook-current-sessions";
+var SIDEBAR_TITLE_ID = "roam-logbook-current-sessions-title";
 var TOPBAR_SELECTOR = ".rm-topbar";
 var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
 var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
@@ -3904,6 +4356,8 @@ function createTopbar({
   let separatorNode = null;
   let buttonNode = null;
   let popover = null;
+  let sidebar = null;
+  let sidebarHost = null;
   let observer = null;
   let hostObserver = null;
   let recoveryObserver = null;
@@ -3923,12 +4377,13 @@ function createTopbar({
   let tickCount = 0;
   let layoutMode = null;
   let actionNotice = "";
+  const layoutHosts = /* @__PURE__ */ new Set();
+  const searchHosts = /* @__PURE__ */ new Set();
   const nowDate = () => {
     const value = nowFn();
     return value instanceof Date ? value : new Date(value);
   };
-  const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
-  const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+  const sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
   const resetClockOutConfirmation = () => {
     confirmation?.reset();
@@ -3948,7 +4403,8 @@ function createTopbar({
     document.removeEventListener("mousedown", onDocumentMouseDown, true);
     document.removeEventListener("keydown", onPopoverKeyDown, true);
     window.removeEventListener("resize", closePopover);
-    buttonNode?.setAttribute("aria-expanded", "false");
+    if (!sidebar)
+      syncSurfaceAria(null);
     if (restoreFocus && buttonNode?.isConnected)
       buttonNode.focus();
   };
@@ -4003,201 +4459,149 @@ function createTopbar({
     popover.style.top = `${anchor.bottom + 6}px`;
     popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
   };
-  const rowFigures = (entry, now) => {
-    const target = targetMinutes(entry.clockUid);
-    const elapsed = now - entry.start.getTime();
-    const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
-    return formatElapsed(elapsed) + (target ? ` \xB7 target ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
-  };
-  const runningRow = (entry, now = nowDate()) => {
-    const overrun = isOverrun(entry, now);
-    const row = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
-    const body = el("div", "rlb-run__body");
-    const taskLabel = `Open this block: ${entry.title}`;
-    const title = button(
-      "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
-      entry.title,
-      () => {
-        closePopover();
-        void openBlock(entry.taskUid);
-      },
-      { title: taskLabel }
-    );
-    const started = formatStarted(entry.start, new Date(now));
-    const startedDetails = `Started ${started.raw}` + (entry.pageTitle ? ` \xB7 Page: ${entry.pageTitle}` : "");
-    const meta = el("div", "rlb-run__meta");
-    const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now));
-    const startedNode = el(
-      "time",
-      "rlb-run__meta-line rlb-run__started",
-      started.valid ? `${started.dateLabel} ${started.timeLabel}` : started.raw
-    );
-    startedNode.title = startedDetails;
-    startedNode.setAttribute("aria-label", startedDetails);
-    if (started.datetime)
-      startedNode.dateTime = started.datetime;
-    meta.append(primary, startedNode);
-    meta.dataset.clockUid = entry.clockUid;
-    body.append(title, meta);
-    const actions = el("div", "rlb-run__actions");
-    const discarding = discardConfirmUid === entry.clockUid;
-    const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
-    const discard = button(
-      `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
-      "",
-      () => {
-        if (!discarding) {
-          discardConfirmUid = entry.clockUid;
-          if (discardConfirmTimer)
-            clearTimeout(discardConfirmTimer);
-          discardConfirmTimer = setTimeout(() => {
-            resetDiscardConfirmation();
-            renderPopover();
-          }, 5e3);
-          renderPopover();
-          return;
-        }
-        resetDiscardConfirmation();
-        void run(() => discardClock(entry.clockUid));
-      },
-      { title: discardTitle }
-    );
-    discard.dataset.action = "discard";
-    actions.append(
-      button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop",
-        "",
-        () => void run(() => clockOut(entry.clockUid)),
-        { title: "Clock out this Session" }
-      ),
-      discard
-    );
-    actions.firstElementChild.dataset.action = "clock-out";
-    row.append(body, actions);
-    return row;
+  const sessionModel = () => buildSessionSurfaceModel({
+    entries: getRunning(),
+    pausedItems: getPaused(),
+    now: nowDate(),
+    staleHours: staleHours()
+  });
+  const surfaceNotices = () => actionNotice ? [actionNotice] : [getNotice(), getNotice2()].filter(Boolean);
+  const renderSurfaces = () => {
+    if (popover)
+      renderPopover();
+    if (sidebar)
+      renderSidebar();
   };
   const run = async (action) => {
     try {
       const result = await action();
       actionNotice = mutationResultNotice(result);
       onMutationResult(result);
-      if (popover)
-        renderPopover();
+      renderSurfaces();
       return result;
     } catch (error) {
       console.error("[roam-logbook]", error);
       actionNotice = mutationResultNotice(error);
       onMutationResult(error);
     }
-    if (popover)
-      renderPopover();
+    renderSurfaces();
+  };
+  const surfaceOptions = (surface) => {
+    const scope = "session-surface";
+    return {
+      titleId: surface === "sidebar" ? SIDEBAR_TITLE_ID : POPOVER_TITLE_ID,
+      staleHours: staleHours(),
+      notices: surfaceNotices(),
+      clockOutAllConfirm: confirmation?.isArmed("clock-out-all", scope),
+      onRefresh: () => run(() => refreshResult()),
+      onOpenTask: (taskUid) => {
+        closePopover({ restoreFocus: false });
+        closeSidebar({ restoreFocus: false });
+        void openBlock(taskUid);
+      },
+      onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
+      onDiscard: (entry) => {
+        if (discardConfirmUid !== entry.clockUid) {
+          discardConfirmUid = entry.clockUid;
+          if (discardConfirmTimer)
+            clearTimeout(discardConfirmTimer);
+          discardConfirmTimer = setTimeout(() => {
+            resetDiscardConfirmation();
+            renderSurfaces();
+          }, 5e3);
+          renderSurfaces();
+          return;
+        }
+        resetDiscardConfirmation();
+        void run(() => discardClock(entry.clockUid));
+      },
+      onOpenDashboard: () => {
+        closePopover({ restoreFocus: false });
+        closeSidebar({ restoreFocus: false });
+        onOpenDashboard?.(buttonNode);
+      },
+      onPauseAll: () => void run(() => pauseAll()),
+      onResumeAll: () => void run(() => resumeAll()),
+      onClockOutAll: () => {
+        if (!confirmation?.arm("clock-out-all", scope)) {
+          renderSurfaces();
+          return;
+        }
+        resetClockOutConfirmation();
+        void run(() => clockOutAll());
+      },
+      onClose: surface === "sidebar" ? () => closeSidebar() : null,
+      discardingClockUid: discardConfirmUid
+    };
   };
   function renderPopover() {
     if (!popover)
       return;
-    const entries = getRunning();
-    const pausedItems = getPaused();
+    const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
-    if (entries.length <= 1 && confirmation?.isArmed("clock-out-all", "popover")) {
-      resetClockOutConfirmation();
-    }
-    popover.replaceChildren();
-    const titleText = entries.length ? `${sessionCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook";
-    const heading = el("div", "rlb-popover__title", titleText);
-    heading.id = POPOVER_TITLE_ID;
-    popover.appendChild(heading);
-    if (entries.length === 0 && pausedItems.length === 0) {
-      popover.appendChild(
-        el(
-          "div",
-          "rlb-popover__empty",
-          refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing."
-        )
-      );
-    } else {
-      const stale = findStaleClocks(entries, nowDate(), staleHours());
-      if (stale.length > 0) {
-        popover.appendChild(
-          el(
-            "div",
-            "rlb-popover__empty bp3-text-small",
-            `${sessionCount(stale.length)} ${stale.length > 1 ? "have" : "has"} been open for over ${staleHours()}h \u2014 likely forgotten.`
-          )
-        );
-      }
-      for (const entry of entries)
-        popover.appendChild(runningRow(entry, nowDate()));
-    }
-    if (pausedItems.length > 0) {
-      if (entries.length > 0) {
-        popover.appendChild(
-          el("div", "rlb-popover__subheading", `${taskCount(pausedItems.length)} Paused`)
-        );
-      }
-      const list = el("div", "rlb-paused-list");
-      for (const item of pausedItems) {
-        list.appendChild(el("div", "rlb-paused-row", item.title || item.taskUid));
-      }
-      popover.appendChild(list);
-    }
-    const notices = actionNotice ? [actionNotice] : [getNotice(), getNotice2()].filter(Boolean);
-    for (const notice4 of notices) {
-      popover.appendChild(
-        el("div", "rlb-popover__notice bp3-text-small", notice4)
-      );
-    }
-    const footer = el("div", "rlb-popover__footer");
-    footer.appendChild(
-      button("bp3-button bp3-small", "Dashboard", () => {
-        closePopover({ restoreFocus: false });
-        onOpenDashboard?.(buttonNode);
-      })
-    );
-    if (entries.length > 0) {
-      footer.appendChild(
-        button(
-          "bp3-button bp3-small",
-          "Pause All",
-          () => run(() => pauseAll())
-        )
-      );
-    }
-    if (entries.length > 1) {
-      const clockOutAllConfirm = confirmation?.isArmed("clock-out-all", "popover");
-      const confirmLabel = clockOutAllConfirm ? "Confirm Clock Out All" : "Clock Out All";
-      const confirmTitle = clockOutAllConfirm ? "Confirm permanent Clock Out All" : "Permanently close all running Sessions";
-      footer.appendChild(
-        button(
-          `bp3-button bp3-small${clockOutAllConfirm ? " bp3-intent-danger" : ""}`,
-          confirmLabel,
-          () => {
-            if (!confirmation?.arm("clock-out-all", "popover")) {
-              renderPopover();
-              return;
-            }
-            resetClockOutConfirmation();
-            void run(() => clockOutAll());
-          },
-          { title: confirmTitle }
-        )
-      );
-    }
-    if (pausedItems.length > 0) {
-      footer.appendChild(button(
-        "bp3-button bp3-small",
-        "Resume All",
-        () => run(() => resumeAll()),
-        { title: "Resume paused Tasks with fresh Sessions" }
-      ));
-    }
-    footer.appendChild(
-      button("bp3-button bp3-small bp3-minimal bp3-icon-refresh", "", () => run(async () => refresh()), {
-        title: "Re-read clocks from the graph"
-      })
-    );
-    popover.appendChild(footer);
+    const options = surfaceOptions("popover");
+    options.emptyMessage = refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
+    renderSessionSurface(popover, model, options);
   }
-  const togglePopover = () => {
+  function renderSidebar() {
+    if (!sidebar)
+      return;
+    const model = sessionModel();
+    const refreshStatus = getLastRefreshStatus();
+    const options = surfaceOptions("sidebar");
+    options.emptyMessage = refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
+    renderSessionSurface(sidebar, model, options);
+  }
+  const syncSurfaceAria = (targetId) => {
+    buttonNode?.setAttribute("aria-expanded", targetId ? "true" : "false");
+    buttonNode?.setAttribute("aria-controls", targetId || POPOVER_ID);
+  };
+  const closeSidebar = ({ restoreFocus = true } = {}) => {
+    sidebar?.remove();
+    sidebar = null;
+    sidebarHost = null;
+    if (!popover)
+      syncSurfaceAria(null);
+    if (restoreFocus && buttonNode?.isConnected)
+      buttonNode.focus();
+  };
+  const findSidebarHost = () => document.querySelector(
+    "#right-sidebar-content, #roam-right-sidebar-content, #right-sidebar .rm-right-sidebar__content, #right-sidebar, .rm-right-sidebar"
+  ) || document.body;
+  const requestRoamSidebarOpen = () => {
+    try {
+      window.roamAlphaAPI?.ui?.rightSidebar?.open?.();
+    } catch (error) {
+      console.debug("[roam-logbook] right sidebar open helper unavailable", error);
+    }
+  };
+  const openSidebar = () => {
+    if (sidebar?.isConnected) {
+      sidebar.querySelector(".rlb-surface__close, button")?.focus();
+      return;
+    }
+    closePopover({ restoreFocus: false });
+    requestRoamSidebarOpen();
+    sidebarHost = findSidebarHost();
+    sidebar = el("section", "bp3-card rlb-sidebar");
+    if (sidebarHost === document.body)
+      sidebar.classList.add("rlb-sidebar--fallback");
+    sidebar.id = SIDEBAR_ID;
+    sidebar.setAttribute("role", "region");
+    sidebar.setAttribute("aria-labelledby", SIDEBAR_TITLE_ID);
+    sidebarHost.appendChild(sidebar);
+    syncSurfaceAria(SIDEBAR_ID);
+    refresh();
+    renderSidebar();
+    sidebar.querySelector("button")?.focus();
+  };
+  const togglePopover = (event) => {
+    if (event?.shiftKey) {
+      event.preventDefault();
+      openSidebar();
+      return;
+    }
+    closeSidebar({ restoreFocus: false });
     if (popover) {
       closePopover();
       return;
@@ -4210,8 +4614,7 @@ function createTopbar({
     popover.setAttribute("aria-labelledby", POPOVER_TITLE_ID);
     document.body.appendChild(popover);
     buttonNode?.setAttribute("aria-haspopup", "dialog");
-    buttonNode?.setAttribute("aria-controls", POPOVER_ID);
-    buttonNode?.setAttribute("aria-expanded", "true");
+    syncSurfaceAria(POPOVER_ID);
     renderPopover();
     positionPopover();
     document.addEventListener("mousedown", onDocumentMouseDown, true);
@@ -4226,8 +4629,7 @@ function createTopbar({
     }
   };
   confirmation?.setOnChange(() => {
-    if (popover)
-      renderPopover();
+    renderSurfaces();
   });
   const syncButtonLayout = (mode) => {
     if (layoutMode === mode)
@@ -4255,7 +4657,7 @@ function createTopbar({
       parallelNode.textContent = "";
       separatorNode.textContent = "";
       syncButtonLayout("idle");
-      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
+      buttonNode.title = pausedItems.length ? `${sessionCount2(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -4266,7 +4668,7 @@ function createTopbar({
     timeNode.textContent = formatElapsed(elapsed);
     if (entries.length > 1) {
       buttonNode.classList.add("rlb-topbar__button--parallel");
-      parallelNode.textContent = sessionCount(entries.length);
+      parallelNode.textContent = sessionCount2(entries.length);
       separatorNode.textContent = "";
       syncButtonLayout("parallel");
     } else {
@@ -4276,13 +4678,13 @@ function createTopbar({
       syncButtonLayout("single");
     }
     if (entries.length > 1) {
-      buttonNode.title = `${sessionCount(entries.length)} Running
+      buttonNode.title = `${sessionCount2(entries.length)} Running
 Primary timer: ${first.title}
 This session ${formatElapsed(elapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
       const target = targetMinutes(first.clockUid);
       const totalMinutes2 = first.priorMinutes + Math.floor(elapsed / 6e4);
-      buttonNode.title = `${sessionCount(entries.length)} Running
+      buttonNode.title = `${sessionCount2(entries.length)} Running
 Clocked in: ${first.title}
 This session ${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (target ? `
 Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(overrunMs(first, now))}` : `${formatElapsed(target * 6e4 - elapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
@@ -4296,21 +4698,8 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
       return;
     const now = nowDate();
     renderButton(entries, now);
-    if (popover) {
-      const byUid = new Map(entries.map((entry) => [entry.clockUid, entry]));
-      for (const meta of popover.querySelectorAll(".rlb-run__meta")) {
-        const entry = byUid.get(meta.dataset.clockUid);
-        if (!entry)
-          continue;
-        const primary = meta.querySelector(".rlb-run__meta-primary");
-        if (primary)
-          primary.textContent = rowFigures(entry, now);
-        const row = meta.closest(".rlb-run");
-        if (row) {
-          row.classList.toggle("rlb-run--overrun", isOverrun(entry, now));
-        }
-      }
-    }
+    updateSessionSurfaceElapsed(popover, entries, now);
+    updateSessionSurfaceElapsed(sidebar, entries, now);
   };
   const build = () => {
     container = el("div", "rlb-topbar");
@@ -4346,6 +4735,7 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     if (!container)
       build();
     const placement = afterNavigation(topbar);
+    syncTopbarLayout(placement);
     if (container.parentNode !== placement.parent || container.nextSibling !== placement.before) {
       placement.parent.insertBefore(container, placement.before);
     }
@@ -4454,6 +4844,29 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     element.getAttribute?.("data-name")
   ].filter((value) => typeof value === "string").join(" ").replaceAll("_", "-").toLowerCase();
   const isMainControl = (element) => element.matches?.('input, textarea, select, [contenteditable="true"]') || MAIN_CONTROL_PATTERN.test(controlSignals(element));
+  const containsMainControl = (element) => isMainControl(element) || Boolean(
+    element.querySelector?.('input, textarea, select, [contenteditable="true"]') || [...element.querySelectorAll?.("*") || []].some(isMainControl)
+  );
+  const syncTopbarLayout = (placement) => {
+    for (const host2 of layoutHosts)
+      host2.classList.remove("rlb-topbar__layout");
+    for (const host2 of searchHosts)
+      host2.classList.remove("rlb-topbar__search");
+    layoutHosts.clear();
+    searchHosts.clear();
+    const host = placement.parent;
+    if (!host?.classList)
+      return;
+    host.classList.add("rlb-topbar__layout");
+    layoutHosts.add(host);
+    for (const child of host.children) {
+      if (child === container || !containsMainControl(child))
+        continue;
+      child.classList.add("rlb-topbar__search");
+      searchHosts.add(child);
+      break;
+    }
+  };
   const navigationCluster = (signal, topbar) => {
     let anchor = signal.closest?.('button, a, [role="button"]') || signal;
     while (anchor.parentElement && anchor.parentElement !== topbar && ![...anchor.parentElement.querySelectorAll("*")].some(isMainControl)) {
@@ -4470,19 +4883,24 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
   };
   const remove = () => {
     closePopover();
+    closeSidebar({ restoreFocus: false });
+    for (const host of layoutHosts)
+      host.classList.remove("rlb-topbar__layout");
+    for (const host of searchHosts)
+      host.classList.remove("rlb-topbar__search");
+    layoutHosts.clear();
+    searchHosts.clear();
     container?.remove();
   };
   return {
     mount() {
       unsubscribe = subscribe(() => {
         renderButton();
-        if (popover)
-          renderPopover();
+        renderSurfaces();
       });
       unsubscribePaused = subscribe2(() => {
         renderButton();
-        if (popover)
-          renderPopover();
+        renderSurfaces();
       });
       ticker = setIntervalFn(tick, 1e3);
       attach2();
