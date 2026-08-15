@@ -90,6 +90,27 @@ async function waitForReady(client, sessionId) {
     throw new Error('Chromium fixture did not finish loading');
 }
 
+/**
+ * Keep the layout fixture launch deterministic on Ubuntu runners. The fixture
+ * evaluates only test-owned static HTML, so the CI sandbox trade-off is
+ * limited to this isolated browser process rather than the extension runtime.
+ */
+export function chromiumLaunchArgs(profile) {
+    return [
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--remote-debugging-port=0',
+        `--user-data-dir=${profile}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-extensions',
+        'about:blank',
+    ];
+}
+
 export async function withChromium(html, expression) {
     const executable = await findChromium();
     if (!executable) throw new Error('Chromium is unavailable');
@@ -97,16 +118,7 @@ export async function withChromium(html, expression) {
     const profile = await mkdtemp(join(tmpdir(), 'roam-logbook-layout-'));
     const browser = spawn(
         executable,
-        [
-            '--headless=new',
-            '--remote-debugging-port=0',
-            `--user-data-dir=${profile}`,
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-background-networking',
-            '--disable-extensions',
-            'about:blank',
-        ],
+        chromiumLaunchArgs(profile),
         { stdio: ['ignore', 'ignore', 'pipe'] }
     );
     let client;
