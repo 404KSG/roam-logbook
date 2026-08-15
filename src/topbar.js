@@ -35,6 +35,7 @@ const MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|ri
 
 export function createTopbar({
     onOpenDashboard,
+    onMutationResult = () => {},
     confirmation = createConfirmationController(),
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -245,9 +246,13 @@ export function createTopbar({
 
     const run = async action => {
         try {
-            await action();
+            const result = await action();
+            onMutationResult(result);
+            if (popover) renderPopover();
+            return result;
         } catch (error) {
             console.error('[roam-logbook]', error);
+            onMutationResult(error);
         }
         if (popover) renderPopover();
     };

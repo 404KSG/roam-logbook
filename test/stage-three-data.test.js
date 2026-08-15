@@ -6,7 +6,9 @@ import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 
 const { parseTimestamp } = await import('../src/time.js');
 const { parseClockLineDetailed } = await import('../src/org.js');
-const { readAllEntries } = await import('../src/entries.js');
+const { readAllEntries, readHierarchy } = await import('../src/entries.js');
+const { GraphReadError } = await import('../src/roam.js');
+const { getBlockString } = await import('../src/roam.js');
 const { buildDashboard } = await import('../src/stats.js');
 const { createDashboard } = await import('../src/dashboard.js');
 const { setExtensionAPI } = await import('../src/settings.js');
@@ -185,11 +187,60 @@ test('Dashboard keeps the last successful hierarchy when a refresh query fails, 
 
     assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /could not be refreshed/i);
     assert.equal(document.querySelector('.rlb-task-link__text').textContent, before);
+    assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /parent query unavailable/i);
+    assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /parent/i);
 
     graph.api.data.q = originalQuery;
     document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
     assert.equal(document.querySelector('.rlb-dashboard__notice'), null);
+    assert.equal(document.querySelector('.rlb-data-issues'), null);
     dashboard.destroy();
+});
+
+test('hierarchy read failures expose a structured GraphReadError issue', () => {
+    const graph = seed(false);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes('?parent-uid')) throw new Error('parent query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+
+    assert.throws(
+        () => readHierarchy(['health-task1']),
+        error => {
+            assert.equal(error instanceof GraphReadError, true);
+            assert.deepEqual(error.issue, {
+                kind: 'graph-read',
+                source: 'parent',
+                message: 'parent query unavailable',
+                affectedUids: ['health-task1'],
+            });
+            return true;
+        }
+    );
+});
+
+test('block-string adapter failures identify the affected uid', () => {
+    const graph = seed(false);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?s')) throw new Error('block string query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+
+    assert.throws(
+        () => getBlockString('health-task1'),
+        error => {
+            assert.equal(error instanceof GraphReadError, true);
+            assert.deepEqual(error.issue, {
+                kind: 'graph-read',
+                source: 'block-string',
+                message: 'block string query unavailable',
+                affectedUid: 'health-task1',
+            });
+            return true;
+        }
+    );
 });
 
 test('Dashboard treats a referenced parent string read failure as stale data, not a new root', () => {
@@ -217,6 +268,35 @@ test('Dashboard treats a referenced parent string read failure as stale data, no
 
     assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /last successful snapshot/i);
     assert.equal(document.querySelectorAll('.rlb-tree__cell').length > 0, true);
+    assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /block string query unavailable/i);
+    assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /block-string/i);
+    dashboard.destroy();
+});
+
+test('Dashboard exposes a structured issue when the first snapshot cannot be read', () => {
+    const graph = installGraph([
+        { uid: 'health-first-error-task', string: '{{[[TODO]]}} First error task', parent: null },
+        { uid: 'health-first-error-drawer', string: 'LOGBOOK::', parent: 'health-first-error-task' },
+        {
+            uid: 'health-first-error-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'health-first-error-drawer',
+        },
+    ]);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes('?parent-uid')) throw new Error('parent query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    assert.match(document.querySelector('.rlb-dashboard__notice')?.textContent || '', /no successful snapshot/i);
+    const issues = document.querySelector('.rlb-data-issues');
+    assert.ok(issues);
+    assert.match(issues.textContent, /parent query unavailable/i);
+    assert.equal(issues.querySelector('[aria-label]')?.getAttribute('aria-label').includes('parent'), true);
     dashboard.destroy();
 });
 

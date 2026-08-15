@@ -233,11 +233,36 @@ function taskTitle(string, { maxLength = Infinity } = {}) {
 
 // src/roam.js
 var GraphReadError = class extends Error {
-  constructor(message, { cause } = {}) {
+  constructor(message, { cause, issue } = {}) {
     super(message, { cause });
     this.name = "GraphReadError";
+    this.issue = issue || {
+      kind: "graph-read",
+      source: "graph",
+      message
+    };
   }
 };
+function graphReadIssue({ source, message, affectedUid, affectedUids } = {}) {
+  const issue = {
+    kind: "graph-read",
+    source: source || "graph",
+    message: message || "The graph could not be read."
+  };
+  if (typeof affectedUid === "string" && affectedUid)
+    issue.affectedUid = affectedUid;
+  if (Array.isArray(affectedUids) && affectedUids.length > 0) {
+    issue.affectedUids = [...new Set(affectedUids.filter((uid) => typeof uid === "string" && uid))];
+  }
+  return issue;
+}
+function withGraphReadIssue(error, details = {}) {
+  const message = error?.message || details.message || "The graph could not be read.";
+  return new GraphReadError(message, {
+    cause: error,
+    issue: graphReadIssue({ ...details, message })
+  });
+}
 function getApi() {
   return typeof window !== "undefined" && window.roamAlphaAPI || null;
 }
@@ -299,14 +324,19 @@ function query(datalog, ...args) {
 function getBlockString(uid) {
   if (!uid)
     return null;
-  const rows = validateQueryRows(
-    queryOrThrow(
-      "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
-      uid
-    ),
-    "block string",
-    (row) => row.length >= 1 && typeof row[0] === "string"
-  );
+  let rows;
+  try {
+    rows = validateQueryRows(
+      queryOrThrow(
+        "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
+        uid
+      ),
+      "block string",
+      (row) => row.length >= 1 && typeof row[0] === "string"
+    );
+  } catch (error) {
+    throw withGraphReadIssue(error, { source: "block-string", affectedUid: uid });
+  }
   return rows[0]?.[0] ?? null;
 }
 function resolveReferencedUid(uid) {
@@ -404,15 +434,20 @@ function queryEntryRows() {
     return queryOrThrow(entriesQuery("starts-with?"));
   } catch (error) {
     console.error("[roam-logbook] could not read logbook entries", error);
-    throw error;
+    throw withGraphReadIssue(error, { source: "entries" });
   }
 }
 function readAllEntries() {
-  const rows = validateQueryRows(
-    queryEntryRows(),
-    "logbook entry",
-    (row) => row.length >= 6 && typeof row[0] === "string" && typeof row[1] === "string" && typeof row[2] === "string" && typeof row[3] === "string" && (typeof row[4] === "string" || row[4] === null || row[4] === void 0) && (typeof row[5] === "string" || row[5] === null || row[5] === void 0)
-  );
+  let rows;
+  try {
+    rows = validateQueryRows(
+      queryEntryRows(),
+      "logbook entry",
+      (row) => row.length >= 6 && typeof row[0] === "string" && typeof row[1] === "string" && typeof row[2] === "string" && typeof row[3] === "string" && (typeof row[4] === "string" || row[4] === null || row[4] === void 0) && (typeof row[5] === "string" || row[5] === null || row[5] === void 0)
+    );
+  } catch (error) {
+    throw withGraphReadIssue(error, { source: "entries" });
+  }
   const entries = [];
   for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
     if (!isDrawerBlock(drawerString))
@@ -484,11 +519,16 @@ var readBlockStrings = (uids) => {
   if (uids.length === 0)
     return {};
   const result = {};
-  const rows = validateQueryRows(
-    queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-    "block string batch",
-    (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
-  );
+  let rows;
+  try {
+    rows = validateQueryRows(
+      queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+      "block string batch",
+      (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
+    );
+  } catch (error) {
+    throw withGraphReadIssue(error, { source: "block-string", affectedUids: uids });
+  }
   for (const [uid, string] of rows)
     result[uid] = string;
   return result;
@@ -501,11 +541,16 @@ function readHierarchy(taskUids) {
   const seeds = new Set(taskUids);
   if (seeds.size === 0)
     return { parentOf, stringOf, mirrorsOf, issues };
-  const mirrorRows = validateQueryRows(
-    queryOrThrow(MIRRORS_QUERY, [...seeds]),
-    "mirror",
-    (row) => row.length >= 3 && row.every((value) => typeof value === "string")
-  );
+  let mirrorRows;
+  try {
+    mirrorRows = validateQueryRows(
+      queryOrThrow(MIRRORS_QUERY, [...seeds]),
+      "mirror",
+      (row) => row.length >= 3 && row.every((value) => typeof value === "string")
+    );
+  } catch (error) {
+    throw withGraphReadIssue(error, { source: "hierarchy", affectedUids: [...seeds] });
+  }
   for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
     if (referencedBlockUid(mirrorString) !== targetUid)
       continue;
@@ -515,11 +560,16 @@ function readHierarchy(taskUids) {
   let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
     const next = [];
-    const parentRows = validateQueryRows(
-      query(PARENTS_QUERY, frontier),
-      "parent",
-      (row) => row.length >= 3 && row.every((value) => typeof value === "string")
-    );
+    let parentRows;
+    try {
+      parentRows = validateQueryRows(
+        query(PARENTS_QUERY, frontier),
+        "parent",
+        (row) => row.length >= 3 && row.every((value) => typeof value === "string")
+      );
+    } catch (error) {
+      throw withGraphReadIssue(error, { source: "parent", affectedUids: frontier });
+    }
     const referencedTargets = parentRows.map(([, , rawParentString]) => referencedBlockUid(rawParentString)).filter(Boolean);
     const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
     for (const [uid, rawParentUid, rawParentString] of parentRows) {
@@ -1306,14 +1356,13 @@ function createDashboard({
     const now = nowFn();
     let snapshot;
     let refreshNotice = "";
-    let hierarchyIssues = [];
+    let transientIssues = [];
     try {
       const candidate = readDashboardSnapshot();
-      hierarchyIssues = candidate.hierarchy.issues || [];
       lastSnapshot = candidate;
       snapshot = candidate;
     } catch (error) {
-      hierarchyIssues = error.issues || hierarchyIssues;
+      transientIssues = error.issue ? [error.issue] : error.issues || [];
       if (!lastSnapshot) {
         summaryNode.replaceChildren();
         const notice4 = el(
@@ -1322,11 +1371,7 @@ function createDashboard({
           "Graph data could not be refreshed; no successful snapshot is available yet."
         );
         notice4.setAttribute("role", "alert");
-        const issueRows = hierarchyIssues.map((issue) => ({
-          title: issue.title || issue.parentUid || "Unresolved graph data",
-          rawClock: issue.rawClock || "(hierarchy query)",
-          issues: [issue]
-        }));
+        const issueRows = transientIssues.map(issueRow);
         bodyNode.replaceChildren(
           notice4,
           ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
@@ -1358,11 +1403,8 @@ function createDashboard({
     }
     const issues = [
       ...model.issues,
-      ...hierarchyIssues.map((issue) => ({
-        title: issue.title || issue.parentUid || "Unresolved graph data",
-        rawClock: issue.rawClock || "(hierarchy query)",
-        issues: [issue]
-      }))
+      ...(hierarchy.issues || []).map(issueRow),
+      ...transientIssues.map(issueRow)
     ];
     if (issues.length > 0)
       bodyNode.appendChild(dataIssuesSection(issues));
@@ -1380,6 +1422,11 @@ function createDashboard({
     bodyNode.appendChild(tasksSection(model.tree));
     startLiveTicker();
   };
+  const issueRow = (issue) => ({
+    title: issue.title || issue.parentUid || issue.affectedUid || "Unresolved graph data",
+    rawClock: issue.rawClock || (issue.source ? `(graph ${issue.source} read)` : "(hierarchy query)"),
+    issues: [issue]
+  });
   const dataIssuesSection = (issues) => {
     const details = el("details", "rlb-data-issues");
     const summary = el(
@@ -1390,7 +1437,8 @@ function createDashboard({
     details.appendChild(summary);
     const list = el("div", "rlb-data-issues__list");
     for (const entry of issues) {
-      const issueText = (entry.issues || [entry.issue]).filter(Boolean).map((issue) => issue.message).join(" ");
+      const entryIssues = (entry.issues || [entry.issue]).filter(Boolean);
+      const issueText = entryIssues.map((issue) => `${issue.source ? `${issue.source}: ` : ""}${issue.message}`).join(" ");
       const raw = entry.rawClock || "(CLOCK text unavailable)";
       const label = `Task: ${entry.title} \xB7 CLOCK: ${raw} \xB7 Issue: ${issueText}`;
       const item = el("div", "rlb-data-issues__item", label);
@@ -2001,16 +2049,23 @@ var cleanRecord = (value) => {
   }
   return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed, ...clockUid ? { clockUid } : {} };
 };
-var cleanPending = (value) => {
+var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
   const record = cleanRecord(value);
   if (!record)
     return null;
-  const hasClockUid = Object.prototype.hasOwnProperty.call(value, "clockUid");
-  if (hasClockUid && value.clockUid !== null && (typeof value.clockUid !== "string" || !value.clockUid)) {
-    return null;
-  }
   const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
-  return { ...record, clockUid, legacy: !hasClockUid };
+  const explicitLegacy = legacy || value.legacy === true || Number(value.sourceVersion) === LEGACY_VERSION;
+  const sourceVersion = explicitLegacy ? LEGACY_VERSION : Number.isInteger(Number(value.sourceVersion)) ? Number(value.sourceVersion) : version;
+  return {
+    ...record,
+    clockUid,
+    legacy: explicitLegacy,
+    sourceVersion,
+    ...clockUid ? {} : {
+      recoveryState: explicitLegacy ? "legacy-fallback" : "conflict",
+      ...explicitLegacy ? {} : { recoveryIssue: "missing-clockUid" }
+    }
+  };
 };
 var serialized2 = () => JSON.stringify({
   version: VERSION2,
@@ -2057,7 +2112,7 @@ function load2() {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (parsed?.version === VERSION2 && parsed.data && Array.isArray(parsed.data.items)) {
       const loadedItems = parsed.data.items.map(cleanRecord);
-      const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map(cleanPending) : [];
+      const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map((value) => cleanPending(value, { version: VERSION2 })) : [];
       if (loadedItems.some((item) => !item) || loadedPending.some((item) => !item)) {
         throw new Error("invalid paused-task record");
       }
@@ -2065,14 +2120,22 @@ function load2() {
       const pendingByTask = new Map(loadedPending.map((item) => [item.taskUid, item]));
       items = [...byTask.values()];
       pendingResume = [...pendingByTask.values()];
+      if (pendingResume.some((item) => item.recoveryState === "conflict")) {
+        const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
+        notice3 = firstWarning ? "A current pending Resume has no exact Session association; it was retained as a conflict." : "";
+      }
       return getPaused();
     }
     if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
       const loaded = parsed.items.map(cleanRecord);
-      if (loaded.some((item) => !item))
+      const loadedPending = Array.isArray(parsed.pendingResume) ? parsed.pendingResume.map(
+        (value) => cleanPending(value, { version: LEGACY_VERSION, legacy: true })
+      ) : [];
+      if (loaded.some((item) => !item) || loadedPending.some((item) => !item)) {
         throw new Error("invalid legacy paused-task record");
+      }
       items = [...new Map(loaded.map((item) => [item.taskUid, item])).values()];
-      pendingResume = [];
+      pendingResume = [...new Map(loadedPending.map((item) => [item.taskUid, item])).values()];
       persist();
       return getPaused();
     }
@@ -2205,6 +2268,7 @@ var removeTask = (taskUid) => {
 async function recoverPending({ running: running2 = [] } = {}) {
   let recovered = 0;
   let failed = 0;
+  let legacyRecovered = 0;
   const conflicts = [];
   const legacyToCreate = [];
   const byClockUid = new Map(running2.map((entry) => [entry.clockUid, entry]));
@@ -2220,7 +2284,7 @@ async function recoverPending({ running: running2 = [] } = {}) {
         });
         continue;
       }
-    } else {
+    } else if (pending.legacy === true) {
       const matches = running2.filter((item) => item.taskUid === pending.taskUid);
       if (matches.length === 1)
         entry = matches[0];
@@ -2234,6 +2298,12 @@ async function recoverPending({ running: running2 = [] } = {}) {
         legacyToCreate.push(pending);
         continue;
       }
+    } else {
+      conflicts.push({
+        taskUid: pending.taskUid,
+        reason: "current pending Resume has no clockUid; exact Session association is required"
+      });
+      continue;
     }
     try {
       applyPomodoro({ ...pending, clockUid: entry.clockUid });
@@ -2241,25 +2311,42 @@ async function recoverPending({ running: running2 = [] } = {}) {
       removeTask(pending.taskUid);
       persist();
       recovered += 1;
+      if (pending.legacy === true)
+        legacyRecovered += 1;
     } catch (error) {
       failed += 1;
       console.error("[roam-logbook] could not recover paused task", pending.taskUid, error);
     }
   }
-  return { recovered, failed, conflicts, legacyToCreate };
+  return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
 var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
 async function resumeRecord(record, now) {
   let pending = pendingResume.find((item) => item.taskUid === record.taskUid);
+  let createdPending = false;
   if (!pending) {
-    pending = { ...record, clockUid: null };
+    pending = {
+      ...record,
+      clockUid: null,
+      legacy: false,
+      sourceVersion: VERSION2,
+      recoveryState: "in-flight"
+    };
     pendingResume.push(pending);
     persist();
+    createdPending = true;
   }
-  let entry = pending.clockUid ? getRunning().find((item) => item.clockUid === pending.clockUid) : getRunning().find((item) => item.taskUid === record.taskUid);
+  let entry = pending.clockUid ? getRunning().find((item) => item.clockUid === pending.clockUid) : pending.legacy === true ? getRunning().find((item) => item.taskUid === record.taskUid) : null;
   if (pending.clockUid && (!entry || entry.taskUid !== record.taskUid)) {
     const conflict = new Error(
       `Resume conflict for ${record.taskUid}: exact Session ${pending.clockUid} is unavailable.`
+    );
+    conflict.conflict = true;
+    throw conflict;
+  }
+  if (!pending.clockUid && !pending.legacy && !createdPending) {
+    const conflict = new Error(
+      `Resume conflict for ${record.taskUid}: current pending Resume has no exact clockUid.`
     );
     conflict.conflict = true;
     throw conflict;
@@ -2279,6 +2366,9 @@ async function resumeRecord(record, now) {
   }
   pending.clockUid = entry.clockUid;
   pending.legacy = false;
+  pending.sourceVersion = VERSION2;
+  delete pending.recoveryState;
+  delete pending.recoveryIssue;
   persist();
   applyPomodoro({ ...record, clockUid: entry.clockUid });
   pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
@@ -2382,11 +2472,15 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   let resumed = recovered.recovered;
   let failed = recovered.failed + uncertain + recovered.conflicts.length;
+  let legacyRecovered = recovered.legacyRecovered;
+  const legacyRecovery = recovered.legacyRecovered > 0 || recovered.legacyToCreate.length > 0;
   const completedTasks = /* @__PURE__ */ new Set();
   for (const record of ready) {
     try {
       await resumeRecord(record, now);
       resumed += 1;
+      if (record.legacy === true)
+        legacyRecovered += 1;
       completedTasks.add(record.taskUid);
     } catch (error) {
       failed += 1;
@@ -2417,10 +2511,21 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       `${recovered.conflicts.length} pending Resume conflict${recovered.conflicts.length === 1 ? "" : "s"} were retained; exact Session associations were not changed.`
     );
   }
+  if (legacyRecovery) {
+    messages.push("Legacy Resume recovery used explicit Task matching.");
+  }
   notice3 = messages.join(" ");
   persist();
   notify2();
-  return { resumed, failed, pruned, satisfied, blocked: false };
+  return {
+    resumed,
+    failed,
+    pruned,
+    satisfied,
+    blocked: false,
+    legacyRecovery,
+    legacyRecovered
+  };
 }
 async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let outcome;
@@ -2470,6 +2575,30 @@ function reset3() {
   notice3 = "";
   unsupportedRaw2 = null;
   listeners2.clear();
+}
+
+// src/action-result.js
+var GRAPH_SYNC_RETRY_NOTICE = "Graph state could not be confirmed; no further changes were made. Retry after Roam finishes syncing.";
+var presentedResults = /* @__PURE__ */ new WeakSet();
+function mutationResultNotice(result) {
+  if (!result)
+    return "";
+  const message = typeof result?.message === "string" ? result.message : result?.error?.message;
+  if (result?.uncertain === true || result?.partial === true || result?.retry || typeof message === "string" && /Graph state could not be confirmed/i.test(message)) {
+    return GRAPH_SYNC_RETRY_NOTICE;
+  }
+  return "";
+}
+function presentMutationResult(result, notifyUser) {
+  if (!result || typeof result !== "object" && typeof result !== "function")
+    return result;
+  if (presentedResults.has(result))
+    return result;
+  presentedResults.add(result);
+  const notice4 = mutationResultNotice(result);
+  if (notice4)
+    notifyUser?.(notice4);
+  return result;
 }
 
 // src/styles.js
@@ -3493,6 +3622,8 @@ var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
 var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 function createTopbar({
   onOpenDashboard,
+  onMutationResult = () => {
+  },
   confirmation = createConfirmationController(),
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -3677,9 +3808,14 @@ function createTopbar({
   };
   const run = async (action) => {
     try {
-      await action();
+      const result = await action();
+      onMutationResult(result);
+      if (popover)
+        renderPopover();
+      return result;
     } catch (error) {
       console.error("[roam-logbook]", error);
+      onMutationResult(error);
     }
     if (popover)
       renderPopover();
@@ -4127,7 +4263,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
   const confirmation = createConfirmationController();
   const topbar = createTopbar({
     confirmation,
-    onOpenDashboard: (trigger) => dashboard.open({ returnFocusTo: trigger })
+    onOpenDashboard: (trigger) => dashboard.open({ returnFocusTo: trigger }),
+    onMutationResult: (result) => presentMutationResult(result, notifyUser)
   });
   let destroyed = false;
   let detachPomodoro = null;
@@ -4151,10 +4288,13 @@ function createController({ extensionAPI: extensionAPI2 }) {
   };
   const guard = async (action) => {
     try {
-      await action();
+      const result = await action();
+      return presentMutationResult(result, notifyUser);
     } catch (error) {
       console.error("[roam-logbook]", error);
-      notifyUser(error?.message || "Logbook could not complete that action.");
+      notifyUser(
+        mutationResultNotice(error) || error?.message || "Logbook could not complete that action."
+      );
     }
   };
   const clockInFocused = () => guard(async () => {
@@ -4163,7 +4303,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       notifyUser("No focused block. Select a block before clocking in.");
       return;
     }
-    await clockIn(uid);
+    return clockIn(uid);
   });
   const registerSettings = () => {
     extensionAPI2.settings.panel.create({
@@ -4247,7 +4387,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
           notifyUser("No focused block. Select a block before clocking out.");
           return;
         }
-        await clockOutBlock(uid);
+        return clockOutBlock(uid);
       })
     );
     add(
@@ -4257,7 +4397,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
           notifyUser("Clock Out All is armed. Run again within 5 seconds to confirm.");
           return;
         }
-        await clockOutAll();
+        return clockOutAll();
       })
     );
     add(PALETTE_COMMANDS[3], () => dashboard.open());

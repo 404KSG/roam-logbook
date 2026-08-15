@@ -322,6 +322,168 @@ test('a missing exact pending Session never transfers its Pomodoro remainder to 
     assert.match(paused.getNotice(), /conflict|exact Session/i);
 });
 
+test('current pending Resume without a clockUid is a conflict, never a task fallback', async () => {
+    const { clock, paused, pomodoro } = await install();
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: TASK.uid,
+                        title: 'current pending without association',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 9 * 60_000,
+                        clockUid: null,
+                    },
+                ],
+            },
+        })
+    );
+    paused.load();
+    pomodoro.load();
+
+    await clock.clockIn(TASK.uid, { now: T0 });
+    const laterUid = clock.getRunning()[0].clockUid;
+    const result = await paused.resumeAll({ now: new Date(T0.getTime() + 1_000) });
+
+    assert.equal(result.resumed, 0);
+    assert.equal(result.legacyRecovery, false);
+    assert.equal(paused.getPendingResume().length, 1);
+    assert.equal(paused.getPendingResume()[0].recoveryState, 'conflict');
+    assert.notEqual(pomodoro.targetDurationMs(laterUid), 9 * 60_000);
+    assert.match(paused.getNotice(), /conflict|clockUid|exact Session/i);
+});
+
+test('current pending Resume without a clockUid cannot create a replacement Session', async () => {
+    const { clock, paused, pomodoro } = await install();
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: TASK.uid,
+                        title: 'current pending without association',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 9 * 60_000,
+                        clockUid: '',
+                    },
+                ],
+            },
+        })
+    );
+    paused.load();
+    pomodoro.load();
+
+    const result = await paused.resumeAll({ now: T0 });
+
+    assert.equal(result.resumed, 0);
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(paused.getPendingResume().length, 1);
+    assert.equal(pomodoro.targetDurationMs('new-clock'), null);
+    assert.match(paused.getNotice(), /conflict|clockUid/i);
+});
+
+test('current pending Resume conflict survives repeated reload without consuming or rebinding', async () => {
+    const { paused } = await install();
+    const raw = JSON.stringify({
+        version: 2,
+        data: {
+            items: [],
+            pendingResume: [
+                {
+                    taskUid: TASK.uid,
+                    title: 'reload-safe conflict',
+                    pausedAtMs: T0.getTime(),
+                    pomodoroRemainingMs: 6 * 60_000,
+                    clockUid: null,
+                },
+            ],
+        },
+    });
+    store.set('pausedBatch', raw);
+
+    paused.load();
+    const first = paused.getPendingResume();
+    paused.reset();
+    paused.load();
+    const second = paused.getPendingResume();
+
+    assert.deepEqual(second, first);
+    assert.equal(second[0].legacy, false);
+    assert.equal(second[0].recoveryState, 'conflict');
+    assert.equal(store.get('pausedBatch'), raw);
+});
+
+test('explicit legacy pending Resume uses task fallback and reports legacy recovery', async () => {
+    const { clock, paused, pomodoro } = await install();
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: TASK.uid,
+                        title: 'legacy pending association',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 9 * 60_000,
+                        legacy: true,
+                        sourceVersion: 1,
+                    },
+                ],
+            },
+        })
+    );
+    paused.load();
+    pomodoro.load();
+
+    await clock.clockIn(TASK.uid, { now: T0 });
+    const runningUid = clock.getRunning()[0].clockUid;
+    const result = await paused.resumeAll({ now: new Date(T0.getTime() + 1_000) });
+
+    assert.equal(result.resumed, 1);
+    assert.equal(result.legacyRecovery, true);
+    assert.equal(result.legacyRecovered, 1);
+    assert.equal(paused.getPendingResume().length, 0);
+    assert.equal(pomodoro.targetDurationMs(runningUid), 9 * 60_000);
+    assert.match(paused.getNotice(), /legacy.*recovery|legacy.*Task matching/i);
+});
+
+test('version-one pending Resume is migrated with an explicit legacy marker', async () => {
+    const { paused } = await install();
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 1,
+            items: [],
+            pendingResume: [
+                {
+                    taskUid: TASK.uid,
+                    title: 'migrated pending association',
+                    pausedAtMs: T0.getTime(),
+                    pomodoroRemainingMs: 4 * 60_000,
+                },
+            ],
+        })
+    );
+
+    paused.load();
+
+    const pending = paused.getPendingResume();
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].legacy, true);
+    assert.equal(pending[0].sourceVersion, 1);
+    assert.equal(JSON.parse(store.get('pausedBatch')).data.pendingResume[0].legacy, true);
+    assert.equal(JSON.parse(store.get('pausedBatch')).data.pendingResume[0].sourceVersion, 1);
+});
+
 test('legacy Pause and Pomodoro settings migrate to versioned data without losing values', async () => {
     const { paused, pomodoro } = await install();
     store.set(

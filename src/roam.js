@@ -9,10 +9,36 @@
 import { referencedBlockUid } from './org.js';
 
 export class GraphReadError extends Error {
-    constructor(message, { cause } = {}) {
+    constructor(message, { cause, issue } = {}) {
         super(message, { cause });
         this.name = 'GraphReadError';
+        this.issue = issue || {
+            kind: 'graph-read',
+            source: 'graph',
+            message,
+        };
     }
+}
+
+export function graphReadIssue({ source, message, affectedUid, affectedUids } = {}) {
+    const issue = {
+        kind: 'graph-read',
+        source: source || 'graph',
+        message: message || 'The graph could not be read.',
+    };
+    if (typeof affectedUid === 'string' && affectedUid) issue.affectedUid = affectedUid;
+    if (Array.isArray(affectedUids) && affectedUids.length > 0) {
+        issue.affectedUids = [...new Set(affectedUids.filter(uid => typeof uid === 'string' && uid))];
+    }
+    return issue;
+}
+
+export function withGraphReadIssue(error, details = {}) {
+    const message = error?.message || details.message || 'The graph could not be read.';
+    return new GraphReadError(message, {
+        cause: error,
+        issue: graphReadIssue({ ...details, message }),
+    });
 }
 
 export function getApi() {
@@ -98,14 +124,19 @@ export function query(datalog, ...args) {
 
 export function getBlockString(uid) {
     if (!uid) return null;
-    const rows = validateQueryRows(
-        queryOrThrow(
-        '[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]',
-        uid
-        ),
-        'block string',
-        row => row.length >= 1 && typeof row[0] === 'string'
-    );
+    let rows;
+    try {
+        rows = validateQueryRows(
+            queryOrThrow(
+                '[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]',
+                uid
+            ),
+            'block string',
+            row => row.length >= 1 && typeof row[0] === 'string'
+        );
+    } catch (error) {
+        throw withGraphReadIssue(error, { source: 'block-string', affectedUid: uid });
+    }
     return rows[0]?.[0] ?? null;
 }
 

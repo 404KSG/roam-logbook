@@ -145,13 +145,17 @@ or `RLB_BUILD_OUTFILE=/tmp/extension.js npm run build`. `npm run verify:bundle`
 builds into a temporary directory and compares the result byte-for-byte with the
 checked-in bundle; `npm run check` also validates the CI workflow contract and
 runs this drift check without rewriting the working tree. Commit the bundle
-alongside the source.
+alongside the source. The local `verify:workflow` command is a static contract
+check; GitHub Actions additionally runs the real pinned Docker image
+`rhysd/actionlint:1.7.7`. The local check does not download or execute Docker.
 
 ### Release checklist
 
 - Source commit and generated `extension.js` are present and `npm run check` is green.
 - A clean clone runs `npm ci`, `npm run check`, and `npm run verify:bundle`.
 - Required Chromium browser-layout tests and the final-bundle lifecycle smoke pass.
+- CI's real `rhysd/actionlint:1.7.7` job is green; the local workflow check is
+  only a static contract and is not a substitute for that CI execution.
 - Depot build output is inspected before release; the Depot PR test count is updated
   at final publication time.
 - Run the real Roam live smoke manually (`npm run verify:live`) against a disposable

@@ -101,8 +101,9 @@ ones, and real Roam uids are 9.
 
 - Commit source and generated `extension.js` together.
 - Run `npm ci`, `npm run check`, and `npm run verify:bundle` from a clean clone.
-- Confirm `npm run verify:workflow` passes; it is the repository's lightweight
-  actionlint substitute when actionlint is unavailable.
+- Confirm `npm run verify:workflow` passes; it is a local static workflow contract
+  check. GitHub Actions separately runs the real pinned Docker actionlint image
+  `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release.
 - Run `npm run verify:live` manually against a disposable real graph; do not call

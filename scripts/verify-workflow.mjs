@@ -10,6 +10,8 @@ const required = [
     'npm run verify:workflow',
     'apt-get install --yes chromium',
     'CHROME_BIN: /usr/bin/chromium',
+    'uses: docker://rhysd/actionlint:1.7.7',
+    'args: -color',
 ];
 
 for (const fragment of required) {
@@ -22,4 +24,6 @@ if (/skip|continue-on-error:\s*true/i.test(workflow)) {
     throw new Error('CI workflow must not silently skip required verification');
 }
 
-console.log('CI workflow contract is present: Chromium, unit/layout tests, lint, bundle verification.');
+console.log(
+    'CI workflow contract is present: pinned actionlint, Chromium, unit/layout tests, lint, bundle verification.'
+);

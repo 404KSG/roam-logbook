@@ -65,14 +65,13 @@ export function createDashboard({
         const now = nowFn();
         let snapshot;
         let refreshNotice = '';
-        let hierarchyIssues = [];
+        let transientIssues = [];
         try {
             const candidate = readDashboardSnapshot();
-            hierarchyIssues = candidate.hierarchy.issues || [];
             lastSnapshot = candidate;
             snapshot = candidate;
         } catch (error) {
-            hierarchyIssues = error.issues || hierarchyIssues;
+            transientIssues = error.issue ? [error.issue] : error.issues || [];
             if (!lastSnapshot) {
                 summaryNode.replaceChildren();
                 const notice = el(
@@ -81,11 +80,7 @@ export function createDashboard({
                     'Graph data could not be refreshed; no successful snapshot is available yet.'
                 );
                 notice.setAttribute('role', 'alert');
-                const issueRows = hierarchyIssues.map(issue => ({
-                    title: issue.title || issue.parentUid || 'Unresolved graph data',
-                    rawClock: issue.rawClock || '(hierarchy query)',
-                    issues: [issue],
-                }));
+                const issueRows = transientIssues.map(issueRow);
                 bodyNode.replaceChildren(
                     notice,
                     ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
@@ -125,11 +120,8 @@ export function createDashboard({
 
         const issues = [
             ...model.issues,
-            ...hierarchyIssues.map(issue => ({
-                title: issue.title || issue.parentUid || 'Unresolved graph data',
-                rawClock: issue.rawClock || '(hierarchy query)',
-                issues: [issue],
-            })),
+            ...(hierarchy.issues || []).map(issueRow),
+            ...transientIssues.map(issueRow),
         ];
         if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
 
@@ -150,6 +142,14 @@ export function createDashboard({
         startLiveTicker();
     };
 
+    const issueRow = issue => ({
+        title: issue.title || issue.parentUid || issue.affectedUid || 'Unresolved graph data',
+        rawClock:
+            issue.rawClock ||
+            (issue.source ? `(graph ${issue.source} read)` : '(hierarchy query)'),
+        issues: [issue],
+    });
+
     const dataIssuesSection = issues => {
         const details = el('details', 'rlb-data-issues');
         const summary = el(
@@ -160,7 +160,10 @@ export function createDashboard({
         details.appendChild(summary);
         const list = el('div', 'rlb-data-issues__list');
         for (const entry of issues) {
-            const issueText = (entry.issues || [entry.issue]).filter(Boolean).map(issue => issue.message).join(' ');
+            const entryIssues = (entry.issues || [entry.issue]).filter(Boolean);
+            const issueText = entryIssues
+                .map(issue => `${issue.source ? `${issue.source}: ` : ''}${issue.message}`)
+                .join(' ');
             const raw = entry.rawClock || '(CLOCK text unavailable)';
             const label = `Task: ${entry.title} · CLOCK: ${raw} · Issue: ${issueText}`;
             const item = el('div', 'rlb-data-issues__item', label);

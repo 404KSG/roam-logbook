@@ -17,6 +17,7 @@ import {
     query,
     queryOrThrow,
     validateQueryRows,
+    withGraphReadIssue,
 } from './roam.js';
 
 // Filter on the drawer rather than on `CLOCK:` so that hand-written entries with
@@ -49,7 +50,7 @@ function queryEntryRows() {
         return queryOrThrow(entriesQuery('starts-with?'));
     } catch (error) {
         console.error('[roam-logbook] could not read logbook entries', error);
-        throw error;
+        throw withGraphReadIssue(error, { source: 'entries' });
     }
 }
 
@@ -75,18 +76,23 @@ function queryEntryRows() {
 
 /** Every parseable clock entry in the graph, newest start first. */
 export function readAllEntries() {
-    const rows = validateQueryRows(
-        queryEntryRows(),
-        'logbook entry',
-        row =>
-            row.length >= 6 &&
-            typeof row[0] === 'string' &&
-            typeof row[1] === 'string' &&
-            typeof row[2] === 'string' &&
-            typeof row[3] === 'string' &&
-            (typeof row[4] === 'string' || row[4] === null || row[4] === undefined) &&
-            (typeof row[5] === 'string' || row[5] === null || row[5] === undefined)
-    );
+    let rows;
+    try {
+        rows = validateQueryRows(
+            queryEntryRows(),
+            'logbook entry',
+            row =>
+                row.length >= 6 &&
+                typeof row[0] === 'string' &&
+                typeof row[1] === 'string' &&
+                typeof row[2] === 'string' &&
+                typeof row[3] === 'string' &&
+                (typeof row[4] === 'string' || row[4] === null || row[4] === undefined) &&
+                (typeof row[5] === 'string' || row[5] === null || row[5] === undefined)
+        );
+    } catch (error) {
+        throw withGraphReadIssue(error, { source: 'entries' });
+    }
     const entries = [];
 
     for (const [clockUid, clockString, drawerString, taskUid, taskString, pageTitle] of rows) {
@@ -182,11 +188,16 @@ const BLOCK_STRINGS_QUERY = `[:find ?uid ?string
 const readBlockStrings = uids => {
     if (uids.length === 0) return {};
     const result = {};
-    const rows = validateQueryRows(
-        queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-        'block string batch',
-        row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
-    );
+    let rows;
+    try {
+        rows = validateQueryRows(
+            queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+            'block string batch',
+            row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
+        );
+    } catch (error) {
+        throw withGraphReadIssue(error, { source: 'block-string', affectedUids: uids });
+    }
     for (const [uid, string] of rows) result[uid] = string;
     return result;
 };
@@ -214,11 +225,16 @@ export function readHierarchy(taskUids) {
 
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf, issues };
 
-    const mirrorRows = validateQueryRows(
-        queryOrThrow(MIRRORS_QUERY, [...seeds]),
-        'mirror',
-        row => row.length >= 3 && row.every(value => typeof value === 'string')
-    );
+    let mirrorRows;
+    try {
+        mirrorRows = validateQueryRows(
+            queryOrThrow(MIRRORS_QUERY, [...seeds]),
+            'mirror',
+            row => row.length >= 3 && row.every(value => typeof value === 'string')
+        );
+    } catch (error) {
+        throw withGraphReadIssue(error, { source: 'hierarchy', affectedUids: [...seeds] });
+    }
     for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
         // `:block/refs` also fires for a block that merely mentions the task
         // in passing; only a block that is *nothing but* the reference counts.
@@ -230,11 +246,16 @@ export function readHierarchy(taskUids) {
     let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
     for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
         const next = [];
-        const parentRows = validateQueryRows(
-            query(PARENTS_QUERY, frontier),
-            'parent',
-            row => row.length >= 3 && row.every(value => typeof value === 'string')
-        );
+        let parentRows;
+        try {
+            parentRows = validateQueryRows(
+                query(PARENTS_QUERY, frontier),
+                'parent',
+                row => row.length >= 3 && row.every(value => typeof value === 'string')
+            );
+        } catch (error) {
+            throw withGraphReadIssue(error, { source: 'parent', affectedUids: frontier });
+        }
         const referencedTargets = parentRows
             .map(([, , rawParentString]) => referencedBlockUid(rawParentString))
             .filter(Boolean);

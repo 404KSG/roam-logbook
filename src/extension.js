@@ -14,6 +14,7 @@ import { getBlockString, getFocusedBlockUid } from './roam.js';
 import { isTaskBlock } from './org.js';
 import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
+import { mutationResultNotice, presentMutationResult } from './action-result.js';
 import {
     normalizeChecked,
     normalizePositiveMinutes,
@@ -47,6 +48,7 @@ function createController({ extensionAPI }) {
     const topbar = createTopbar({
         confirmation,
         onOpenDashboard: trigger => dashboard.open({ returnFocusTo: trigger }),
+        onMutationResult: result => presentMutationResult(result, notifyUser),
     });
     let destroyed = false;
     let detachPomodoro = null;
@@ -74,10 +76,15 @@ function createController({ extensionAPI }) {
 
     const guard = async action => {
         try {
-            await action();
+            const result = await action();
+            return presentMutationResult(result, notifyUser);
         } catch (error) {
             console.error('[roam-logbook]', error);
-            notifyUser(error?.message || 'Logbook could not complete that action.');
+            notifyUser(
+                mutationResultNotice(error) ||
+                    error?.message ||
+                    'Logbook could not complete that action.'
+            );
         }
     };
 
@@ -88,7 +95,7 @@ function createController({ extensionAPI }) {
                 notifyUser('No focused block. Select a block before clocking in.');
                 return;
             }
-            await clock.clockIn(uid);
+            return clock.clockIn(uid);
         });
 
     const registerSettings = () => {
@@ -179,7 +186,7 @@ function createController({ extensionAPI }) {
                     notifyUser('No focused block. Select a block before clocking out.');
                     return;
                 }
-                await clock.clockOutBlock(uid);
+                return clock.clockOutBlock(uid);
             })
         );
         add(PALETTE_COMMANDS[2], () =>
@@ -188,7 +195,7 @@ function createController({ extensionAPI }) {
                     notifyUser('Clock Out All is armed. Run again within 5 seconds to confirm.');
                     return;
                 }
-                await paused.clockOutAll();
+                return paused.clockOutAll();
             })
         );
         add(PALETTE_COMMANDS[3], () => dashboard.open());

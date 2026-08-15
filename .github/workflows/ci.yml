@@ -5,6 +5,15 @@ on:
   pull_request:
 
 jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint 1.7.7
+        # The pinned Docker image executes the real actionlint binary in CI.
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
   workflow-contract:
     runs-on: ubuntu-latest
     steps:

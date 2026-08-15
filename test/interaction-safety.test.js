@@ -67,6 +67,28 @@ const openPopover = () => {
 const footerAction = label =>
     [...document.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === label);
 
+const failNextPostWriteReads = () => {
+    const originalQuery = graph.api.data.q;
+    const originalUpdate = graph.api.data.block.update;
+    let remaining = 0;
+    graph.api.data.block.update = async args => {
+        const result = await originalUpdate(args);
+        remaining = 2;
+        return result;
+    };
+    graph.api.data.q = (...args) => {
+        if (remaining > 0) {
+            remaining -= 1;
+            throw new Error('Roam is still syncing after the write');
+        }
+        return originalQuery(...args);
+    };
+    return () => {
+        graph.api.data.q = originalQuery;
+        graph.api.data.block.update = originalUpdate;
+    };
+};
+
 test.beforeEach(() => {
     extension.onunload();
     document.body.innerHTML = '<div class="rm-topbar"></div>';
@@ -134,6 +156,56 @@ test('Command Palette Clock Out All requires a second invocation before writing'
 
     await command();
     assert.equal(clock.getRunning().length, 0, 'the second command invocation performs the confirmed action');
+});
+
+test('Command Palette presents an uncertain mutation result once and preserves success silence', async () => {
+    focused = TASK.uid;
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    const command = paletteCommands.get('Logbook: Clock out current block');
+    const restore = failNextPostWriteReads();
+    try {
+        await command();
+    } finally {
+        restore();
+    }
+
+    assert.equal(
+        toasts.filter(message => /Graph state could not be confirmed; no further changes were made\./.test(message)).length,
+        1
+    );
+    assert.match(toasts.join(' '), /Retry after Roam finishes syncing/i);
+
+    toasts.length = 0;
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    assert.doesNotMatch(toasts.join(' '), /Graph state could not be confirmed/i);
+});
+
+test('context menu presents an uncertain mutation result without continuing to write', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    const command = contextCommands.get('Logbook: Clock out');
+    const restore = failNextPostWriteReads();
+    try {
+        await command.callback({ 'block-uid': TASK.uid });
+    } finally {
+        restore();
+    }
+
+    assert.match(toasts.join(' '), /Graph state could not be confirmed.*Retry after Roam finishes syncing/i);
+    assert.equal(clock.getRunning().length, 1, 'the last valid running snapshot remains visible');
+});
+
+test('topbar per-session action presents an uncertain mutation result', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    const popover = openPopover();
+    const restore = failNextPostWriteReads();
+    try {
+        click(popover.querySelector('[data-action="clock-out"]'));
+        await settle();
+    } finally {
+        restore();
+    }
+
+    assert.match(toasts.join(' '), /Graph state could not be confirmed.*Retry after Roam finishes syncing/i);
 });
 
 test('Command Palette confirmation expires and unload resets the armed state', async t => {

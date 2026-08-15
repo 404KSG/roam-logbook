@@ -47,15 +47,29 @@ const cleanRecord = value => {
     return { taskUid, title, pausedAtMs, pomodoroRemainingMs, pomodoroSuppressed, ...(clockUid ? { clockUid } : {}) };
 };
 
-const cleanPending = value => {
+const cleanPending = (value, { version = VERSION, legacy = false } = {}) => {
     const record = cleanRecord(value);
     if (!record) return null;
-    const hasClockUid = Object.prototype.hasOwnProperty.call(value, 'clockUid');
-    if (hasClockUid && value.clockUid !== null && (typeof value.clockUid !== 'string' || !value.clockUid)) {
-        return null;
-    }
     const clockUid = typeof value.clockUid === 'string' && value.clockUid ? value.clockUid : null;
-    return { ...record, clockUid, legacy: !hasClockUid };
+    const explicitLegacy =
+        legacy || value.legacy === true || Number(value.sourceVersion) === LEGACY_VERSION;
+    const sourceVersion = explicitLegacy
+        ? LEGACY_VERSION
+        : Number.isInteger(Number(value.sourceVersion))
+          ? Number(value.sourceVersion)
+          : version;
+    return {
+        ...record,
+        clockUid,
+        legacy: explicitLegacy,
+        sourceVersion,
+        ...(clockUid
+            ? {}
+            : {
+                  recoveryState: explicitLegacy ? 'legacy-fallback' : 'conflict',
+                  ...(explicitLegacy ? {} : { recoveryIssue: 'missing-clockUid' }),
+              }),
+    };
 };
 
 const serialized = () =>
@@ -115,7 +129,7 @@ export function load() {
         if (parsed?.version === VERSION && parsed.data && Array.isArray(parsed.data.items)) {
             const loadedItems = parsed.data.items.map(cleanRecord);
             const loadedPending = Array.isArray(parsed.data.pendingResume)
-                ? parsed.data.pendingResume.map(cleanPending)
+                ? parsed.data.pendingResume.map(value => cleanPending(value, { version: VERSION }))
                 : [];
             if (loadedItems.some(item => !item) || loadedPending.some(item => !item)) {
                 throw new Error('invalid paused-task record');
@@ -124,13 +138,26 @@ export function load() {
             const pendingByTask = new Map(loadedPending.map(item => [item.taskUid, item]));
             items = [...byTask.values()];
             pendingResume = [...pendingByTask.values()];
+            if (pendingResume.some(item => item.recoveryState === 'conflict')) {
+                const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
+                notice = firstWarning
+                    ? 'A current pending Resume has no exact Session association; it was retained as a conflict.'
+                    : '';
+            }
             return getPaused();
         }
         if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
             const loaded = parsed.items.map(cleanRecord);
-            if (loaded.some(item => !item)) throw new Error('invalid legacy paused-task record');
+            const loadedPending = Array.isArray(parsed.pendingResume)
+                ? parsed.pendingResume.map(value =>
+                      cleanPending(value, { version: LEGACY_VERSION, legacy: true })
+                  )
+                : [];
+            if (loaded.some(item => !item) || loadedPending.some(item => !item)) {
+                throw new Error('invalid legacy paused-task record');
+            }
             items = [...new Map(loaded.map(item => [item.taskUid, item])).values()];
-            pendingResume = [];
+            pendingResume = [...new Map(loadedPending.map(item => [item.taskUid, item])).values()];
             persist();
             return getPaused();
         }
@@ -277,6 +304,7 @@ const removeTask = taskUid => {
 async function recoverPending({ running = [] } = {}) {
     let recovered = 0;
     let failed = 0;
+    let legacyRecovered = 0;
     const conflicts = [];
     const legacyToCreate = [];
     const byClockUid = new Map(running.map(entry => [entry.clockUid, entry]));
@@ -293,7 +321,7 @@ async function recoverPending({ running = [] } = {}) {
                 });
                 continue;
             }
-        } else {
+        } else if (pending.legacy === true) {
             const matches = running.filter(item => item.taskUid === pending.taskUid);
             if (matches.length === 1) entry = matches[0];
             else if (matches.length > 1) {
@@ -306,6 +334,12 @@ async function recoverPending({ running = [] } = {}) {
                 legacyToCreate.push(pending);
                 continue;
             }
+        } else {
+            conflicts.push({
+                taskUid: pending.taskUid,
+                reason: 'current pending Resume has no clockUid; exact Session association is required',
+            });
+            continue;
         }
 
         try {
@@ -314,12 +348,13 @@ async function recoverPending({ running = [] } = {}) {
             removeTask(pending.taskUid);
             persist();
             recovered += 1;
+            if (pending.legacy === true) legacyRecovered += 1;
         } catch (error) {
             failed += 1;
             console.error('[roam-logbook] could not recover paused task', pending.taskUid, error);
         }
     }
-    return { recovered, failed, conflicts, legacyToCreate };
+    return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
 
 const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
@@ -327,18 +362,35 @@ const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
 /** Start a fresh CLOCK and make its recovery association durable before migration. */
 async function resumeRecord(record, now) {
     let pending = pendingResume.find(item => item.taskUid === record.taskUid);
+    let createdPending = false;
     if (!pending) {
-        pending = { ...record, clockUid: null };
+        pending = {
+            ...record,
+            clockUid: null,
+            legacy: false,
+            sourceVersion: VERSION,
+            recoveryState: 'in-flight',
+        };
         pendingResume.push(pending);
         persist();
+        createdPending = true;
     }
 
     let entry = pending.clockUid
         ? clock.getRunning().find(item => item.clockUid === pending.clockUid)
-        : clock.getRunning().find(item => item.taskUid === record.taskUid);
+        : pending.legacy === true
+          ? clock.getRunning().find(item => item.taskUid === record.taskUid)
+          : null;
     if (pending.clockUid && (!entry || entry.taskUid !== record.taskUid)) {
         const conflict = new Error(
             `Resume conflict for ${record.taskUid}: exact Session ${pending.clockUid} is unavailable.`
+        );
+        conflict.conflict = true;
+        throw conflict;
+    }
+    if (!pending.clockUid && !pending.legacy && !createdPending) {
+        const conflict = new Error(
+            `Resume conflict for ${record.taskUid}: current pending Resume has no exact clockUid.`
         );
         conflict.conflict = true;
         throw conflict;
@@ -358,6 +410,9 @@ async function resumeRecord(record, now) {
     }
     pending.clockUid = entry.clockUid;
     pending.legacy = false;
+    pending.sourceVersion = VERSION;
+    delete pending.recoveryState;
+    delete pending.recoveryIssue;
     // This write is intentionally before the Pomodoro migration. If the next
     // line fails, reload can find this exact Session and finish it.
     persist();
@@ -475,11 +530,15 @@ export async function resumeAll({ now = new Date() } = {}) {
 
     let resumed = recovered.recovered;
     let failed = recovered.failed + uncertain + recovered.conflicts.length;
+    let legacyRecovered = recovered.legacyRecovered;
+    const legacyRecovery =
+        recovered.legacyRecovered > 0 || recovered.legacyToCreate.length > 0;
     const completedTasks = new Set();
     for (const record of ready) {
         try {
             await resumeRecord(record, now);
             resumed += 1;
+            if (record.legacy === true) legacyRecovered += 1;
             completedTasks.add(record.taskUid);
         } catch (error) {
             failed += 1;
@@ -509,10 +568,21 @@ export async function resumeAll({ now = new Date() } = {}) {
             `${recovered.conflicts.length} pending Resume conflict${recovered.conflicts.length === 1 ? '' : 's'} were retained; exact Session associations were not changed.`
         );
     }
+    if (legacyRecovery) {
+        messages.push('Legacy Resume recovery used explicit Task matching.');
+    }
     notice = messages.join(' ');
     persist();
     notify();
-    return { resumed, failed, pruned, satisfied, blocked: false };
+    return {
+        resumed,
+        failed,
+        pruned,
+        satisfied,
+        blocked: false,
+        legacyRecovery,
+        legacyRecovered,
+    };
 }
 
 /**
