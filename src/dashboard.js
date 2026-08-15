@@ -1,5 +1,7 @@
 /**
- * The dashboard dialog: totals, a per-day bar row, and a per-task breakdown.
+ * The dashboard dialog: a compact overview, running sessions, and a per-task
+ * breakdown. Activity remains available as an accessible micro rail inside the
+ * selected-range overview item rather than as a separate chart section.
  *
  * Reads the graph on open and on refresh only — there is no live subscription,
  * because a dialog that reshuffles under the cursor is worse than a stale one.
@@ -101,7 +103,7 @@ export function createDashboard({
 
         const rangeLabel = getRange(rangeId).label;
         summaryNode.replaceChildren(
-            statsRow({
+            overviewBar({
                 today: formatMinutesHuman(model.todayMinutes),
                 selected: formatMinutesHuman(model.totalMinutes),
                 selectedLabel: rangeLabel,
@@ -225,13 +227,13 @@ export function createDashboard({
             bucket.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
             const fill = el('span', 'rlb-activity__fill');
             fill.style.height = `${day.minutes === 0 ? 0 : Math.max(8, Math.round((day.minutes / peak) * 100))}%`;
-            bucket.append(fill, el('span', 'rlb-activity__label', label));
+            bucket.appendChild(fill);
             rail.appendChild(bucket);
         }
         return rail;
     };
 
-    const statsRow = ({
+    const overviewBar = ({
         today,
         selected,
         selectedLabel,
@@ -241,21 +243,26 @@ export function createDashboard({
         tasks,
         now,
     }) => {
-        const wrapper = el('div', 'rlb-stats');
-        wrapper.setAttribute('role', 'list');
-        wrapper.setAttribute('aria-label', 'Logbook summary');
+        const wrapper = el('dl', 'rlb-overview');
+        wrapper.setAttribute('aria-label', 'Logbook overview');
         const metrics = [
             ['Today', today],
             [selectedLabel, selected],
             ['Tasks tracked', tasks],
         ];
         for (const [index, [label, value]] of metrics.entries()) {
-            const card = el('div', 'rlb-stat');
-            if (index === 1) card.classList.add('rlb-stat--activity');
-            card.setAttribute('role', 'listitem');
-            card.append(el('strong', 'rlb-stat__value', value), el('span', 'rlb-stat__label', label));
-            if (index === 1) card.appendChild(activityRail(activity, now, activityLabel, activityScope));
-            wrapper.appendChild(card);
+            const item = el('div', 'rlb-overview__item');
+            if (index === 1) item.classList.add('rlb-overview__item--selected');
+            item.append(
+                el('dt', 'rlb-overview__label', label),
+                el('dd', 'rlb-overview__value', value)
+            );
+            if (index === 1) {
+                item.querySelector('.rlb-overview__value').appendChild(
+                    activityRail(activity, now, activityLabel, activityScope)
+                );
+            }
+            wrapper.appendChild(item);
         }
         return wrapper;
     };
@@ -589,10 +596,14 @@ export function createDashboard({
         const heading = el('div', 'rlb-header__heading');
         const title = el('h2', 'bp3-heading rlb-header__title', 'Logbook');
         title.id = 'roam-logbook-dashboard-title';
-        heading.append(
-            title,
-            el('p', 'rlb-header__subtitle', 'Focus sessions, activity, and task rollups')
+        const subtitle = el(
+            'p',
+            'rlb-header__subtitle rlb-visually-hidden',
+            'Focus sessions, activity, and task rollups'
         );
+        subtitle.id = 'roam-logbook-dashboard-description';
+        heading.append(title, subtitle);
+        dialog.setAttribute('aria-describedby', subtitle.id);
         header.appendChild(heading);
 
         const selectWrapper = el('div', 'bp3-select bp3-small');

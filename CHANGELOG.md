@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-beta.8 — 2026-08-15
+
+- Reworked the Dashboard as a content-fit inspector: short reports no longer reserve a near-full-screen shell, while long task lists scroll inside the body below a compact header.
+- Replaced the floating summary blocks with one semantic inline overview bar containing Today, the selected range, Tasks tracked, and an accessible date-free micro activity rail.
+- Removed obsolete visible activity labels and beta.7 modal/stat layout rules without changing range, timing, hierarchy, or roll-up semantics.
+- Made paused topbar state icon-only: the history icon uses muted ochre on the normal transparent surface, with no background block, ring, or pause badge.
+- Added RED→GREEN DOM and browser geometry coverage for content fit, body scrolling, inline metrics, quiet activity buckets, responsive containment, and paused icon color/background priority.
+- The complete local suite now contains 228 tests, including browser geometry, accessibility, data-health ordering, and final-bundle lifecycle coverage.
+
 ## 0.9.0-beta.7 — 2026-08-15
 
 - Rebuilt the Dashboard around an integrated three-metric summary: the selected-range metric now owns the real daily activity rail, and the standalone By Day section is gone.

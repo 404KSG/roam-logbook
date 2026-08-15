@@ -248,11 +248,11 @@ test('activity rail keeps accessible green intensity cells compact on a narrow p
     const cells = [0, 25, 50, 100, 0, 75, 10]
         .map(
             (minutes, index) =>
-                `<button class="rlb-activity__bucket rlb-activity__bucket--level-${minutes === 0 ? 0 : index === 3 ? 3 : 1}${minutes === 0 ? ' rlb-activity__bucket--empty' : ''}" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, day, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-activity__fill" style="height:${minutes}%"></span><span class="rlb-activity__label">Aug ${index + 9} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}</span></button>`
+                `<button class="rlb-activity__bucket rlb-activity__bucket--level-${minutes === 0 ? 0 : index === 3 ? 3 : 1}${minutes === 0 ? ' rlb-activity__bucket--empty' : ''}" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, day, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-activity__fill" style="height:${minutes}%"></span></button>`
         )
         .join('');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div style="width:320px"><div class="rlb-summary"><div class="rlb-stats"><div class="rlb-stat rlb-stat--activity"><strong class="rlb-stat__value">13h 47m</strong><span class="rlb-stat__label">Last 7 days</span><div class="rlb-activity-rail" data-day-count="7" style="--rlb-activity-count:7" role="list">${cells}</div></div></div></div></div></div>`),
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div style="width:320px"><div class="rlb-summary"><dl class="rlb-overview"><div class="rlb-overview__item rlb-overview__item--selected"><dt class="rlb-overview__label">Last 7 days</dt><dd class="rlb-overview__value">13h 47m<div class="rlb-activity-rail" data-day-count="7" style="--rlb-activity-count:7" role="group">${cells}</div></dd></div></dl></div></div></div>`),
         `(() => {
             const chart = document.querySelector('.rlb-activity-rail');
             const cells = [...chart.querySelectorAll('.rlb-activity__bucket')];
@@ -262,23 +262,22 @@ test('activity rail keeps accessible green intensity cells compact on a narrow p
                 chart: rect(chart),
                 count: cells.length,
                 columns: getComputedStyle(chart).gridTemplateColumns,
-                labels: cells.map(cell => cell.querySelector('.rlb-activity__label').textContent),
+                labels: [...document.querySelectorAll('.rlb-activity__label')].filter(node => node.getClientRects().length).length,
                 colors: cells.map(cell => getComputedStyle(cell.querySelector('.rlb-activity__fill')).backgroundColor),
                 accessible: cells.every(cell => cell.title.includes('2026-08-') && cell.getAttribute('aria-label').includes('m')),
                 keyboard: cells.every(cell => cell.tagName === 'BUTTON' && cell.tabIndex >= 0),
                 overlap: rects.some((item, index) => index > 0 && item.left < rects[index - 1].right),
-                labelsInside: cells.every(cell => { const cellRect = rect(cell); const labelRect = rect(cell.querySelector('.rlb-activity__label')); return labelRect.left >= cellRect.left && labelRect.right <= cellRect.right + 0.5; })
             };
         })()`
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.equal(geometry.count, 7, JSON.stringify(geometry));
-    assert.ok(geometry.chart.height >= 28 && geometry.chart.height <= 40, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 12 && geometry.chart.height <= 18, JSON.stringify(geometry));
     assert.match(geometry.columns, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
     assert.equal(geometry.accessible, true, JSON.stringify(geometry));
     assert.equal(geometry.keyboard, true, JSON.stringify(geometry));
     assert.equal(geometry.overlap, false, JSON.stringify(geometry));
-    assert.equal(geometry.labelsInside, true, JSON.stringify(geometry));
+    assert.equal(geometry.labels, 0, JSON.stringify(geometry));
     assert.ok(new Set(geometry.colors).size >= 3, JSON.stringify(geometry));
     assert.ok(geometry.colors.every(color => !color.includes('45, 114, 210')), JSON.stringify(geometry));
 });
@@ -383,6 +382,87 @@ test('beta.7 integrated summary stays three-column, embeds activity, and keeps t
     }
 });
 
+test('beta.8 Dashboard is content-fit and uses an inline overview at desktop and narrow widths', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const shortTask = '<tr><td>Short task</td><td>1</td><td>30m</td><td>30m</td></tr>';
+    const longTasks = Array.from(
+        { length: 34 },
+        (_, index) => `<tr><td>Task ${index + 1} with a long title</td><td>1</td><td>30m</td><td>30m</td></tr>`
+    ).join('');
+    const buckets = [0, 30, 0, 120, 0, 60, 15]
+        .map(
+            (minutes, index) =>
+                `<button class="rlb-activity__bucket rlb-activity__bucket--level-${minutes ? 2 : 0}${minutes ? '' : ' rlb-activity__bucket--empty'}" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-activity__fill" style="height:${minutes ? Math.max(8, Math.round((minutes / 120) * 100)) : 0}%"></span></button>`
+        )
+        .join('');
+
+    for (const [width, rows, expectedFit] of [
+        [1440, shortTask, true],
+        [1200, shortTask, true],
+        [1024, shortTask, true],
+        [640, longTasks, false],
+    ]) {
+        const geometry = await withChromium(
+            htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="rlb-header__title">Logbook</h2><p class="rlb-header__subtitle rlb-visually-hidden" id="dashboard-description">Focus sessions, activity, and task rollups</p></div></header><div class="rlb-summary"><dl class="rlb-overview" aria-label="Logbook overview"><div class="rlb-overview__item"><dt class="rlb-overview__label">Today</dt><dd class="rlb-overview__value"><span class="rlb-overview__number">2h 17m</span></dd></div><div class="rlb-overview__item rlb-overview__item--selected"><dt class="rlb-overview__label">Last 7 days</dt><dd class="rlb-overview__value"><span class="rlb-overview__number">13h 47m</span><div class="rlb-activity-rail" data-day-count="7" role="group" aria-label="Last 7 days activity">${buckets}</div></dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Tasks tracked</dt><dd class="rlb-overview__value"><span class="rlb-overview__number">${rows === shortTask ? '1' : '34'}</span><span class="rlb-overview__suffix">tasks</span></dd></div></dl></div><div class="rlb-body"><section class="rlb-dashboard-section rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By task</h3></div><table class="rlb-table"><tbody>${rows}</tbody></table></section></div></div></div>`),
+            `(() => {
+                const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+                const dialog = document.querySelector('.rlb-dialog');
+                const overview = document.querySelector('.rlb-overview');
+                const rail = document.querySelector('.rlb-activity-rail');
+                const body = document.querySelector('.rlb-body');
+                const task = document.querySelector('.rlb-by-task');
+                const title = document.querySelector('.rlb-header__title');
+                const subtitle = document.querySelector('.rlb-header__subtitle');
+                const dialogStyle = getComputedStyle(dialog);
+                const bodyStyle = getComputedStyle(body);
+                const bucketRects = [...document.querySelectorAll('.rlb-activity__bucket')].map(rect);
+                const dialogRect = rect(dialog);
+                const taskRect = rect(task);
+                return {
+                    viewport: { width: innerWidth, height: innerHeight },
+                    dialog: dialogRect,
+                    overview: rect(overview),
+                    rail: rect(rail),
+                    task: taskRect,
+                    bucketRects,
+                    metricCount: overview.querySelectorAll('.rlb-overview__item').length,
+                    visibleDayLabels: [...document.querySelectorAll('.rlb-activity__label')].filter(node => node.getClientRects().length).length,
+                    dialogHeightRule: dialogStyle.height,
+                    dialogMinHeight: dialogStyle.minHeight,
+                    dialogMaxHeight: dialogStyle.maxHeight,
+                    bodyOverflowY: bodyStyle.overflowY,
+                    bodyScrolls: body.scrollHeight > body.clientHeight,
+                    titleVisible: Boolean(title.getClientRects().length),
+                    subtitleVisible: subtitle.getBoundingClientRect().width > 2 && subtitle.getBoundingClientRect().height > 2,
+                    noHorizontalOverflow: dialog.scrollWidth <= dialog.clientWidth + 1,
+                    taskInside: taskRect.left >= dialogRect.left && taskRect.right <= dialogRect.right + .5,
+                    bucketsInside: bucketRects.every(item => item.left >= rect(rail).left && item.right <= rect(rail).right + .5),
+                    bottomGap: dialogRect.bottom - taskRect.bottom,
+                };
+            })()`
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, expectedFit, geometry }));
+        assert.equal(geometry.metricCount, 3, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.visibleDayLabels, 0, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.titleVisible, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.subtitleVisible, false, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.dialogMinHeight, '0px', JSON.stringify({ width, geometry }));
+        assert.notEqual(geometry.dialogMaxHeight, 'none', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.bodyOverflowY, 'auto', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.noHorizontalOverflow, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.taskInside, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.bucketsInside, true, JSON.stringify({ width, geometry }));
+        if (expectedFit) {
+            assert.ok(geometry.bottomGap >= 24 && geometry.bottomGap <= 56, JSON.stringify({ width, geometry }));
+            assert.ok(geometry.dialog.height < geometry.viewport.height * 0.8, JSON.stringify({ width, geometry }));
+            assert.equal(geometry.bodyScrolls, false, JSON.stringify({ width, geometry }));
+        } else {
+            assert.equal(geometry.bodyScrolls, true, JSON.stringify({ width, geometry }));
+            assert.ok(geometry.dialog.height <= geometry.viewport.height * 0.86 + 1, JSON.stringify({ width, geometry }));
+        }
+    }
+});
+
 test('session status bullet aligns with the title row rather than the whole row', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
@@ -438,6 +518,8 @@ test('paused icon-only topbar keeps clock identity with only a quiet background 
             const paused = buttons[1];
             const idleRect = rect(idle);
             const pausedRect = rect(paused);
+            const idleIconStyle = getComputedStyle(idle.querySelector('.rlb-topbar__icon'));
+            const pausedIconStyle = getComputedStyle(paused.querySelector('.rlb-topbar__icon'));
             const pausedStyle = getComputedStyle(paused);
             return {
                 idle: idleRect,
@@ -447,6 +529,9 @@ test('paused icon-only topbar keeps clock identity with only a quiet background 
                 pausedHasClock: Boolean(paused.querySelector('.bp3-icon-history')),
                 pausedLabel: paused.getAttribute('aria-label'),
                 pausedBackground: pausedStyle.backgroundColor,
+                idleBackground: getComputedStyle(idle).backgroundColor,
+                idleIconColor: idleIconStyle.color,
+                pausedIconColor: pausedIconStyle.color,
                 pausedRing: pausedStyle.boxShadow,
                 square: Math.abs(pausedRect.width - pausedRect.height) <= 1
             };
@@ -457,7 +542,8 @@ test('paused icon-only topbar keeps clock identity with only a quiet background 
     assert.equal(geometry.pausedHasBadge, false, JSON.stringify(geometry));
     assert.equal(geometry.pausedHasClock, true, JSON.stringify(geometry));
     assert.match(geometry.pausedLabel, /2 Sessions Paused/i, JSON.stringify(geometry));
-    assert.notEqual(geometry.pausedBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
+    assert.equal(geometry.pausedBackground, geometry.idleBackground, JSON.stringify(geometry));
+    assert.notEqual(geometry.pausedIconColor, geometry.idleIconColor, JSON.stringify(geometry));
     assert.equal(geometry.pausedRing, 'none', JSON.stringify(geometry));
     assert.equal(geometry.square, true, JSON.stringify(geometry));
 });

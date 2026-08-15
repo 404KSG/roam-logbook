@@ -98,12 +98,17 @@ test('onload mounts the topbar widget and registers every command', () => {
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.equal(document.querySelectorAll('#roam-logbook-styles').length, 1);
-    assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
-    assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
-    assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 58px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
+    assert.match(css, /width: min\(1040px, calc\(100vw - 48px\)\)/);
+    assert.match(css, /max-height: min\(84vh, calc\(100vh - 48px\)\)/);
+    assert.doesNotMatch(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
+    assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
-    assert.match(css, /\.rlb-dashboard \.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 11px[^}]*line-height: 1\.4[^}]*overflow: visible[^}]*white-space: normal/s);
+    assert.match(css, /\.rlb-visually-hidden\s*{[^}]*position: absolute/s);
+    assert.match(css, /\.rlb-overview\s*{/);
+    assert.match(css, /\.rlb-overview__label\s*{/);
+    assert.match(css, /\.rlb-overview__value\s*{/);
+    assert.doesNotMatch(css, /\.rlb-stats\s*{/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
@@ -119,6 +124,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
     assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__icon[^}]*color: #a7b6c2/s);
+    assert.match(css, /\.rlb-topbar__button--paused\s*{[^}]*background: transparent/s);
+    assert.match(css, /\.rlb-topbar__button--paused > \.rlb-topbar__icon\s*{[^}]*color: #b7791f/s);
     assert.match(css, /\.rlb-topbar__parallel\s*{[^}]*color: #5c7080/s);
     assert.match(css, /\.rlb-topbar__separator\s*{[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__parallel,[^}]*color: #a7b6c2/s);
@@ -393,9 +400,14 @@ test('the dashboard renders totals and the task breakdown', () => {
         dialog().querySelector('.rlb-header__subtitle').textContent,
         'Focus sessions, activity, and task rollups'
     );
+    assert.equal(
+        dialog().querySelector('.rlb-header__subtitle').getBoundingClientRect().width,
+        0
+    );
     assert.equal(dialog().querySelector('.rlb-header .bp3-icon'), null, 'header has no decorative icon');
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
-    assert.equal(dialog().querySelector('.rlb-stats').getAttribute('aria-label'), 'Logbook summary');
+    assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Logbook overview');
+    assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 3);
     assert.ok(dialog().querySelector('.rlb-body__scroll'));
     for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {
         const action = dialog().querySelector(selector);

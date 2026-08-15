@@ -198,10 +198,10 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
     dashboard.open();
 
     const summary = document.querySelector('.rlb-summary');
-    const metrics = [...summary.querySelectorAll('.rlb-stat')];
+    const metrics = [...summary.querySelectorAll('.rlb-overview__item')];
     assert.equal(metrics.length, 3, 'the summary has a stable three-metric contract');
     assert.deepEqual(
-        metrics.map(metric => metric.querySelector('.rlb-stat__label')?.textContent),
+        metrics.map(metric => metric.querySelector('.rlb-overview__label')?.textContent),
         ['Today', 'Last 7 days', 'Tasks tracked']
     );
 
@@ -213,19 +213,58 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
     assert.equal(cells.length, 7);
     assert.equal(document.querySelector('.rlb-by-day'), null, 'By Day is no longer a standalone section');
     assert.equal(document.querySelector('.rlb-bars__range'), null, 'the range is not repeated below the summary');
-    assert.ok(cells.every(cell => cell.querySelector('.rlb-activity__label')?.textContent));
+    assert.ok(cells.every(cell => cell.querySelector('.rlb-activity__fill')));
     assert.ok(cells.every(cell => /2026-08-\d{2}/.test(cell.getAttribute('aria-label'))));
     assert.ok(cells.every(cell => /\d+(?:h \d{2}m|m)/.test(cell.title)));
     assert.ok(cells.every(cell => cell.tagName === 'BUTTON'));
     assert.ok(cells.every(cell => cell.getAttribute('role') !== 'listitem'));
     assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-0')));
     assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-3')));
-    assert.ok(cells.some(cell => /(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/.test(cell.textContent)));
+    assert.ok(cells.every(cell => cell.textContent === ''));
 
     const byTask = document.querySelector('.rlb-by-task');
     assert.ok(byTask, 'By Task remains the primary follow-up list');
     assert.ok(
         summary.compareDocumentPosition(byTask) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    dashboard.destroy();
+});
+
+test('beta.8 exposes one inline semantic overview and keeps activity buckets accessible without a visible axis', () => {
+    graph = installGraph([
+        { uid: 'compact-task', string: '{{[[TODO]]}} Compact dashboard task', parent: null },
+        { uid: 'compact-drawer', string: 'LOGBOOK::', parent: 'compact-task' },
+        {
+            uid: 'compact-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 09:30] => 0:30',
+            parent: 'compact-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const overview = document.querySelector('.rlb-overview');
+    assert.ok(overview, 'Dashboard exposes a single semantic overview bar');
+    assert.equal(overview.tagName, 'DL');
+    assert.equal(overview.getAttribute('aria-label'), 'Logbook overview');
+    assert.equal(overview.querySelectorAll('.rlb-overview__item').length, 3);
+    assert.equal(overview.querySelectorAll('dt').length, 3);
+    assert.equal(overview.querySelectorAll('dd').length, 3);
+    assert.equal(document.querySelectorAll('.rlb-stat').length, 0);
+
+    const rail = overview.querySelector('.rlb-activity-rail');
+    assert.ok(rail, 'the selected-range metric owns the activity rail');
+    assert.equal(rail.querySelectorAll('.rlb-activity__bucket').length, 7);
+    assert.equal(rail.querySelectorAll('.rlb-activity__label').length, 0);
+    assert.ok(
+        [...rail.querySelectorAll('.rlb-activity__bucket')].every(
+            bucket =>
+                bucket.tagName === 'BUTTON' &&
+                bucket.tabIndex >= 0 &&
+                /2026-08-\d{2}/.test(bucket.title) &&
+                /\d+(?:h \d{2}m|m)/.test(bucket.getAttribute('aria-label'))
+        )
     );
 
     dashboard.destroy();
@@ -261,7 +300,7 @@ test('activity rail labels finite ranges and the All time fallback honestly', ()
     select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     rail = document.querySelector('.rlb-activity-rail');
     assert.equal(
-        document.querySelectorAll('.rlb-stat')[1].querySelector('.rlb-stat__label').textContent,
+        document.querySelectorAll('.rlb-overview__item')[1].querySelector('.rlb-overview__label').textContent,
         'All time'
     );
     assert.equal(rail.dataset.activityScope, 'recent-30-days');
