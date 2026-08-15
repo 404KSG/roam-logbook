@@ -31,7 +31,7 @@ The extension reads and writes the local graph only. There are no analytics, net
 12:34
 ```
 
-With parallel timing enabled, it follows the stable elapsed timer with only the active-task count while preserving the same primary timer semantics — it does not sum the sessions:
+With parallel timing enabled, it follows the stable elapsed timer with only the active-task count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline:
 
 ```
 0:28 · 2 Tasks
@@ -45,7 +45,7 @@ If a running Session had an unfinished Pomodoro, its exact remaining budget cont
 
 **Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. By Task keeps complete titles—even beyond 80 characters—in a dedicated wrapping title column, while Sessions, Own, and Total retain stable numeric rails; narrow screens scroll only when those columns truly need it.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. By Task keeps complete titles—even beyond 80 characters—in a dedicated wrapping title column, while Sessions, Own, and Total retain stable numeric rails; narrow screens scroll only when those columns truly need it.
 
 ### Custom hotkeys
 

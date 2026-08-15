@@ -294,7 +294,7 @@ export function createTopbar({ onOpenDashboard }) {
         timeNode.textContent = formatElapsed(elapsed);
         if (entries.length > 1) {
             parallelNode.textContent = taskCount(entries.length);
-            separatorNode.textContent = '·';
+            separatorNode.textContent = '';
             buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         } else {
             buttonNode.replaceChildren(timeNode);
@@ -352,6 +352,7 @@ export function createTopbar({ onOpenDashboard }) {
         iconNode = el('span', 'bp3-icon bp3-icon-history rlb-topbar__icon');
         parallelNode = el('span', 'rlb-topbar__parallel');
         separatorNode = el('span', 'rlb-topbar__separator');
+        separatorNode.setAttribute('aria-hidden', 'true');
         timeNode = el('span', 'rlb-topbar__time');
 
         buttonNode = button('bp3-button bp3-minimal rlb-topbar__button', '', togglePopover);

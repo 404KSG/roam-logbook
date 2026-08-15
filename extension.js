@@ -1449,6 +1449,7 @@ var STYLES = `
 .rlb-topbar__button {
     display: inline-flex;
     align-items: center;
+    gap: 5px;
     justify-content: center;
     min-width: 30px;
     height: 30px;
@@ -1468,8 +1469,7 @@ var STYLES = `
     color: #a7b6c2;
 }
 
-.rlb-topbar__parallel,
-.rlb-topbar__separator {
+.rlb-topbar__parallel {
     color: #5c7080;
     font-size: 14px;
     font-weight: 500;
@@ -1478,7 +1478,13 @@ var STYLES = `
 }
 
 .rlb-topbar__separator {
-    margin: 0 4px;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    color: #5c7080;
+    flex: 0 0 auto;
+    margin: 0;
 }
 
 .bp3-dark .rlb-topbar__parallel,
@@ -1488,7 +1494,7 @@ var STYLES = `
 
 .rlb-topbar__time {
     display: inline-block;
-    min-width: 4.6ch;
+    min-width: 4ch;
     color: #5c7080;
     font-size: 14px;
     font-weight: 500;
@@ -2009,8 +2015,8 @@ var STYLES = `
 
 .rlb-header {
     flex: 0 0 auto;
-    min-height: 72px;
-    padding: 12px 16px 12px 20px;
+    min-height: 56px;
+    padding: 8px 14px 8px 16px;
     border-bottom: 1px solid var(--rlb-border);
     background: var(--rlb-surface);
     box-shadow: none;
@@ -2019,19 +2025,25 @@ var STYLES = `
 .rlb-header__heading {
     flex: 1 1 auto;
     min-width: 0;
+    overflow: visible;
 }
 
 .rlb-header__title {
     color: inherit;
-    font-size: 20px;
-    line-height: 1.25;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.2;
+    overflow: visible;
+    white-space: normal;
 }
 
 .rlb-header__subtitle {
-    margin: 3px 0 0;
+    margin: 2px 0 0;
     color: var(--rlb-muted);
-    font-size: 12px;
-    line-height: 1.35;
+    font-size: 11px;
+    line-height: 1.25;
+    overflow: visible;
+    white-space: normal;
 }
 
 .rlb-header .bp3-select select {
@@ -2440,7 +2452,7 @@ function createTopbar({ onOpenDashboard }) {
     timeNode.textContent = formatElapsed(elapsed);
     if (entries.length > 1) {
       parallelNode.textContent = taskCount(entries.length);
-      separatorNode.textContent = "\xB7";
+      separatorNode.textContent = "";
       buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     } else {
       buttonNode.replaceChildren(timeNode);
@@ -2483,6 +2495,7 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     iconNode = el("span", "bp3-icon bp3-icon-history rlb-topbar__icon");
     parallelNode = el("span", "rlb-topbar__parallel");
     separatorNode = el("span", "rlb-topbar__separator");
+    separatorNode.setAttribute("aria-hidden", "true");
     timeNode = el("span", "rlb-topbar__time");
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
     buttonNode.appendChild(iconNode);

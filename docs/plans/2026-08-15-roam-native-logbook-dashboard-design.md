@@ -20,7 +20,7 @@ The dashboard uses the calm, analytical structure of Contribution Graph as a ref
 - Roam/Blueprint system typography is inherited. Numeric counters use tabular figures.
 - Theme tokens use the `--rlb-*` namespace with light and `.bp3-dark` values.
 
-The header contains “Logbook”, a short description, range selection, a 32px refresh control, and close control. It has no decorative hero icon. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses a dedicated column contract: a complete, flexible, wrapping Task title (including titles longer than 80 characters) plus stable Sessions, Own, and Total rails.
+The compact 56px toolbar header contains “Logbook” at 17px, its complete 11px description, range selection, a 32px refresh control, and close control. It has no decorative hero icon and never clips either line of heading text. Summary values retain the current Today, Last 7 days, selected-range, and Tasks tracked semantics. Running, By day, and By task retain their existing data and actions. By Task alone uses a dedicated column contract: a complete, flexible, wrapping Task title (including titles longer than 80 characters) plus stable Sessions, Own, and Total rails.
 
 ## Icon map
 
@@ -40,7 +40,7 @@ The running topbar has no icon or status-dot DOM. Emoji, external icons, and cus
 ## Interaction and accessibility
 
 - The topbar widget belongs to Roam's left navigation cluster immediately after Back/Forward, before the main and right action controls. Descendant navigation signals and conservative left-side fallbacks keep placement stable across Roam rerenders without relying on one class name.
-- The topbar is a minimal timing-state entry: idle is a neutral-gray `history` icon; one running task visibly shows only the existing primary session's elapsed time; parallel timing shows `elapsed · N Tasks` without aggregating session time or exposing task titles. The separator uses compact CSS spacing so elapsed remains the stable leading element.
+- The topbar is a minimal timing-state entry: idle is a neutral-gray `history` icon; one running task visibly shows only the existing primary session's elapsed time; parallel timing shows `elapsed · N Tasks` without aggregating session time or exposing task titles. The separator is an aria-hidden, CSS-drawn 3px circle rather than a text glyph; a uniform 5px flex gap keeps time, circle, and count centered and compact.
 - The active-task count and separator remain neutral in light and dark themes. Normal, Pomodoro-overrun, and stale colors apply only to the elapsed-time element.
 - Task context, totals, Pomodoro targets, parallel-task details, and actions remain available through the rich tooltip and running-task popover. Count language is `1 Task Running` / `N Tasks Running`; clock action names remain unchanged.
 - Normal elapsed text uses Roam/Blueprint's neutral foreground family. Pomodoro overrun and stale states color only the elapsed text red or amber; the button has no status background or green treatment.

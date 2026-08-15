@@ -89,18 +89,25 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
+    assert.match(css, /\.rlb-header\s*{[^}]*min-height: 56px[^}]*padding: 8px 14px 8px 16px/s);
+    assert.match(css, /\.rlb-header__heading\s*{[^}]*overflow: visible/s);
+    assert.match(css, /\.rlb-header__title\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.2[^}]*overflow: visible/s);
+    assert.match(css, /\.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 11px[^}]*line-height: 1\.25[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-size: 14px/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-weight: 500/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-variant-numeric: tabular-nums/s);
-    assert.match(css, /\.rlb-topbar__time[^}]*min-width: 4\.6ch/s);
+    assert.match(css, /\.rlb-topbar__button[^}]*display: inline-flex[^}]*align-items: center[^}]*gap: 5px/s);
+    assert.match(css, /\.rlb-topbar__time[^}]*min-width: 4ch/s);
+    assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*flex: 0 0 auto[^}]*margin: 0/s);
     assert.match(css, /\.rlb-topbar__time--neutral[^}]*#5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
     assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__icon[^}]*color: #a7b6c2/s);
-    assert.match(css, /\.rlb-topbar__parallel,[^}]*color: #5c7080/s);
+    assert.match(css, /\.rlb-topbar__parallel\s*{[^}]*color: #5c7080/s);
+    assert.match(css, /\.rlb-topbar__separator\s*{[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__parallel,[^}]*color: #a7b6c2/s);
     for (const state of ['neutral', 'overrun', 'stale']) {
         assert.match(css, new RegExp(`\\.rlb-topbar__time--${state}\\s*{`));
@@ -257,20 +264,16 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Tas
         assert.equal(clock.getRunning().length, 3);
         // Keep the exact primary-session ordering supplied by the current clock
         // reader; the topbar must not invent a sum or expose task titles.
-        assert.match(
-            [...topbarWidget().querySelector('button').children]
-                .map(node => node.textContent)
-                .join(' '),
-            /^\d+:\d{2}(?::\d{2})? · 3 Tasks$/
-        );
         const visible = [...topbarWidget().querySelector('button').children];
         assert.deepEqual(visible.map(node => node.className.split(' ')[0]), [
             'rlb-topbar__time',
             'rlb-topbar__separator',
             'rlb-topbar__parallel',
         ]);
+        assert.match(visible[0].textContent, /^\d+:\d{2}(?::\d{2})?$/);
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Tasks');
-        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent, '·');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent, '');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
         assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--overrun'), null);
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
@@ -359,7 +362,11 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.ok(dialog().classList.contains('rlb-root--open'));
     const shell = dialog().querySelector('.rlb-dialog');
     assert.equal(shell.getAttribute('aria-modal'), 'true');
-    assert.ok(dialog().querySelector('.rlb-header__subtitle'));
+    assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Logbook');
+    assert.equal(
+        dialog().querySelector('.rlb-header__subtitle').textContent,
+        'Focus sessions, activity, and task rollups'
+    );
     assert.equal(dialog().querySelector('.rlb-header .bp3-icon'), null, 'header has no decorative icon');
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
     assert.equal(dialog().querySelector('.rlb-stats').getAttribute('aria-label'), 'Logbook summary');
