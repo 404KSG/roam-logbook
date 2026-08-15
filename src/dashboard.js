@@ -201,6 +201,8 @@ export function createDashboard() {
             for (const node of rows) {
                 const row = el('tr');
                 const name = el('td', 'rlb-tree__cell');
+                const leading = el('div', 'rlb-tree__leading');
+                const content = el('div', 'rlb-tree__content');
                 name.style.paddingLeft = `${8 + node.depth * 20}px`;
 
                 if (node.hasChildren) {
@@ -217,26 +219,27 @@ export function createDashboard() {
                         { title: node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks' }
                     );
                     caret.setAttribute('aria-expanded', String(!node.collapsed));
-                    name.appendChild(caret);
+                    leading.appendChild(caret);
                 } else {
                     // Keeps every title on the same left edge, caret or not.
-                    name.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
+                    leading.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
                 }
 
                 const mark = statusMark(node.status);
-                if (mark) name.appendChild(mark);
+                if (mark) leading.appendChild(mark);
                 if (node.status === 'DONE') row.classList.add('rlb-row--done');
-                name.appendChild(taskLink(node.title, node.taskUid));
+                content.appendChild(taskLink(node.title, node.taskUid));
                 // A task reachable from more than one parent is counted under each
                 // of them; say so on the row rather than let the columns look wrong.
                 if (node.occurrences > 1) {
                     const badge = el('span', 'bp3-tag bp3-minimal rlb-tree__badge', `×${node.occurrences}`);
                     badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-                    name.appendChild(badge);
+                    content.appendChild(badge);
                 }
                 if (node.truncated) {
-                    name.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
+                    content.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
                 }
+                name.append(leading, content);
                 if (node.collapsed) {
                     const hidden = countDescendants(node);
                     name.appendChild(
@@ -324,7 +327,7 @@ export function createDashboard() {
     };
 
     const build = () => {
-        const overlay = el('div', 'rlb-root');
+        const overlay = el('div', 'rlb-root rlb-dashboard');
         overlay.id = ROOT_ID;
         overlay.setAttribute('aria-hidden', 'true');
         overlay.addEventListener('mousedown', event => {

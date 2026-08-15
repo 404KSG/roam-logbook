@@ -89,10 +89,10 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.match(css, /width: min\(960px, calc\(100vw - 32px\)\)/);
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
-    assert.match(css, /\.rlb-header\s*{[^}]*min-height: 56px[^}]*padding: 8px 14px 8px 16px/s);
-    assert.match(css, /\.rlb-header__heading\s*{[^}]*overflow: visible/s);
-    assert.match(css, /\.rlb-header__title\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.2[^}]*overflow: visible/s);
-    assert.match(css, /\.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 11px[^}]*line-height: 1\.25[^}]*overflow: visible/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 62px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 18px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 12px[^}]*line-height: 1\.4[^}]*overflow: visible[^}]*white-space: normal/s);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
@@ -100,7 +100,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-topbar__time[^}]*font-weight: 500/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-variant-numeric: tabular-nums/s);
     assert.match(css, /\.rlb-topbar__button[^}]*display: inline-flex[^}]*align-items: center[^}]*gap: 5px/s);
-    assert.match(css, /\.rlb-topbar__time[^}]*min-width: 4ch/s);
+    const timeRule = css.match(/\.rlb-topbar__time\s*\{([^}]*)\}/)?.[1] ?? '';
+    assert.doesNotMatch(timeRule, /min-width:/, 'elapsed text has no invisible width reservation');
     assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*flex: 0 0 auto[^}]*margin: 0/s);
     assert.match(css, /\.rlb-topbar__time--neutral[^}]*#5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
@@ -360,6 +361,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     paletteCommands.get('Logbook: Open dashboard')();
 
     assert.ok(dialog().classList.contains('rlb-root--open'));
+    assert.ok(dialog().classList.contains('rlb-dashboard'), 'dashboard styles have a host-scoped root');
     const shell = dialog().querySelector('.rlb-dialog');
     assert.equal(shell.getAttribute('aria-modal'), 'true');
     assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Logbook');
@@ -402,6 +404,9 @@ test('the dashboard renders totals and the task breakdown', () => {
 });
 
 test('the task tree collapses and expands from the caret', () => {
+    const collapsedTitle =
+        'Graph Engineering: How to Build AI Agent Systems That Do Not Break at Scale * 这是一个需要完整换行且不能和摘要粘连的超长任务标题';
+    graph.store.get('taskone01').string = `{{[[TODO]]}} ${collapsedTitle}`;
     // Give the tracked task a sub-task with time of its own.
     graph.store.set('steps00001', {
         uid: 'steps00001',
@@ -446,7 +451,25 @@ test('the task tree collapses and expands from the caret', () => {
     assert.equal(taskRows().length, 1, 'the sub-task row is hidden');
     assert.match(taskRows()[0], /\+1 sub-task/);
     assert.equal(dialog().querySelector('.rlb-tree__toggle').getAttribute('aria-expanded'), 'false');
+    const collapsedCell = dialog().querySelector('.rlb-tree__cell');
+    assert.deepEqual(
+        [...collapsedCell.children].map(child => child.className.split(' ')[0]),
+        ['rlb-tree__leading', 'rlb-tree__content', 'rlb-muted'],
+        'leading controls, wrapping title, and summary are independent layout items'
+    );
+    assert.equal(collapsedCell.querySelector('.rlb-task-link__text').textContent, collapsedTitle);
+    assert.equal(collapsedCell.querySelector('.rlb-tree__hidden').textContent, '+1 sub-task');
+    assert.equal(
+        collapsedCell.querySelector('.rlb-tree__content').contains(collapsedCell.querySelector('.rlb-tree__hidden')),
+        false,
+        'the fixed summary cannot overlap inside the wrapping title box'
+    );
+    const css = document.getElementById('roam-logbook-styles').textContent;
+    assert.match(css, /\.rlb-tree__cell\s*{[^}]*display: grid[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto[^}]*column-gap: 8px/s);
+    assert.match(css, /\.rlb-tree__content\s*{[^}]*min-width: 0[^}]*flex-wrap: wrap/s);
+    assert.match(css, /\.rlb-tree__hidden\s*{[^}]*white-space: nowrap/s);
 
+    graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     dialog().querySelector('.rlb-tree__toggle').dispatchEvent(
         new dom.window.MouseEvent('click', { bubbles: true })
     );

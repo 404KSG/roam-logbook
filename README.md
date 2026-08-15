@@ -45,7 +45,7 @@ If a running Session had an unfinished Pomodoro, its exact remaining budget cont
 
 **Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. By Task keeps complete titles—even beyond 80 characters—in a dedicated wrapping title column, while Sessions, Own, and Total retain stable numeric rails; narrow screens scroll only when those columns truly need it.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. By Task keeps complete titles—even beyond 80 characters—in a dedicated wrapping title column, while collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails; narrow screens scroll only when those columns truly need it.
 
 ### Custom hotkeys
 
@@ -87,7 +87,7 @@ Clocks that have been open longer than the threshold (8 hours by default) are ma
 
 ### One clock or several
 
-By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `elapsed · N Tasks` using its existing primary live timer, while the popover lists every parallel task. Clocking the same task twice is refused so nothing gets double-counted.
+By default, clocking in closes whatever was running, the way org-mode behaves. Turn on **Allow multiple clocks at once** in the settings to run several tasks in parallel; the topbar shows `elapsed · N Tasks` using its existing primary live timer, while the popover lists every parallel task. The centered dot is CSS-drawn with equal 5px spacing from the visible time and count—there is no hidden timer-width reservation. Clocking the same task twice is refused so nothing gets double-counted.
 
 ## Settings
 

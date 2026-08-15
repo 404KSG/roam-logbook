@@ -920,6 +920,8 @@ function createDashboard() {
       for (const node of rows) {
         const row = el("tr");
         const name = el("td", "rlb-tree__cell");
+        const leading = el("div", "rlb-tree__leading");
+        const content = el("div", "rlb-tree__content");
         name.style.paddingLeft = `${8 + node.depth * 20}px`;
         if (node.hasChildren) {
           const caret = button(
@@ -935,24 +937,25 @@ function createDashboard() {
             { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
           );
           caret.setAttribute("aria-expanded", String(!node.collapsed));
-          name.appendChild(caret);
+          leading.appendChild(caret);
         } else {
-          name.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
+          leading.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
         }
         const mark = statusMark(node.status);
         if (mark)
-          name.appendChild(mark);
+          leading.appendChild(mark);
         if (node.status === "DONE")
           row.classList.add("rlb-row--done");
-        name.appendChild(taskLink(node.title, node.taskUid));
+        content.appendChild(taskLink(node.title, node.taskUid));
         if (node.occurrences > 1) {
           const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
           badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-          name.appendChild(badge);
+          content.appendChild(badge);
         }
         if (node.truncated) {
-          name.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
+          content.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
         }
+        name.append(leading, content);
         if (node.collapsed) {
           const hidden = countDescendants(node);
           name.appendChild(
@@ -1026,7 +1029,7 @@ function createDashboard() {
     }
   };
   const build = () => {
-    const overlay = el("div", "rlb-root");
+    const overlay = el("div", "rlb-root rlb-dashboard");
     overlay.id = ROOT_ID;
     overlay.setAttribute("aria-hidden", "true");
     overlay.addEventListener("mousedown", (event) => {
@@ -1494,7 +1497,6 @@ var STYLES = `
 
 .rlb-topbar__time {
     display: inline-block;
-    min-width: 4ch;
     color: #5c7080;
     font-size: 14px;
     font-weight: 500;
@@ -1821,12 +1823,34 @@ var STYLES = `
     text-align: right;
 }
 
-.rlb-cell,
-.rlb-tree__cell {
+.rlb-cell {
     display: flex;
     align-items: baseline;
     gap: 4px;
     min-width: 0;
+}
+
+.rlb-tree__cell {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 8px;
+    min-width: 0;
+}
+
+.rlb-tree__leading {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.rlb-tree__content {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 4px;
 }
 
 .rlb-section__heading {
@@ -1843,7 +1867,7 @@ var STYLES = `
 /* Scoped to the cell so it outranks .bp3-button.bp3-small, whose own min-width
    would otherwise make the caret wider than the spacer on childless rows and put
    the two sets of titles on different left edges. */
-.rlb-tree__cell > .rlb-tree__toggle {
+.rlb-tree__leading > .rlb-tree__toggle {
     flex: 0 0 auto;
     width: 20px;
     min-width: 20px;
@@ -1855,7 +1879,7 @@ var STYLES = `
     align-self: center;
 }
 
-.rlb-tree__cell > .rlb-tree__toggle:hover {
+.rlb-tree__leading > .rlb-tree__toggle:hover {
     opacity: 1;
 }
 
@@ -1900,8 +1924,10 @@ var STYLES = `
 }
 
 .rlb-tree__hidden {
+    grid-column: 3;
     flex: 0 0 auto;
     font-size: 11px;
+    white-space: nowrap;
 }
 
 .rlb-tree__badge {
@@ -1948,6 +1974,8 @@ var STYLES = `
 }
 
 .rlb-task-table .rlb-task-link {
+    flex: 1 1 0;
+    min-width: 0;
     white-space: normal;
     overflow: visible;
     overflow-wrap: anywhere;
@@ -2013,35 +2041,40 @@ var STYLES = `
     box-shadow: 0 10px 32px rgba(16, 22, 26, 0.24);
 }
 
-.rlb-header {
+.rlb-dashboard .rlb-header.bp3-dialog-header {
     flex: 0 0 auto;
-    min-height: 56px;
+    min-height: 62px;
+    height: auto;
+    overflow: visible;
     padding: 8px 14px 8px 16px;
     border-bottom: 1px solid var(--rlb-border);
     background: var(--rlb-surface);
     box-shadow: none;
 }
 
-.rlb-header__heading {
+.rlb-dashboard .rlb-header__heading {
     flex: 1 1 auto;
     min-width: 0;
     overflow: visible;
 }
 
-.rlb-header__title {
+.rlb-dashboard .rlb-header__title.bp3-heading {
+    flex: 1 1 auto;
+    margin: 0;
     color: inherit;
-    font-size: 17px;
+    font-size: 18px;
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.35;
     overflow: visible;
+    text-overflow: initial;
     white-space: normal;
 }
 
-.rlb-header__subtitle {
+.rlb-dashboard .rlb-header__subtitle {
     margin: 2px 0 0;
     color: var(--rlb-muted);
-    font-size: 11px;
-    line-height: 1.25;
+    font-size: 12px;
+    line-height: 1.4;
     overflow: visible;
     white-space: normal;
 }
@@ -2175,13 +2208,13 @@ var STYLES = `
         border-radius: 0;
     }
 
-    .rlb-header {
+    .rlb-dashboard .rlb-header.bp3-dialog-header {
         flex-wrap: wrap;
         gap: 8px;
         padding: 12px;
     }
 
-    .rlb-header__heading {
+    .rlb-dashboard .rlb-header__heading {
         flex-basis: calc(100% - 80px);
     }
 
