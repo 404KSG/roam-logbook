@@ -75,6 +75,10 @@ test('onload mounts the topbar widget and registers every command', () => {
     assert.ok(topbarWidget(), 'widget should be attached to .rm-topbar');
     assert.equal(topbarWidget().textContent, '', 'idle stays icon-only');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__icon.bp3-icon-history'));
+    assert.ok(
+        topbarWidget().querySelector('button.rlb-topbar__button--icon-only'),
+        'idle trigger exposes a stable icon-only hit target'
+    );
     assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.equal(settingsPanel.tabTitle, 'Logbook');
@@ -343,7 +347,9 @@ test('the popover lists the running clock', () => {
     assert.ok(popover.querySelector('.rlb-run__title.bp3-icon-document-open'));
     assert.equal(popover.querySelector('.bp3-icon-stopwatch'), null);
     const checkout = popover.querySelector('[data-action="clock-out"]');
-    assert.equal(checkout.textContent, 'Check Out');
+    assert.equal(checkout.textContent, '');
+    assert.ok(checkout.classList.contains('bp3-icon-log-out'));
+    assert.equal(checkout.title, 'Check Out');
     assert.ok(checkout.title);
     assert.equal(checkout.getAttribute('aria-label'), checkout.title);
     const discard = popover.querySelector('.bp3-icon-trash');

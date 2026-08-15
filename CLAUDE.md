@@ -59,8 +59,10 @@ Layering, innermost first:
     `aria-hidden="true"`; its visual spacing is CSS `gap`. Do not reintroduce
     leading whitespace into text nodes. Elapsed state uses neutral Blueprint
     gray, restrained amber stale state, and restrained red Pomodoro overrun state;
-    there is no success-green running dot in the topbar. Session rows use a small,
-    muted status bullet for alignment; the explicit text action is `Check Out`.
+    there is no success-green running dot in the topbar. Idle uses a dedicated
+    square icon-only hit target, while running preserves the elapsed/count unit.
+    Session rows use a small, muted status bullet for alignment; the explicit
+    `Check Out` action is a neutral log-out icon with an accessible text label.
   - `syncTopbarLayout` marks the actual navigation shell and search child found at
     attach time. The Logbook unit is `flex: 0 0 auto`/`min-width: max-content`
     while Search owns only remaining space. Do not replace this with a global
@@ -70,6 +72,9 @@ Layering, innermost first:
     Roam's existing right-sidebar host. It creates no page or block. The panel is
     removed on its close action and during extension unload; a missing host uses a
     visibly marked DOM fallback only for unusual shells/test fixtures.
+  - Dashboard By Day is a compact seven-column chart: its range stays in the
+    heading, the bars use a quiet baseline/track and green intensity levels, and
+    By Task follows without an extra range row or large empty spacer.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 Persisted internal state uses explicit envelopes: Pause Batch format 2,
@@ -125,6 +130,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.3 UI slice currently has 212 tests).
+  (the beta.4 visual slice currently has 215 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

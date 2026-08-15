@@ -107,10 +107,12 @@ test('running rows expose compact explicit target metadata and complete accessib
     assert.doesNotMatch(row.textContent, /Project Page|\[2026-08-15 Sat 09:00\]/);
 
     const checkout = row.querySelector('[data-action="clock-out"]');
-    assert.equal(checkout.textContent, 'Check Out');
+    assert.equal(checkout.textContent, '');
+    assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.classList.contains('bp3-icon-stop'), false);
     assert.equal(checkout.classList.contains('bp3-intent-success'), false);
-    assert.equal(checkout.getAttribute('aria-label'), checkout.title);
+    assert.equal(checkout.title, 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
 
     const discard = row.querySelector('[data-action="discard"]');
     assert.match(discard.title, /Discard this CLOCK|discard this Session/i);
@@ -118,7 +120,7 @@ test('running rows expose compact explicit target metadata and complete accessib
     await settle();
 });
 
-test('Session surfaces put Refresh in the header and expose a textual Check Out action', async t => {
+test('Session surfaces put Refresh in the header and expose an icon-only Check Out action', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
@@ -130,8 +132,42 @@ test('Session surfaces put Refresh in the header and expose a textual Check Out 
     assert.equal(refresh.title, 'Refresh current Sessions');
     assert.equal(refresh.getAttribute('aria-label'), refresh.title);
     assert.equal(refresh.closest('.rlb-popover__footer'), null);
-    assert.equal(checkout.textContent, 'Check Out');
-    assert.match(checkout.getAttribute('aria-label'), /Check Out this Session/);
+    assert.equal(checkout.textContent, '');
+    assert.ok(checkout.classList.contains('bp3-icon-log-out'));
+    assert.equal(checkout.title, 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+});
+
+test('Check Out icon ends only its clicked Session in single and parallel mode', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second task',
+        parent: null,
+        page: 'Project Page',
+    });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    const singlePopover = openPopover();
+    const singleCheckout = singlePopover.querySelector('[data-action="clock-out"]');
+    assert.equal(singleCheckout.textContent, '');
+    assert.equal(singleCheckout.title, 'Check Out');
+    click(singleCheckout);
+    await settle();
+    assert.equal(clock.getRunning().length, 0);
+    click(topbarButton());
+
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
+    const parallelPopover = openPopover();
+    const rows = [...parallelPopover.querySelectorAll('.rlb-run')];
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every(row => row.querySelector('[data-action="clock-out"]')?.title === 'Check Out'));
+    const retainedUid = clock.getRunning()[1].clockUid;
+    click(rows[0].querySelector('[data-action="clock-out"]'));
+    await settle();
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].clockUid, retainedUid);
 });
 
 test('Shift+Click opens one shared Current Sessions sidebar without graph writes', async t => {

@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.3**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.4**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -45,7 +45,7 @@ With parallel timing enabled, it follows the stable elapsed timer with only the 
 0:28 · 2 Sessions
 ```
 
-Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Every running row has an explicit **Check Out** button, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is an icon-only header action in both surfaces.
+Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is an icon-only header action in both surfaces.
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks them **Paused**, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 
@@ -53,7 +53,7 @@ If a running Session had an unfinished Pomodoro, its exact remaining budget cont
 
 **Automatic Pomodoro** — every newly started or discovered running `CLOCK::` receives the configured target from that Session's original start, 30 minutes by default. There is no manual start button or command. Past the target, elapsed time turns a restrained red and **keeps counting** — the target never closes the clock. Change **Pomodoro duration (minutes)** to any positive minute value; the new value applies only to future Sessions. Reload discovery repairs an open CLOCK with no saved assignment, while Pause/Resume carries an unfinished target's exact remaining milliseconds instead of resetting it.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, per-day activity, and the original per-task tree over the range you pick. Running rows show Started as compact `Today 08:46` or `Aug 14 21:30` metadata while retaining the complete Org timestamp in the accessible title. By Task keeps complete titles—even beyond 80 characters—in a dedicated inner grid whose title span explicitly overrides Blueprint's non-shrinking button-child rule; collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails. Narrow screens scroll only when those columns truly need it.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. A compact, content-driven toolbar header keeps Logbook, its subtitle, range, refresh, and close controls readable without a hero treatment or clipped letterforms. The centered 960px analytical panel keeps totals for today and the last 7 days, running clocks, a compact seven-column By Day activity chart, and the original per-task tree over the range you pick. By Day keeps its date range in the heading, uses a quiet baseline/track treatment, and shows compact values only on days with activity; each bar still exposes the complete date and duration through its accessible label and tooltip. Running rows show Started as compact `Today 08:46` or `Aug 14 21:30` metadata while retaining the complete Org timestamp in the accessible title. By Task keeps complete titles—even beyond 80 characters—in a dedicated inner grid whose title span explicitly overrides Blueprint's non-shrinking button-child rule; collapsed sub-task summaries remain a separate non-overlapping layout item and Sessions, Own, and Total retain stable numeric rails. Narrow screens scroll only when those columns truly need it.
 
 ### Custom hotkeys
 

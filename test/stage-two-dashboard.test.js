@@ -136,9 +136,12 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     dashboard.open();
 
     const running = document.querySelector('[data-running-elapsed="true"]').closest('tr');
-    const stop = running.querySelector('[data-action="clock-out"]');
-    assert.equal(stop.classList.contains('bp3-intent-success'), false);
-    assert.equal(stop.getAttribute('aria-label'), stop.title);
+    const checkout = running.querySelector('[data-action="clock-out"]');
+    assert.equal(checkout.textContent, '');
+    assert.ok(checkout.classList.contains('bp3-icon-log-out'));
+    assert.equal(checkout.title, 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+    assert.equal(checkout.classList.contains('bp3-intent-success'), false);
 
     const discard = running.querySelector('[data-action="discard"]');
     discard.click();
@@ -198,9 +201,16 @@ test('Last 7 days renders seven accessible green intensity cells including zero 
     const cells = [...bars.querySelectorAll('.rlb-bar')];
     assert.equal(bars.dataset.dayCount, '7');
     assert.equal(cells.length, 7);
+    const daySection = bars.closest('.rlb-section');
+    const dayHeading = daySection.querySelector('.rlb-section__heading');
+    assert.ok(dayHeading, 'By Day keeps title and date range on one heading row');
+    assert.equal(dayHeading.querySelector('.rlb-section__title').textContent, 'By day');
+    assert.match(dayHeading.querySelector('.rlb-bars__range').textContent, /^2026-08-09 → 2026-08-15$/);
+    assert.equal(daySection.querySelectorAll('.rlb-bars__range').length, 1);
     assert.ok(cells.every(cell => cell.querySelector('.rlb-bar__label')?.textContent));
     assert.ok(cells.every(cell => /2026-08-\d{2}/.test(cell.getAttribute('aria-label'))));
     assert.ok(cells.every(cell => /\d+(?:h \d{2}m|m)/.test(cell.title)));
+    assert.ok(cells.some(cell => cell.querySelector('.rlb-bar__duration')?.textContent));
     assert.ok(cells.some(cell => cell.classList.contains('rlb-bar--level-0')));
     assert.ok(cells.some(cell => cell.classList.contains('rlb-bar--level-3')));
     assert.ok(cells.some(cell => /(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/.test(cell.textContent)));

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.4 — 2026-08-15
+
+- Corrected the idle topbar trigger to a square, Roam-aligned icon hit target that remains stable beside expanded Search and at narrow widths.
+- Restored per-Session **Check Out** to a neutral `log-out` icon in the popover, right sidebar, and Dashboard, with the same accessible label and single-row action semantics.
+- Compressed the Dashboard's By Day section into an inline-range weekly chart with a visible baseline, quiet tracks, compact duration labels, and earlier By Task content.
+- Added RED→GREEN geometry and behavior coverage for idle/focus states, icon-only checkout actions, compact chart layout, labels, and clipping.
+- The complete local suite now contains 215 tests, including browser geometry, accessibility, and final-bundle lifecycle coverage.
+
 ## 0.9.0-beta.3 — 2026-08-15
 
 - Kept the Logbook topbar unit stable while Roam Search expands or the window narrows.

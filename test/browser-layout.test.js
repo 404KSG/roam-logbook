@@ -176,6 +176,42 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
     }
 });
 
+test('idle topbar icon keeps a square hit target through focus and narrow search layout', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rm-topbar" style="width:360px"><div class="rlb-topbar__layout" style="width:100%"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Logbook"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div><div class="rlb-topbar__search" style="flex:1 1 auto"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
+        `(() => {
+            const button = document.querySelector('.rlb-topbar__button');
+            const icon = document.querySelector('.rlb-topbar__icon');
+            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+            const before = getComputedStyle(button, '::before');
+            button.focus();
+            const focused = getComputedStyle(button);
+            const buttonRect = rect(button);
+            const layoutRect = rect(document.querySelector('.rlb-topbar__layout'));
+            const searchRect = rect(document.querySelector('.rlb-topbar__search'));
+            return {
+                button: buttonRect,
+                icon: rect(icon),
+                layout: layoutRect,
+                search: searchRect,
+                square: Math.abs(buttonRect.width - buttonRect.height) <= 1,
+                target: buttonRect.width >= 30 && buttonRect.width <= 34 && buttonRect.height >= 30 && buttonRect.height <= 34,
+                noPseudoContent: before.content === 'none' || before.content === 'normal' || before.width === 'auto',
+                focusedBackground: focused.backgroundColor,
+                noOverlap: buttonRect.right <= searchRect.left + .5 && searchRect.right <= layoutRect.right + .5,
+                centered: Math.abs((buttonRect.left + buttonRect.width / 2) - (layoutRect.left + 72 + buttonRect.width / 2)) < 100
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.square, true, JSON.stringify(geometry));
+    assert.equal(geometry.target, true, JSON.stringify(geometry));
+    assert.equal(geometry.noPseudoContent, true, JSON.stringify(geometry));
+    assert.notEqual(geometry.focusedBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
+    assert.equal(geometry.noOverlap, true, JSON.stringify(geometry));
+});
+
 test('a collapsed long Task wraps without painting into its summary', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const title = "Graph Engineering: How to Build AI Agent Systems That Don't Break at Scale * 这是一个需要完整换行且不能和摘要粘连的超长任务标题";
@@ -244,13 +280,53 @@ test('seven-day activity cells keep labels, green levels, and compact geometry o
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.equal(geometry.count, 7, JSON.stringify(geometry));
-    assert.ok(geometry.chart.height >= 100 && geometry.chart.height <= 120, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 72 && geometry.chart.height <= 96, JSON.stringify(geometry));
     assert.match(geometry.columns, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
     assert.equal(geometry.accessible, true, JSON.stringify(geometry));
     assert.equal(geometry.overlap, false, JSON.stringify(geometry));
     assert.equal(geometry.labelsInside, true, JSON.stringify(geometry));
     assert.ok(new Set(geometry.colors).size >= 3, JSON.stringify(geometry));
     assert.ok(geometry.colors.every(color => !color.includes('45, 114, 210')), JSON.stringify(geometry));
+});
+
+test('By Day is a compact weekly chart with an inline range and readable values', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const cells = [0, 30, 0, 120, 0, 60, 15]
+        .map((minutes, index) => `<div class="rlb-bar rlb-bar--level-${minutes === 0 ? 0 : index === 3 ? 3 : 1}${minutes === 0 ? ' rlb-bar--empty' : ''}" role="listitem" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-bar__duration">${minutes ? `${minutes}m` : ''}</span><div class="rlb-bar__track"><div class="rlb-bar__fill" style="height:${minutes ? Math.max(4, Math.round((minutes / 120) * 100)) : 0}%"></div></div><span class="rlb-bar__label">Aug ${index + 9} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}</span></div>`)
+        .join('');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open"><div class="rlb-dialog" style="width:760px;height:700px"><div class="rlb-body"><section class="rlb-section rlb-by-day"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" data-day-count="7" style="--rlb-day-count:7" role="list">${cells}</div></section><section class="rlb-section rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By task</h3></div></section></div></div></div>`),
+        `(() => {
+            const day = document.querySelector('.rlb-by-day');
+            const chart = document.querySelector('.rlb-bars');
+            const task = document.querySelector('.rlb-by-task');
+            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+            const bars = [...chart.querySelectorAll('.rlb-bar')];
+            const durationLabels = bars.map(bar => bar.querySelector('.rlb-bar__duration'));
+            const labelRects = [...chart.querySelectorAll('.rlb-bar__label, .rlb-bar__duration')].map(rect);
+            return {
+                day: rect(day), chart: rect(chart), task: rect(task),
+                count: bars.length,
+                range: document.querySelector('.rlb-bars__range')?.textContent,
+                durationCount: durationLabels.filter(label => label?.textContent).length,
+                chartHeight: rect(chart).height,
+                labelsInside: labelRects.every(item => item.left >= rect(chart).left && item.right <= rect(chart).right + .5),
+                noLabelOverlap: labelRects.every((item, index) => labelRects.slice(index + 1).every(other => item.right <= other.left || other.right <= item.left || item.bottom <= other.top || other.bottom <= item.top)),
+                taskMovesUp: rect(task).top < rect(day).bottom + 24,
+                baseline: getComputedStyle(chart.querySelector('.rlb-bar__track')).borderBottomStyle
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.count, 7, JSON.stringify(geometry));
+    assert.equal(geometry.range, '2026-08-09 → 2026-08-15', JSON.stringify(geometry));
+    assert.ok(geometry.chartHeight <= 96, JSON.stringify(geometry));
+    assert.ok(geometry.day.height <= 170, JSON.stringify(geometry));
+    assert.ok(geometry.durationCount >= 3, JSON.stringify(geometry));
+    assert.equal(geometry.labelsInside, true, JSON.stringify(geometry));
+    assert.equal(geometry.noLabelOverlap, true, JSON.stringify(geometry));
+    assert.equal(geometry.taskMovesUp, true, JSON.stringify(geometry));
+    assert.notEqual(geometry.baseline, 'none', JSON.stringify(geometry));
 });
 
 test('popover rows stay within 340px and 320px with two metadata lines and a two-row footer', async t => {
@@ -277,12 +353,12 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
                 rowHasDot: Boolean(row.querySelector('.rlb-dot')),
                 footerInside: footerRects.every(item => item.left >= popRect.left && item.right <= popRect.right && item.top >= popRect.top && item.bottom <= popRect.bottom),
                 footerOverlap: footerRects.some((item, index) => footerRects.slice(index + 1).some(other => item.left < other.right && item.right > other.left && item.top < other.bottom && item.bottom > other.top)),
-                iconLabels: [...popover.querySelectorAll('.bp3-icon-stop, .bp3-icon-trash, .bp3-icon-refresh')].every(button => button.title && button.getAttribute('aria-label')),
+                iconLabels: [...popover.querySelectorAll('.bp3-icon-log-out, .bp3-icon-trash, .bp3-icon-refresh')].every(button => button.title && button.getAttribute('aria-label')),
             };
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh" data-action="refresh" title="Refresh current Sessions" aria-label="Refresh current Sessions"></button></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal rlb-run__checkout" data-action="clock-out" title="Check Out this Session" aria-label="Check Out this Session">Check Out</button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh" data-action="refresh" title="Refresh current Sessions" aria-label="Refresh current Sessions"></button></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));

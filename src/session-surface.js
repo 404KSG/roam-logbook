@@ -68,10 +68,10 @@ const renderRunningRow = (row, now, options) => {
 
     const actions = el('div', 'rlb-run__actions');
     const checkout = button(
-        'bp3-button bp3-small bp3-minimal rlb-run__checkout',
-        'Check Out',
+        'bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout',
+        '',
         () => void options.onCheckOut?.(entry),
-        { title: 'Check Out this Session' }
+        { title: 'Check Out' }
     );
     checkout.dataset.action = 'clock-out';
 

@@ -38,6 +38,38 @@ export const STYLES = `
     font-variant-numeric: tabular-nums;
 }
 
+/* Idle is a real icon-only control, not a max-content text button. Roam's
+   Blueprint button rules otherwise collapse the hit target to the icon's
+   pseudo-element, which paints the hover state as a narrow vertical strip. */
+.rlb-topbar__button--icon-only {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 34px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 34px !important;
+    padding: 0 !important;
+    border-radius: 4px;
+}
+
+.rlb-topbar__button--icon-only::before {
+    display: none !important;
+    content: none !important;
+}
+
+.rlb-topbar__button--icon-only > .rlb-topbar__icon {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    margin: 0 !important;
+}
+
+.rlb-topbar__button--icon-only:hover,
+.rlb-topbar__button--icon-only:focus-visible {
+    background: rgba(167, 182, 194, 0.24) !important;
+}
+
 /* The widget shares the left navigation row with Roam's expanding search.
    These classes are applied to the actual host/child found at attach time, so
    the search can shrink into remaining space without ever shrinking this unit. */
@@ -408,6 +440,15 @@ export const STYLES = `
 }
 
 .rlb-run__actions .rlb-run__checkout {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
     color: #5c7080;
 }
 
@@ -433,12 +474,21 @@ export const STYLES = `
     opacity: 1;
 }
 
-.rlb-table .rlb-running__stop {
+.rlb-table .rlb-running__checkout {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
     color: #5c7080;
 }
 
-.rlb-table .rlb-running__stop:hover,
-.rlb-table .rlb-running__stop:focus {
+.rlb-table .rlb-running__checkout:hover,
+.rlb-table .rlb-running__checkout:focus {
     color: #c23030;
 }
 
@@ -722,6 +772,20 @@ export const STYLES = `
 
 .rlb-section__heading .rlb-section__title {
     margin: 0;
+}
+
+.rlb-bars__range {
+    min-width: 0;
+    max-width: 58%;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--rlb-muted, #5c7080);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Scoped to the cell so it outranks .bp3-button.bp3-small, whose own min-width
@@ -1030,7 +1094,7 @@ export const STYLES = `
 
 .rlb-section {
     margin: 0;
-    padding: 22px 0 20px;
+    padding: 12px 0 14px;
     border-bottom: 1px solid var(--rlb-border-light);
 }
 
@@ -1042,9 +1106,38 @@ export const STYLES = `
     color: var(--rlb-muted);
 }
 
+.rlb-dashboard .rlb-section__heading {
+    margin-bottom: 4px;
+}
+
 .rlb-bars {
-    height: 112px;
-    padding: 8px 0 4px;
+    height: 82px;
+    padding: 2px 0 0;
+    border-bottom: 1px solid var(--rlb-border);
+}
+
+.rlb-bar {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 2px;
+}
+
+.rlb-bar__duration {
+    display: block;
+    min-width: 0;
+    min-height: 10px;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-bar__track {
+    border-top: 1px solid var(--rlb-border-light);
+    border-bottom: 1px solid var(--rlb-border);
 }
 
 .rlb-table th {

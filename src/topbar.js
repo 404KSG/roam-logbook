@@ -377,6 +377,7 @@ export function createTopbar({
         const stale = findStaleClocks(entries, now, staleHours()).length > 0;
 
         if (!running) {
+            buttonNode.classList.add('rlb-topbar__button--icon-only');
             buttonNode.classList.remove('rlb-topbar__button--parallel');
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
@@ -391,6 +392,7 @@ export function createTopbar({
             return;
         }
 
+        buttonNode.classList.remove('rlb-topbar__button--icon-only');
         const [first] = entries;
         const elapsed = now - first.start.getTime();
         // The topbar is a timing-state entry, not a task summary. Overrun

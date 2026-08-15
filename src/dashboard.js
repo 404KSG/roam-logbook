@@ -263,10 +263,10 @@ export function createDashboard({
             discard.dataset.action = 'discard';
             actions.append(
                 button(
-                    'bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-running__stop',
+                    'bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout',
                     '',
                     () => void act(() => clock.clockOut(entry.clockUid)),
-                    { title: 'Clock out this Session' }
+                    { title: 'Check Out' }
                 ),
                 discard
             );
@@ -307,7 +307,16 @@ export function createDashboard({
 
     const daysSection = (days, now) => {
         const section = el('section', 'rlb-section');
-        section.appendChild(el('h3', 'rlb-section__title', 'By day'));
+        const heading = el('div', 'rlb-section__heading');
+        const range = el(
+            'span',
+            'rlb-bars__range',
+            `${days[0]?.key ?? ''} → ${days[days.length - 1]?.key ?? ''}`
+        );
+        range.title = range.textContent;
+        range.setAttribute('aria-label', `Date range: ${range.textContent}`);
+        heading.append(el('h3', 'rlb-section__title', 'By day'), range);
+        section.appendChild(heading);
         const peak = Math.max(1, ...days.map(day => day.minutes));
         const bars = el('div', 'rlb-bars');
         bars.dataset.dayCount = String(days.length);
@@ -328,17 +337,20 @@ export function createDashboard({
             bar.title = `${day.key} · ${duration}`;
             bar.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
             bar.setAttribute('role', 'listitem');
+            const durationLabel = el(
+                'span',
+                'rlb-bar__duration',
+                day.minutes > 0 ? duration : ''
+            );
+            if (day.minutes === 0) durationLabel.setAttribute('aria-hidden', 'true');
             const track = el('div', 'rlb-bar__track');
             const fill = el('div', 'rlb-bar__fill');
             fill.style.height = `${day.minutes === 0 ? 0 : Math.max(4, Math.round((day.minutes / peak) * 100))}%`;
             track.appendChild(fill);
-            bar.append(track, el('span', 'rlb-bar__label', label));
+            bar.append(durationLabel, track, el('span', 'rlb-bar__label', label));
             bars.appendChild(bar);
         }
         section.appendChild(bars);
-        section.appendChild(
-            el('div', 'rlb-muted bp3-text-small', `${days[0]?.key} → ${days[days.length - 1]?.key}`)
-        );
         return section;
     };
 

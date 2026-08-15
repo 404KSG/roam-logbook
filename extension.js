@@ -610,7 +610,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.3";
+var PLUGIN_VERSION = "0.9.0-beta.4";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -1652,10 +1652,10 @@ function createDashboard({
       discard.dataset.action = "discard";
       actions.append(
         button(
-          "bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-running__stop",
+          "bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout",
           "",
           () => void act(() => clockOut(entry.clockUid)),
-          { title: "Clock out this Session" }
+          { title: "Check Out" }
         ),
         discard
       );
@@ -1693,7 +1693,16 @@ function createDashboard({
   };
   const daysSection = (days, now) => {
     const section = el("section", "rlb-section");
-    section.appendChild(el("h3", "rlb-section__title", "By day"));
+    const heading = el("div", "rlb-section__heading");
+    const range = el(
+      "span",
+      "rlb-bars__range",
+      `${days[0]?.key ?? ""} \u2192 ${days[days.length - 1]?.key ?? ""}`
+    );
+    range.title = range.textContent;
+    range.setAttribute("aria-label", `Date range: ${range.textContent}`);
+    heading.append(el("h3", "rlb-section__title", "By day"), range);
+    section.appendChild(heading);
     const peak = Math.max(1, ...days.map((day) => day.minutes));
     const bars = el("div", "rlb-bars");
     bars.dataset.dayCount = String(days.length);
@@ -1714,17 +1723,21 @@ function createDashboard({
       bar.title = `${day.key} \xB7 ${duration}`;
       bar.setAttribute("aria-label", `${day.key}, ${label}, ${duration}`);
       bar.setAttribute("role", "listitem");
+      const durationLabel = el(
+        "span",
+        "rlb-bar__duration",
+        day.minutes > 0 ? duration : ""
+      );
+      if (day.minutes === 0)
+        durationLabel.setAttribute("aria-hidden", "true");
       const track = el("div", "rlb-bar__track");
       const fill = el("div", "rlb-bar__fill");
       fill.style.height = `${day.minutes === 0 ? 0 : Math.max(4, Math.round(day.minutes / peak * 100))}%`;
       track.appendChild(fill);
-      bar.append(track, el("span", "rlb-bar__label", label));
+      bar.append(durationLabel, track, el("span", "rlb-bar__label", label));
       bars.appendChild(bar);
     }
     section.appendChild(bars);
-    section.appendChild(
-      el("div", "rlb-muted bp3-text-small", `${days[0]?.key} \u2192 ${days[days.length - 1]?.key}`)
-    );
     return section;
   };
   const tasksSection = (tree) => {
@@ -3006,6 +3019,38 @@ var STYLES = `
     font-variant-numeric: tabular-nums;
 }
 
+/* Idle is a real icon-only control, not a max-content text button. Roam's
+   Blueprint button rules otherwise collapse the hit target to the icon's
+   pseudo-element, which paints the hover state as a narrow vertical strip. */
+.rlb-topbar__button--icon-only {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 34px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 34px !important;
+    padding: 0 !important;
+    border-radius: 4px;
+}
+
+.rlb-topbar__button--icon-only::before {
+    display: none !important;
+    content: none !important;
+}
+
+.rlb-topbar__button--icon-only > .rlb-topbar__icon {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    margin: 0 !important;
+}
+
+.rlb-topbar__button--icon-only:hover,
+.rlb-topbar__button--icon-only:focus-visible {
+    background: rgba(167, 182, 194, 0.24) !important;
+}
+
 /* The widget shares the left navigation row with Roam's expanding search.
    These classes are applied to the actual host/child found at attach time, so
    the search can shrink into remaining space without ever shrinking this unit. */
@@ -3376,6 +3421,15 @@ var STYLES = `
 }
 
 .rlb-run__actions .rlb-run__checkout {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
     color: #5c7080;
 }
 
@@ -3401,12 +3455,21 @@ var STYLES = `
     opacity: 1;
 }
 
-.rlb-table .rlb-running__stop {
+.rlb-table .rlb-running__checkout {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
     color: #5c7080;
 }
 
-.rlb-table .rlb-running__stop:hover,
-.rlb-table .rlb-running__stop:focus {
+.rlb-table .rlb-running__checkout:hover,
+.rlb-table .rlb-running__checkout:focus {
     color: #c23030;
 }
 
@@ -3690,6 +3753,20 @@ var STYLES = `
 
 .rlb-section__heading .rlb-section__title {
     margin: 0;
+}
+
+.rlb-bars__range {
+    min-width: 0;
+    max-width: 58%;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--rlb-muted, #5c7080);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Scoped to the cell so it outranks .bp3-button.bp3-small, whose own min-width
@@ -3998,7 +4075,7 @@ var STYLES = `
 
 .rlb-section {
     margin: 0;
-    padding: 22px 0 20px;
+    padding: 12px 0 14px;
     border-bottom: 1px solid var(--rlb-border-light);
 }
 
@@ -4010,9 +4087,38 @@ var STYLES = `
     color: var(--rlb-muted);
 }
 
+.rlb-dashboard .rlb-section__heading {
+    margin-bottom: 4px;
+}
+
 .rlb-bars {
-    height: 112px;
-    padding: 8px 0 4px;
+    height: 82px;
+    padding: 2px 0 0;
+    border-bottom: 1px solid var(--rlb-border);
+}
+
+.rlb-bar {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 2px;
+}
+
+.rlb-bar__duration {
+    display: block;
+    min-width: 0;
+    min-height: 10px;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-bar__track {
+    border-top: 1px solid var(--rlb-border-light);
+    border-bottom: 1px solid var(--rlb-border);
 }
 
 .rlb-table th {
@@ -4146,10 +4252,10 @@ var renderRunningRow = (row, now, options) => {
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(
-    "bp3-button bp3-small bp3-minimal rlb-run__checkout",
-    "Check Out",
+    "bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout",
+    "",
     () => void options.onCheckOut?.(entry),
-    { title: "Check Out this Session" }
+    { title: "Check Out" }
   );
   checkout.dataset.action = "clock-out";
   const discarding = options.discardingClockUid === entry.clockUid;
@@ -4650,6 +4756,7 @@ function createTopbar({
     const overrun = entries.some((entry) => isOverrun(entry, now));
     const stale = findStaleClocks(entries, now, staleHours()).length > 0;
     if (!running2) {
+      buttonNode.classList.add("rlb-topbar__button--icon-only");
       buttonNode.classList.remove("rlb-topbar__button--parallel");
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
@@ -4661,6 +4768,7 @@ function createTopbar({
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
+    buttonNode.classList.remove("rlb-topbar__button--icon-only");
     const [first] = entries;
     const elapsed = now - first.start.getTime();
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
