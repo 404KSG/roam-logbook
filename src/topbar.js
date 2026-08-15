@@ -218,6 +218,7 @@ export function createTopbar({
                 void openBlock(taskUid);
             },
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
+            onResume: item => void run(() => paused.resumeOne(item.taskUid)),
             onDiscard: entry => {
                 if (discardConfirmUid !== entry.clockUid) {
                     discardConfirmUid = entry.clockUid;

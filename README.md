@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.4**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.5**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -45,9 +45,9 @@ With parallel timing enabled, it follows the stable elapsed timer with only the 
 0:28 · 2 Sessions
 ```
 
-Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is an icon-only header action in both surfaces.
+Task names, banked totals, automatic Pomodoro targets, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click** opens the same view in Roam's right sidebar. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause All, Resume All, and Clock Out All are text buttons; Refresh is one icon-only footer action in each surface.
 
-**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks them **Paused**, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
+**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 
 If a running Session had an unfinished Pomodoro, its exact remaining budget continues on the new Session. A completed or overrun Pomodoro is saved as explicitly suppressed and does not restart. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
 

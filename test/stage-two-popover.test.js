@@ -120,22 +120,42 @@ test('running rows expose compact explicit target metadata and complete accessib
     await settle();
 });
 
-test('Session surfaces put Refresh in the header and expose an icon-only Check Out action', async t => {
+test('Session surfaces put one accessible Refresh action in the footer', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second task',
+        parent: null,
+        page: 'Project Page',
+    });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
 
     const popover = openPopover();
-    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+    const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
     const checkout = popover.querySelector('[data-action="clock-out"]');
 
-    assert.ok(refresh, 'Refresh belongs in the surface header');
-    assert.equal(refresh.title, 'Refresh current Sessions');
-    assert.equal(refresh.getAttribute('aria-label'), refresh.title);
-    assert.equal(refresh.closest('.rlb-popover__footer'), null);
+    assert.ok(refresh, 'Refresh belongs in the surface footer');
+    assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
+    assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
+    assert.equal(refresh.title, 'Refresh');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh');
+    assert.ok(refresh.classList.contains('bp3-icon-refresh'));
+    assert.deepEqual(
+        [...popover.querySelectorAll('.rlb-popover__footer button')].map(node => node.textContent),
+        ['Dashboard', 'Pause All', 'Clock Out All', '']
+    );
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.title, 'Check Out');
     assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+
+    click(refresh);
+    await settle();
+    assert.equal(popover.parentElement, document.body);
+    assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
+
 });
 
 test('Check Out icon ends only its clicked Session in single and parallel mode', async t => {
@@ -170,6 +190,91 @@ test('Check Out icon ends only its clicked Session in single and parallel mode',
     assert.equal(clock.getRunning()[0].clockUid, retainedUid);
 });
 
+test('paused rows expose an icon-only Resume action and restore only the clicked Session', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second paused task',
+        parent: null,
+        page: 'Project Page',
+    });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
+
+    const surface = openPopover();
+    const pause = [...surface.querySelectorAll('.rlb-popover__footer button')].find(
+        node => node.textContent === 'Pause All'
+    );
+    click(pause);
+    await settle();
+
+    const pausedRows = [...surface.querySelectorAll('[data-session-state="paused"]')];
+    assert.equal(pausedRows.length, 2);
+    assert.ok(pausedRows.every(row => row.querySelector('[data-action="resume"]')));
+    assert.ok(
+        pausedRows.every(row => {
+            const resume = row.querySelector('[data-action="resume"]');
+            return resume.textContent === '' && resume.classList.contains('bp3-icon-play') && resume.title === 'Resume' && resume.getAttribute('aria-label') === 'Resume';
+        })
+    );
+    assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__state')));
+    assert.ok(pausedRows.every(row => !/\bPaused\b/.test(row.textContent)));
+
+    const firstTaskUid = pausedRows[0].dataset.taskUid;
+    click(pausedRows[0].querySelector('[data-action="resume"]'));
+    await settle();
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, firstTaskUid);
+    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 1);
+    assert.ok(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
+
+    click(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
+    await settle();
+    assert.equal(clock.getRunning().length, 2);
+    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
+    assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause All'));
+    assert.equal([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Resume All'), false);
+});
+
+test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    const surface = openPopover();
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    await settle();
+
+    const row = surface.querySelector('[data-session-state="paused"]');
+    const resume = row.querySelector('[data-action="resume"]');
+    click(resume);
+    click(resume);
+    await settle();
+    assert.equal(clock.getRunning().length, 1, 'double click does not create two running CLOCKs');
+    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
+
+    await clock.clockOut(clock.getRunning()[0].clockUid);
+    await settle();
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
+    await settle();
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    await settle();
+    const retryRow = surface.querySelector('[data-session-state="paused"]');
+    const originalCreate = graph.api.data.block.create;
+    graph.api.data.block.create = async () => {
+        throw new Error('individual resume write failed');
+    };
+    try {
+        click(retryRow.querySelector('[data-action="resume"]'));
+        await settle();
+    } finally {
+        graph.api.data.block.create = originalCreate;
+    }
+    assert.equal(clock.getRunning().length, 0);
+    assert.ok(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
+    assert.match(surface.textContent, /individual resume write failed/i);
+});
+
 test('Shift+Click opens one shared Current Sessions sidebar without graph writes', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
@@ -195,7 +300,12 @@ test('Shift+Click opens one shared Current Sessions sidebar without graph writes
         assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
         assert.equal(sidebar.getAttribute('role'), 'region');
         assert.match(sidebar.textContent, /1 Session Running/);
-        assert.ok(sidebar.querySelector('.rlb-surface__header [data-action="refresh"]'));
+        assert.equal(sidebar.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
+        const sidebarRefresh = sidebar.querySelector('.rlb-popover__footer [data-action="refresh"]');
+        assert.ok(sidebarRefresh);
+        assert.equal(sidebar.querySelectorAll('[data-action="refresh"]').length, 1);
+        assert.equal(sidebarRefresh.title, 'Refresh');
+        assert.equal(sidebarRefresh.getAttribute('aria-label'), 'Refresh');
         assert.ok(sidebar.querySelector('[data-action="clock-out"]'));
         assert.equal(trigger.getAttribute('aria-expanded'), 'true');
 
@@ -211,6 +321,50 @@ test('Shift+Click opens one shared Current Sessions sidebar without graph writes
     } finally {
         for (const name of Object.keys(writes)) graph.api.data.block[name] = original[name];
     }
+});
+
+test('sidebar paused rows use the same actionable Resume icon as the popover', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
+    shiftClick(topbarButton());
+    const sidebar = document.querySelector('#roam-logbook-current-sessions');
+    const pause = [...sidebar.querySelectorAll('.rlb-popover__footer button')].find(
+        node => node.textContent === 'Pause All'
+    );
+    click(pause);
+    await settle();
+
+    const resume = sidebar.querySelector('[data-session-state="paused"] [data-action="resume"]');
+    assert.ok(resume);
+    assert.equal(resume.textContent, '');
+    assert.ok(resume.classList.contains('bp3-icon-play'));
+    assert.equal(resume.title, 'Resume');
+    assert.equal(resume.getAttribute('aria-label'), 'Resume');
+    click(resume);
+    await settle();
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(sidebar.querySelector('[data-session-state="paused"]'), null);
+});
+
+test('external clock activity during a pause is not duplicated by individual Resume', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    const surface = openPopover();
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    await settle();
+
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:02:00') });
+    await settle();
+    const resume = surface.querySelector('[data-session-state="paused"] [data-action="resume"]');
+    click(resume);
+    await settle();
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(surface.querySelector('[data-session-state="paused"]'), null);
+    assert.match(surface.textContent, /already clocked out|not reopened|reconciled/i);
 });
 
 test('Current Sessions sidebar is removed completely on extension unload', async t => {

@@ -228,6 +228,11 @@ export const STYLES = `
 
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
 .rlb-popover {
+    --rlb-surface-title-size: 10px;
+    --rlb-surface-task-size: 13px;
+    --rlb-surface-meta-size: 10px;
+    --rlb-surface-action-size: 13px;
+    --rlb-surface-row-padding: 5px;
     position: fixed;
     z-index: 30;
     width: min(340px, calc(100vw - 16px));
@@ -240,8 +245,8 @@ export const STYLES = `
 
 .rlb-popover__title {
     min-width: 0;
-    padding: 4px 6px 8px;
-    font-size: 11px;
+    padding: 3px 6px 6px;
+    font-size: var(--rlb-surface-title-size, 10px);
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
@@ -250,7 +255,7 @@ export const STYLES = `
 
 .rlb-surface__header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content max-content;
+    grid-template-columns: minmax(0, 1fr) max-content;
     align-items: center;
     column-gap: 4px;
     min-width: 0;
@@ -272,6 +277,11 @@ export const STYLES = `
 }
 
 .rlb-sidebar {
+    --rlb-surface-title-size: 10px;
+    --rlb-surface-task-size: 13px;
+    --rlb-surface-meta-size: 10px;
+    --rlb-surface-action-size: 13px;
+    --rlb-surface-row-padding: 5px;
     width: min(360px, 100%);
     max-width: 100%;
     max-height: 100%;
@@ -357,6 +367,28 @@ export const STYLES = `
 
 .rlb-popover__footer .bp3-button {
     min-width: 0;
+    font-size: var(--rlb-surface-action-size, 12px);
+    line-height: 1.2;
+}
+
+.rlb-popover__footer .rlb-surface__refresh {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    justify-self: center;
+    padding: 0 !important;
+    align-items: center;
+    justify-content: center;
+    color: #5c7080;
+}
+
+.rlb-popover__footer .rlb-surface__refresh:hover,
+.rlb-popover__footer .rlb-surface__refresh:focus-visible {
+    color: #3f596b;
+    background: rgba(167, 182, 194, 0.24);
 }
 
 .bp3-dark .rlb-popover__footer {
@@ -367,8 +399,8 @@ export const STYLES = `
     display: grid;
     grid-template-columns: 8px minmax(0, 1fr) max-content;
     align-items: start;
-    gap: 6px;
-    padding: 6px;
+    gap: 5px;
+    padding: var(--rlb-surface-row-padding, 5px) 6px;
     border-radius: 3px;
 }
 
@@ -392,7 +424,7 @@ export const STYLES = `
 .rlb-run__status {
     width: 7px;
     height: 7px;
-    margin-top: 7px;
+    margin-top: 6px;
     border-radius: 50%;
     background: #7a9e87;
     opacity: 0.75;
@@ -410,12 +442,15 @@ export const STYLES = `
     white-space: nowrap;
     text-align: left;
     padding: 0;
+    font-size: var(--rlb-surface-task-size, 15px);
+    line-height: 1.25;
 }
 
 .rlb-run__meta {
     display: block;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--rlb-surface-meta-size, 10px);
+    line-height: 1.25;
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
 }
@@ -455,6 +490,25 @@ export const STYLES = `
 .rlb-run__actions .rlb-run__checkout:hover,
 .rlb-run__actions .rlb-run__checkout:focus {
     color: #c23030;
+}
+
+.rlb-run__actions .rlb-run__resume {
+    width: 32px;
+    min-width: 32px;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
+    color: #5c7080;
+}
+
+.rlb-run__actions .rlb-run__resume:hover,
+.rlb-run__actions .rlb-run__resume:focus-visible {
+    color: #3f596b;
+    background: rgba(167, 182, 194, 0.24);
 }
 
 .rlb-run--paused .rlb-run__meta,
@@ -1010,7 +1064,7 @@ export const STYLES = `
     flex: 1 1 auto;
     margin: 0;
     color: inherit;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     line-height: 1.35;
     overflow: visible;
@@ -1021,7 +1075,7 @@ export const STYLES = `
 .rlb-dashboard .rlb-header__subtitle {
     margin: 2px 0 0;
     color: var(--rlb-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
     overflow: visible;
     white-space: normal;
@@ -1029,6 +1083,12 @@ export const STYLES = `
 
 .rlb-header .bp3-select select {
     min-width: 112px;
+}
+
+.rlb-dashboard .bp3-button,
+.rlb-dashboard .bp3-select select {
+    font-size: 12px;
+    line-height: 1.2;
 }
 
 .rlb-icon-button {
@@ -1055,7 +1115,7 @@ export const STYLES = `
 
 .rlb-stat {
     min-width: 0;
-    padding: 14px 16px;
+    padding: 12px 16px;
     border-right: 1px solid var(--rlb-border-light);
     border-radius: 0;
     background: transparent;
@@ -1072,7 +1132,7 @@ export const STYLES = `
 
 .rlb-stat__value {
     color: var(--rlb-text);
-    font-size: 19px;
+    font-size: 18px;
     line-height: 1.3;
 }
 
@@ -1080,21 +1140,21 @@ export const STYLES = `
     display: block;
     margin-top: 2px;
     color: var(--rlb-muted);
-    font-size: 10px;
+    font-size: 9px;
 }
 
 .rlb-body,
 .rlb-body__scroll {
     flex: 1 1 auto;
     min-height: 0;
-    padding: 0 20px 24px;
+    padding: 0 20px 18px;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
 
 .rlb-section {
     margin: 0;
-    padding: 12px 0 14px;
+    padding: 10px 0 12px;
     border-bottom: 1px solid var(--rlb-border-light);
 }
 
@@ -1104,6 +1164,10 @@ export const STYLES = `
 
 .rlb-section__title {
     color: var(--rlb-muted);
+}
+
+.rlb-dashboard .rlb-section__title {
+    font-size: 11px;
 }
 
 .rlb-dashboard .rlb-section__heading {
@@ -1142,11 +1206,14 @@ export const STYLES = `
 
 .rlb-table th {
     color: var(--rlb-muted);
+    font-size: 10px;
     border-bottom-color: var(--rlb-border);
 }
 
 .rlb-table td,
 .bp3-dark .rlb-table td {
+    padding: 5px 8px;
+    font-size: 13px;
     border-bottom-color: var(--rlb-border-light);
 }
 

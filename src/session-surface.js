@@ -101,7 +101,6 @@ const renderPausedRow = (row, now, options) => {
     status.setAttribute('aria-label', 'Paused Session');
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
-    meta.appendChild(el('div', 'rlb-run__meta-line rlb-run__meta-primary', 'Paused'));
     const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
     const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : 'Paused Session';
     const pausedNode = el(
@@ -116,9 +115,14 @@ const renderPausedRow = (row, now, options) => {
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
-    const state = el('span', 'rlb-run__state', 'Paused');
-    state.setAttribute('aria-label', 'Paused Session');
-    actions.appendChild(state);
+    const resume = button(
+        'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume',
+        '',
+        () => void options.onResume?.(item),
+        { title: 'Resume' }
+    );
+    resume.dataset.action = 'resume';
+    actions.appendChild(resume);
     node.append(status, body, actions);
     return node;
 };
@@ -165,17 +169,6 @@ export function renderSessionSurface(root, model, options = {}) {
 
     const header = el('header', 'rlb-surface__header');
     header.appendChild(title);
-    if (options.onRefresh) {
-        header.appendChild(
-            button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh',
-                '',
-                () => void options.onRefresh(),
-                { title: 'Refresh current Sessions' }
-            )
-        );
-        header.lastElementChild.dataset.action = 'refresh';
-    }
     if (options.onClose) {
         header.appendChild(
             button(
@@ -252,6 +245,17 @@ export function renderSessionSurface(root, model, options = {}) {
                 )
             );
         }
+    }
+    if (options.onRefresh) {
+        footer.appendChild(
+            button(
+                'bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh',
+                '',
+                () => void options.onRefresh(),
+                { title: 'Refresh' }
+            )
+        );
+        footer.lastElementChild.dataset.action = 'refresh';
     }
     root.appendChild(footer);
     return root;

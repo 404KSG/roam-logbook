@@ -62,7 +62,9 @@ Layering, innermost first:
     there is no success-green running dot in the topbar. Idle uses a dedicated
     square icon-only hit target, while running preserves the elapsed/count unit.
     Session rows use a small, muted status bullet for alignment; the explicit
-    `Check Out` action is a neutral log-out icon with an accessible text label.
+    `Check Out` action is a neutral log-out icon with an accessible text label,
+    and paused rows expose an icon-only `Resume` action. The shared Refresh
+    action belongs in the two-column footer grid, not the surface header.
   - `syncTopbarLayout` marks the actual navigation shell and search child found at
     attach time. The Logbook unit is `flex: 0 0 auto`/`min-width: max-content`
     while Search owns only remaining space. Do not replace this with a global
@@ -130,6 +132,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.4 visual slice currently has 215 tests).
+  (the beta.5 visual slice currently has 220 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

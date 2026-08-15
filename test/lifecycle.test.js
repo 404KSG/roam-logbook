@@ -102,8 +102,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 62px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 8px 14px 8px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
-    assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 18px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
-    assert.match(css, /\.rlb-dashboard \.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 12px[^}]*line-height: 1\.4[^}]*overflow: visible[^}]*white-space: normal/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
+    assert.match(css, /\.rlb-dashboard \.rlb-header__subtitle\s*{[^}]*margin: 2px 0 0[^}]*font-size: 11px[^}]*line-height: 1\.4[^}]*overflow: visible[^}]*white-space: normal/s);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
@@ -309,12 +309,14 @@ test('multiple-clock mode leads with elapsed time and follows with a compact Ses
             'Dashboard',
             'Pause All',
             'Clock Out All',
+            '',
         ]);
-        assert.ok(footer.every(node => !/\bbp3-icon-/.test(node.className)));
-        const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-        assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
-        assert.equal(headerRefresh.title, 'Refresh current Sessions');
-        assert.equal(headerRefresh.getAttribute('aria-label'), 'Refresh current Sessions');
+        assert.ok(footer.slice(0, 3).every(node => !/\bbp3-icon-/.test(node.className)));
+        const footerRefresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+        assert.match(footerRefresh.className, /\bbp3-icon-refresh\b/);
+        assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
+        assert.equal(footerRefresh.title, 'Refresh');
+        assert.equal(footerRefresh.getAttribute('aria-label'), 'Refresh');
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -360,14 +362,16 @@ test('the popover lists the running clock', () => {
     assert.deepEqual(footerActions.map(action => action.textContent), [
         'Dashboard',
         'Pause All',
+        '',
     ]);
-    for (const action of footerActions) {
+    for (const action of footerActions.slice(0, 2)) {
         assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
-    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+    const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
     assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(refresh.title, 'Refresh current Sessions');
-    assert.equal(refresh.getAttribute('aria-label'), 'Refresh current Sessions');
+    assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
+    assert.equal(refresh.title, 'Refresh');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh');
 
     click(topbarWidget().querySelector('button'));
     assert.equal(document.querySelector('.rlb-popover'), null, 'second click closes it');

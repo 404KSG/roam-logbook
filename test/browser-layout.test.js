@@ -344,13 +344,25 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
                 return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
             };
             const popRect = rect(popover);
-            const footerRects = [...popover.querySelectorAll('.rlb-popover__footer button')].map(rect);
+            const footer = popover.querySelector('.rlb-popover__footer');
+            const footerRect = rect(footer);
+            const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+            const refreshRect = rect(refresh);
+            const footerStyles = getComputedStyle(footer);
+            const footerColumns = footerStyles.gridTemplateColumns.split(' ').map(Number);
+            const footerGap = parseFloat(footerStyles.columnGap) || 0;
+            const expectedRefreshCenter = footerRect.left + footerColumns[0] + footerGap + footerColumns[1] / 2;
+            const footerButtons = [...popover.querySelectorAll('.rlb-popover__footer button')];
+            const footerRects = footerButtons.map(rect);
             return {
                 popover: popRect,
                 title: rect(title), body: rect(body), actions: rect(actions), meta: rect(meta),
                 lines: row.querySelectorAll('.rlb-run__meta-line').length,
                 titleClips: title.scrollWidth > title.clientWidth,
                 rowHasDot: Boolean(row.querySelector('.rlb-dot')),
+                headerRefresh: Boolean(popover.querySelector('.rlb-surface__header [data-action="refresh"]')),
+                refreshCenterDelta: Math.abs(refreshRect.left + refreshRect.width / 2 - expectedRefreshCenter),
+                footerLabels: footerButtons.map(button => button.textContent),
                 footerInside: footerRects.every(item => item.left >= popRect.left && item.right <= popRect.right && item.top >= popRect.top && item.bottom <= popRect.bottom),
                 footerOverlap: footerRects.some((item, index) => footerRects.slice(index + 1).some(other => item.left < other.right && item.right > other.left && item.top < other.bottom && item.bottom > other.top)),
                 iconLabels: [...popover.querySelectorAll('.bp3-icon-log-out, .bp3-icon-trash, .bp3-icon-refresh')].every(button => button.title && button.getAttribute('aria-label')),
@@ -358,7 +370,7 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh" data-action="refresh" title="Refresh current Sessions" aria-label="Refresh current Sessions"></button></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh" aria-label="Refresh"></button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
@@ -368,8 +380,61 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         assert.ok(geometry.meta.height <= 34, JSON.stringify({ width, geometry }));
         assert.ok(geometry.title.right <= geometry.actions.left + 0.5, JSON.stringify({ width, geometry }));
         assert.equal(geometry.rowHasDot, false, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.headerRefresh, false, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.refreshCenterDelta <= 1, JSON.stringify({ width, geometry }));
+        assert.deepEqual(geometry.footerLabels, ['Dashboard', 'Pause All', 'Clock Out All', ''], JSON.stringify({ width, geometry }));
         assert.equal(geometry.footerInside, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.footerOverlap, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
     }
+});
+
+test('beta.5 keeps session surfaces and dashboard readable while reducing local density', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Paused</div></header><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused"></span><div class="rlb-run__body"><button class="rlb-run__title">一个较长的中文 paused task 标题</button><div class="rlb-run__meta"><time class="rlb-run__started">Today 15:59</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Resume All</button><button class="bp3-button bp3-small">Clock Out All</button><button class="bp3-button bp3-small bp3-icon-refresh rlb-surface__refresh" title="Refresh" aria-label="Refresh"></button></div></div><div class="rlb-root rlb-dashboard rlb-root--open"><div class="rlb-dialog"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="bp3-heading rlb-header__title">Logbook</h2><p class="rlb-header__subtitle">Focus sessions, activity, and task rollups</p></div><button class="bp3-button rlb-icon-button">Refresh</button></header><div class="rlb-summary"><div class="rlb-stat"><span class="rlb-stat__value">2h 17m</span><span class="rlb-stat__label">Today</span></div></div><div class="rlb-body"><section class="rlb-section"><div class="rlb-section__heading"><h3 class="rlb-section__title">By day</h3><span class="rlb-bars__range">2026-08-09 → 2026-08-15</span></div><div class="rlb-bars" style="--rlb-day-count:7;height:82px"></div></section><table class="rlb-table"><thead><tr><th>Task</th></tr></thead><tbody><tr><td>一个长任务标题</td></tr></tbody></table></div></div></div>`),
+        `(() => {
+            const style = selector => getComputedStyle(document.querySelector(selector));
+            const rect = selector => document.querySelector(selector).getBoundingClientRect();
+            const sessionTitle = style('.rlb-popover__title');
+            const sessionTask = style('.rlb-run__title');
+            const sessionMeta = style('.rlb-run__meta');
+            const footerLabel = style('.rlb-popover__footer .bp3-button');
+            const resume = rect('.rlb-run__resume');
+            const dashboardTitle = style('.rlb-header__title');
+            const dashboardSubtitle = style('.rlb-header__subtitle');
+            const statValue = style('.rlb-stat__value');
+            const sectionTitle = style('.rlb-section__title');
+            const tableHeader = style('.rlb-table th');
+            const tableCell = style('.rlb-table td');
+            const day = rect('.rlb-bars');
+            return {
+                sessionTitle: sessionTitle.fontSize,
+                sessionTask: sessionTask.fontSize,
+                sessionMeta: sessionMeta.fontSize,
+                footerLabel: footerLabel.fontSize,
+                resume: { width: resume.width, height: resume.height },
+                dashboardTitle: dashboardTitle.fontSize,
+                dashboardSubtitle: dashboardSubtitle.fontSize,
+                statValue: statValue.fontSize,
+                sectionTitle: sectionTitle.fontSize,
+                tableHeader: tableHeader.fontSize,
+                tableCell: tableCell.fontSize,
+                dayHeight: day.height,
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.sessionTitle, '10px', JSON.stringify(geometry));
+    assert.equal(geometry.sessionTask, '13px', JSON.stringify(geometry));
+    assert.equal(geometry.sessionMeta, '10px', JSON.stringify(geometry));
+    assert.equal(geometry.footerLabel, '13px', JSON.stringify(geometry));
+    assert.ok(geometry.resume.width >= 32 && geometry.resume.height >= 32, JSON.stringify(geometry));
+    assert.equal(geometry.dashboardTitle, '17px', JSON.stringify(geometry));
+    assert.equal(geometry.dashboardSubtitle, '11px', JSON.stringify(geometry));
+    assert.equal(geometry.statValue, '18px', JSON.stringify(geometry));
+    assert.equal(geometry.sectionTitle, '11px', JSON.stringify(geometry));
+    assert.equal(geometry.tableHeader, '10px', JSON.stringify(geometry));
+    assert.equal(geometry.tableCell, '13px', JSON.stringify(geometry));
+    assert.ok(geometry.dayHeight <= 82.5, JSON.stringify(geometry));
 });

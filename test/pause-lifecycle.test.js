@@ -114,8 +114,17 @@ test('Pause All survives reload and Resume All starts fresh Sessions with the Po
     assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
     assert.ok(action('Resume All'));
     const footer = [...popover().querySelectorAll('.rlb-popover__footer button')];
-    assert.ok(footer.every(button => !/\bbp3-icon-/.test(button.className)));
-    assert.match(popover().querySelector('.rlb-surface__header [data-action="refresh"]').className, /\bbp3-icon-refresh\b/);
+    assert.equal(footer.filter(button => /\bbp3-icon-/.test(button.className)).length, 1);
+    assert.ok(footer.filter(button => !/\bbp3-icon-/.test(button.className)).every(button => button.textContent));
+    const refresh = popover().querySelector('.rlb-popover__footer [data-action="refresh"]');
+    assert.ok(refresh);
+    assert.equal(popover().querySelector('.rlb-surface__header [data-action="refresh"]'), null);
+    assert.equal(refresh.title, 'Refresh');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh');
+    click(refresh);
+    await settle();
+    assert.equal(popover().querySelectorAll('[data-session-state="paused"]').length, 2);
+    assert.equal(popover().querySelectorAll('[data-action="resume"]').length, 2);
 
     const persisted = JSON.parse(settingsStore.get('pausedBatch'));
     assert.equal(persisted.version, 2);

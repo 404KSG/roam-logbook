@@ -520,6 +520,36 @@ const resumeBatchResult = ({
     };
 };
 
+const resumeOneResult = ({
+    completed = 0,
+    failed = 0,
+    pendingTaskUids = [],
+    uncertain = false,
+    error = null,
+    retry = null,
+    ...extra
+} = {}) => {
+    const pending = [...new Set(pendingTaskUids.filter(Boolean))];
+    const incomplete = uncertain || failed > 0 || pending.length > 0;
+    return {
+        action: 'resume-one',
+        ok: !incomplete,
+        count: completed,
+        completed,
+        resumed: completed,
+        failed,
+        pending: pending.length,
+        pendingTaskUids: pending,
+        uncertain: Boolean(uncertain),
+        partial: Boolean(incomplete && completed > 0),
+        retry: retry || (incomplete ? { action: 'resume', retryTaskUids: pending } : null),
+        error: error || (failed > 0 ? new Error('The Session could not be resumed.') : null),
+        item: 'Session',
+        completedVerb: 'resumed',
+        ...extra,
+    };
+};
+
 /** Start a fresh CLOCK and make its recovery association durable before migration. */
 async function resumeRecord(record, now) {
     let pending = pendingResume.find(item => item.taskUid === record.taskUid);
@@ -595,6 +625,119 @@ async function resumeRecord(record, now) {
     removeTask(record.taskUid);
     persist();
     return entry;
+}
+
+/** Resume one exact Pause Batch item without touching the remaining batch. */
+export async function resumeOne(taskUid, { now = new Date() } = {}) {
+    if (unsupportedRaw !== null) {
+        notice = 'Saved paused-task state is unsupported; no Sessions were resumed.';
+        notify();
+        return resumeOneResult({
+            failed: 1,
+            pendingTaskUids: [taskUid],
+            uncertain: true,
+            error: new Error(notice),
+        });
+    }
+
+    notice = '';
+    const initial = clock.refreshResult();
+    if (!initial.ok) {
+        notice = clock.getNotice() || clock.GRAPH_UNCERTAIN;
+        notify();
+        return resumeOneResult({
+            failed: 1,
+            pendingTaskUids: [taskUid],
+            uncertain: true,
+            error: initial.error,
+        });
+    }
+
+    const record = items.find(item => item.taskUid === taskUid);
+    const alreadyRunning = initial.running.find(entry => entry.taskUid === taskUid);
+    if (!record) {
+        return resumeOneResult({ alreadyRunning: Boolean(alreadyRunning) });
+    }
+
+    if (record.reconciliationState) {
+        removeTask(taskUid);
+        persist();
+        notice = record.reconciliationState === 'externally-clocked-out'
+            ? 'The paused Session was already clocked out and was not reopened.'
+            : 'The paused Session was replaced by explicit clock activity and was not duplicated.';
+        notify();
+        return resumeOneResult({ reconciled: true });
+    }
+
+    if (alreadyRunning) {
+        removeTask(taskUid);
+        persist();
+        notify();
+        return resumeOneResult({ alreadyRunning: true });
+    }
+
+    const valid = existingTask(record);
+    if (valid?.uncertain) {
+        notice = clock.GRAPH_UNCERTAIN;
+        notify();
+        return resumeOneResult({
+            failed: 1,
+            pendingTaskUids: [taskUid],
+            uncertain: true,
+            error: valid.error,
+        });
+    }
+    if (!valid) {
+        notice = `Task ${taskUid} could not be confirmed; the paused Session was kept.`;
+        notify();
+        return resumeOneResult({
+            failed: 1,
+            pendingTaskUids: [taskUid],
+            error: new Error(notice),
+        });
+    }
+
+    let enabledMultiple = false;
+    if (initial.running.length > 0 && !allowMultipleClocks()) {
+        try {
+            writeSetting(SETTING_MULTIPLE, true);
+        } catch (error) {
+            notice = 'Multiple clocks could not be enabled; the paused Session was kept.';
+            notify();
+            return resumeOneResult({
+                failed: 1,
+                pendingTaskUids: [taskUid],
+                error,
+            });
+        }
+        if (!allowMultipleClocks()) {
+            notice = 'Multiple clocks could not be enabled; the paused Session was kept.';
+            notify();
+            return resumeOneResult({
+                failed: 1,
+                pendingTaskUids: [taskUid],
+                error: new Error(notice),
+            });
+        }
+        enabledMultiple = true;
+    }
+
+    try {
+        await resumeRecord(valid, now);
+    } catch (error) {
+        notice = error?.uncertain ? clock.GRAPH_UNCERTAIN : error?.message || 'The paused Session could not be resumed.';
+        notify();
+        return resumeOneResult({
+            failed: 1,
+            pendingTaskUids: [taskUid],
+            uncertain: Boolean(error?.uncertain),
+            error,
+        });
+    }
+
+    notice = enabledMultiple ? 'Multiple clocks were enabled to resume this Session.' : '';
+    notify();
+    return resumeOneResult({ completed: 1, enabledMultiple });
 }
 
 /** Start a fresh CLOCK for each valid paused task and consume successful records. */

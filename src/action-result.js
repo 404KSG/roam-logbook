@@ -30,9 +30,13 @@ export function mutationResultNotice(result) {
         const failedCount = failed || pending;
         const completedText = `${completed} ${noun}${completed === 1 ? '' : 's'} ${completedVerb}`;
         const failedText = `${failedCount} could not be updated`;
+        const detail =
+            result?.action === 'resume-one' && typeof message === 'string' && message.trim()
+                ? ` ${message.trim()}`
+                : '';
         return completed > 0
-            ? `${completedText}; ${failedText}. Retry after Roam finishes syncing.`
-            : `${failedText[0].toUpperCase()}${failedText.slice(1)}. Retry after Roam finishes syncing.`;
+            ? `${completedText}; ${failedText}.${detail} Retry after Roam finishes syncing.`
+            : `${failedText[0].toUpperCase()}${failedText.slice(1)}.${detail} Retry after Roam finishes syncing.`;
     }
     return '';
 }
