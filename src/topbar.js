@@ -9,12 +9,14 @@ import * as clock from './clock.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
-import { formatElapsed, formatMinutesHuman, formatStamp } from './time.js';
+import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
 import { openBlock } from './roam.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
+const POPOVER_ID = 'roam-logbook-popover';
+const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
 const TOPBAR_SELECTOR = '.rm-topbar';
 
 /**
@@ -45,9 +47,8 @@ export function createTopbar({ onOpenDashboard }) {
     let destroyed = false;
     let clockOutAllConfirm = false;
     let clockOutAllConfirmTimer = null;
-
-    const isStale = entry =>
-        findStaleClocks([entry], new Date(), staleHours()).length > 0;
+    let discardConfirmUid = null;
+    let discardConfirmTimer = null;
 
     const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
     const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
@@ -62,13 +63,22 @@ export function createTopbar({ onOpenDashboard }) {
         clockOutAllConfirmTimer = null;
     };
 
-    const closePopover = () => {
+    const resetDiscardConfirmation = () => {
+        discardConfirmUid = null;
+        if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
+        discardConfirmTimer = null;
+    };
+
+    const closePopover = ({ restoreFocus = true } = {}) => {
         resetClockOutConfirmation();
+        resetDiscardConfirmation();
         popover?.remove();
         popover = null;
         document.removeEventListener('mousedown', onDocumentMouseDown, true);
         document.removeEventListener('keydown', onPopoverKeyDown, true);
         window.removeEventListener('resize', closePopover);
+        buttonNode?.setAttribute('aria-expanded', 'false');
+        if (restoreFocus && buttonNode?.isConnected) buttonNode.focus();
     };
 
     function onDocumentMouseDown(event) {
@@ -78,7 +88,11 @@ export function createTopbar({ onOpenDashboard }) {
     }
 
     function onPopoverKeyDown(event) {
-        if (event.key === 'Escape') closePopover();
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closePopover();
+        }
     }
 
     /**
@@ -99,14 +113,14 @@ export function createTopbar({ onOpenDashboard }) {
         popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
     };
 
-    /** `12:34 / 30:00 · 2h 05m total` — the live half of a row's meta line. */
+    /** `12:34 · target 30:00 · 2h 05m total` — the live half of a row's meta line. */
     const rowFigures = (entry, now) => {
         const target = pomodoro.targetMinutes(entry.clockUid);
         const elapsed = now - entry.start.getTime();
         const total = entry.priorMinutes + Math.floor(elapsed / 60_000);
         return (
             formatElapsed(elapsed) +
-            (target ? ` / ${formatElapsed(target * 60_000)}` : '') +
+            (target ? ` · target ${formatElapsed(target * 60_000)}` : '') +
             ` · ${formatMinutesHuman(total)} total`
         );
     };
@@ -115,11 +129,9 @@ export function createTopbar({ onOpenDashboard }) {
         const now = Date.now();
         const overrun = pomodoro.isOverrun(entry, now);
         const row = el('div', `rlb-run${overrun ? ' rlb-run--overrun' : ''}`);
-        row.appendChild(
-            el('span', `rlb-dot${overrun ? ' rlb-dot--overrun' : isStale(entry) ? ' rlb-dot--stale' : ''}`)
-        );
 
         const body = el('div', 'rlb-run__body');
+        const taskLabel = `Open this block: ${entry.title}`;
         const title = button(
             'bp3-button bp3-minimal bp3-icon-document-open rlb-run__title',
             entry.title,
@@ -127,30 +139,60 @@ export function createTopbar({ onOpenDashboard }) {
                 closePopover();
                 void openBlock(entry.taskUid);
             },
-            { title: 'Open this block' }
+            { title: taskLabel }
         );
-        const suffix =
-            ` · since ${formatStamp(entry.start)}` + (entry.pageTitle ? ` · ${entry.pageTitle}` : '');
-        const meta = el('div', 'rlb-run__meta', rowFigures(entry, now) + suffix);
+        const started = formatStarted(entry.start, new Date(now));
+        const startedDetails =
+            `Started ${started.raw}` + (entry.pageTitle ? ` · Page: ${entry.pageTitle}` : '');
+        const meta = el('div', 'rlb-run__meta');
+        const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', rowFigures(entry, now));
+        const startedNode = el(
+            'time',
+            'rlb-run__meta-line rlb-run__started',
+            started.valid ? `${started.dateLabel} ${started.timeLabel}` : started.raw
+        );
+        startedNode.title = startedDetails;
+        startedNode.setAttribute('aria-label', startedDetails);
+        if (started.datetime) startedNode.dateTime = started.datetime;
+        meta.append(primary, startedNode);
         meta.dataset.clockUid = entry.clockUid;
-        meta.dataset.suffix = suffix;
         body.append(title, meta);
 
         const actions = el('div', 'rlb-run__actions');
+        const discarding = discardConfirmUid === entry.clockUid;
+        const discardTitle = discarding
+            ? 'Confirm discard of this CLOCK entry'
+            : 'Discard this CLOCK entry (cannot be undone)';
+        const discard = button(
+            `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
+            '',
+            () => {
+                if (!discarding) {
+                    discardConfirmUid = entry.clockUid;
+                    if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
+                    discardConfirmTimer = setTimeout(() => {
+                        resetDiscardConfirmation();
+                        renderPopover();
+                    }, 5000);
+                    renderPopover();
+                    return;
+                }
+                resetDiscardConfirmation();
+                void run(() => clock.discardClock(entry.clockUid));
+            },
+            { title: discardTitle }
+        );
+        discard.dataset.action = 'discard';
         actions.append(
             button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success',
+                'bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop',
                 '',
                 () => void run(() => clock.clockOut(entry.clockUid)),
-                { title: 'Clock out now' }
+                { title: 'Clock out this Session' }
             ),
-            button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-trash',
-                '',
-                () => void run(() => clock.discardClock(entry.clockUid)),
-                { title: 'Discard this entry' }
-            )
+            discard
         );
+        actions.firstElementChild.dataset.action = 'clock-out';
 
         row.append(body, actions);
         return row;
@@ -172,24 +214,21 @@ export function createTopbar({ onOpenDashboard }) {
         if (entries.length <= 1 && clockOutAllConfirm) resetClockOutConfirmation();
         popover.replaceChildren();
 
-        popover.appendChild(
-            el(
-                'div',
-                'rlb-popover__title',
-                entries.length
-                    ? `${sessionCount(entries.length)} Running`
-                    : pausedItems.length
-                      ? `${taskCount(pausedItems.length)} Paused`
-                      : 'Logbook'
-            )
-        );
+        const titleText = entries.length
+            ? `${sessionCount(entries.length)} Running`
+            : pausedItems.length
+              ? `${taskCount(pausedItems.length)} Paused`
+              : 'Logbook';
+        const heading = el('div', 'rlb-popover__title', titleText);
+        heading.id = POPOVER_TITLE_ID;
+        popover.appendChild(heading);
 
         if (entries.length === 0 && pausedItems.length === 0) {
             popover.appendChild(
                 el(
                     'div',
                     'rlb-popover__empty',
-                    'No clock is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                    'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
                 )
             );
         } else {
@@ -230,8 +269,8 @@ export function createTopbar({ onOpenDashboard }) {
         const footer = el('div', 'rlb-popover__footer');
         footer.appendChild(
             button('bp3-button bp3-small', 'Dashboard', () => {
-                closePopover();
-                onOpenDashboard();
+                closePopover({ restoreFocus: false });
+                onOpenDashboard?.(buttonNode);
             })
         );
         if (entries.length > 0) {
@@ -290,12 +329,19 @@ export function createTopbar({ onOpenDashboard }) {
         }
         clock.refresh();
         popover = el('div', 'bp3-card bp3-elevation-3 rlb-popover');
+        popover.id = POPOVER_ID;
+        popover.setAttribute('role', 'dialog');
+        popover.setAttribute('aria-labelledby', POPOVER_TITLE_ID);
         document.body.appendChild(popover);
+        buttonNode?.setAttribute('aria-haspopup', 'dialog');
+        buttonNode?.setAttribute('aria-controls', POPOVER_ID);
+        buttonNode?.setAttribute('aria-expanded', 'true');
         renderPopover();
         positionPopover();
         document.addEventListener('mousedown', onDocumentMouseDown, true);
         document.addEventListener('keydown', onPopoverKeyDown, true);
         window.addEventListener('resize', closePopover);
+        popover.querySelector('button')?.focus();
     };
 
     // ---- widget ----
@@ -376,7 +422,8 @@ export function createTopbar({ onOpenDashboard }) {
             for (const meta of popover.querySelectorAll('.rlb-run__meta')) {
                 const entry = byUid.get(meta.dataset.clockUid);
                 if (!entry) continue;
-                meta.textContent = rowFigures(entry, now) + (meta.dataset.suffix || '');
+                const primary = meta.querySelector('.rlb-run__meta-primary');
+                if (primary) primary.textContent = rowFigures(entry, now);
                 // Crossing the target mid-tick has to repaint the row, not just the text.
                 const row = meta.closest('.rlb-run');
                 if (row) {
@@ -397,6 +444,9 @@ export function createTopbar({ onOpenDashboard }) {
         timeNode = el('span', 'rlb-topbar__time');
 
         buttonNode = button('bp3-button bp3-minimal rlb-topbar__button', '', togglePopover);
+        buttonNode.setAttribute('aria-haspopup', 'dialog');
+        buttonNode.setAttribute('aria-controls', POPOVER_ID);
+        buttonNode.setAttribute('aria-expanded', 'false');
         buttonNode.appendChild(iconNode);
         container.appendChild(buttonNode);
         renderButton();

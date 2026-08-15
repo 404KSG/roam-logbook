@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     dateKey,
     durationMinutes,
+    formatDayLabel,
     formatDurationMinutes,
     formatElapsed,
     formatMinutesHuman,
@@ -36,6 +37,12 @@ test('formats Started as a compact local date and time against a fixed now', () 
         timeLabel: '21:30',
         datetime: '2026-08-14T21:30',
     });
+});
+
+test('formats compact activity labels with a local weekday', () => {
+    const now = new Date(2026, 7, 15, 9, 0);
+    assert.equal(formatDayLabel(new Date(2026, 7, 15), now), 'Today Sat');
+    assert.equal(formatDayLabel(new Date(2026, 7, 14), now), 'Aug 14 Fri');
 });
 
 test('falls back to the original Started text when its timestamp is invalid', () => {

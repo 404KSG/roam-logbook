@@ -11,23 +11,57 @@ import { readAllEntries, readHierarchy } from './entries.js';
 import { openBlock } from './roam.js';
 import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
 import { staleHours } from './settings.js';
-import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 
-export function createDashboard() {
+export function createDashboard({
+    now: nowFn = () => new Date(),
+    setIntervalFn = (callback, delay) => setInterval(callback, delay),
+    clearIntervalFn = ticker => clearInterval(ticker),
+} = {}) {
     let root = null;
     let summaryNode = null;
     let bodyNode = null;
     let rangeId = 'week';
     let returnFocusTo = null;
+    let liveTicker = null;
+    let discardConfirmUid = null;
+    let discardConfirmTimer = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
     const collapsed = new Set();
 
+    const clearLiveTicker = () => {
+        if (liveTicker !== null) clearIntervalFn(liveTicker);
+        liveTicker = null;
+    };
+
+    const resetDiscardConfirmation = () => {
+        discardConfirmUid = null;
+        if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
+        discardConfirmTimer = null;
+    };
+
+    const updateRunningElapsed = () => {
+        if (!root?.classList.contains('rlb-root--open')) return;
+        const now = nowFn().getTime();
+        for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
+            cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
+        }
+    };
+
+    const startLiveTicker = () => {
+        clearLiveTicker();
+        if (!root?.classList.contains('rlb-root--open')) return;
+        if (!bodyNode?.querySelector('[data-running-elapsed="true"]')) return;
+        liveTicker = setIntervalFn(updateRunningElapsed, 1000);
+    };
+
     const render = () => {
         if (!bodyNode) return;
-        const now = new Date();
+        clearLiveTicker();
+        const now = nowFn();
         const entries = readAllEntries();
         const hierarchy = readHierarchy([...new Set(entries.map(entry => entry.taskUid))]);
         const model = buildDashboard(entries, { now, rangeId, hierarchy });
@@ -54,11 +88,13 @@ export function createDashboard() {
             bodyNode.appendChild(
                 el('div', 'rlb-empty', 'No clock entries in this range yet.')
             );
+            startLiveTicker();
             return;
         }
 
-        bodyNode.appendChild(daysSection(model.days));
+        bodyNode.appendChild(daysSection(model.days, now));
         bodyNode.appendChild(tasksSection(model.tree));
+        startLiveTicker();
     };
 
     const statsRow = pairs => {
@@ -103,20 +139,40 @@ export function createDashboard() {
             }
 
             const actions = el('td', 'rlb-table__num');
+            const discarding = discardConfirmUid === entry.clockUid;
+            const discardTitle = discarding
+                ? 'Confirm discard of this CLOCK entry'
+                : 'Discard this CLOCK entry (cannot be undone)';
+            const discard = button(
+                `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
+                '',
+                () => {
+                    if (!discarding) {
+                        discardConfirmUid = entry.clockUid;
+                        if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
+                        discardConfirmTimer = setTimeout(() => {
+                            resetDiscardConfirmation();
+                            render();
+                        }, 5000);
+                        render();
+                        return;
+                    }
+                    resetDiscardConfirmation();
+                    void act(() => clock.discardClock(entry.clockUid));
+                },
+                { title: discardTitle }
+            );
+            discard.dataset.action = 'discard';
             actions.append(
                 button(
-                    'bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success',
+                    'bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-running__stop',
                     '',
                     () => void act(() => clock.clockOut(entry.clockUid)),
-                    { title: 'Clock out now' }
+                    { title: 'Clock out this Session' }
                 ),
-                button(
-                    'bp3-button bp3-minimal bp3-small bp3-icon-trash',
-                    '',
-                    () => void act(() => clock.discardClock(entry.clockUid)),
-                    { title: 'Discard this entry' }
-                )
+                discard
             );
+            actions.firstElementChild.dataset.action = 'clock-out';
 
             const started = formatStarted(entry.start, now);
             const startedTime = el('time', 'rlb-started', '');
@@ -135,12 +191,15 @@ export function createDashboard() {
             const startedCell = el('td', 'rlb-muted rlb-started-cell');
             startedCell.appendChild(startedTime);
 
-            row.append(
-                task,
-                startedCell,
-                el('td', 'rlb-table__num', formatElapsed(now.getTime() - entry.start.getTime())),
-                actions
+            const elapsed = el(
+                'td',
+                'rlb-table__num rlb-running-elapsed',
+                formatElapsed(now.getTime() - entry.start.getTime())
             );
+            elapsed.dataset.runningElapsed = 'true';
+            elapsed.dataset.clockUid = entry.clockUid;
+            elapsed.dataset.startMs = String(entry.start.getTime());
+            row.append(task, startedCell, elapsed, actions);
             tbody.appendChild(row);
         }
         table.appendChild(tbody);
@@ -148,17 +207,34 @@ export function createDashboard() {
         return section;
     };
 
-    const daysSection = days => {
+    const daysSection = (days, now) => {
         const section = el('section', 'rlb-section');
         section.appendChild(el('h3', 'rlb-section__title', 'By day'));
         const peak = Math.max(1, ...days.map(day => day.minutes));
         const bars = el('div', 'rlb-bars');
+        bars.dataset.dayCount = String(days.length);
+        bars.style.setProperty('--rlb-day-count', String(days.length));
+        bars.setAttribute('role', 'list');
+        bars.setAttribute('aria-label', `Activity by day for ${days.length} days`);
         for (const day of days) {
-            const bar = el('div', `rlb-bar${day.minutes === 0 ? ' rlb-bar--empty' : ''}`);
-            bar.title = `${day.key} · ${formatMinutesHuman(day.minutes)}`;
+            const level = day.minutes === 0 ? 0 : Math.max(1, Math.ceil((day.minutes / peak) * 3));
+            const duration = formatMinutesHuman(day.minutes);
+            const label = formatDayLabel(day.date, now);
+            const bar = el(
+                'div',
+                `rlb-bar rlb-bar--level-${level}${day.minutes === 0 ? ' rlb-bar--empty' : ''}`
+            );
+            bar.dataset.date = day.key;
+            bar.dataset.minutes = String(day.minutes);
+            bar.dataset.level = String(level);
+            bar.title = `${day.key} · ${duration}`;
+            bar.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
+            bar.setAttribute('role', 'listitem');
+            const track = el('div', 'rlb-bar__track');
             const fill = el('div', 'rlb-bar__fill');
-            fill.style.height = `${Math.max(2, Math.round((day.minutes / peak) * 100))}%`;
-            bar.appendChild(fill);
+            fill.style.height = `${day.minutes === 0 ? 0 : Math.max(4, Math.round((day.minutes / peak) * 100))}%`;
+            track.appendChild(fill);
+            bar.append(track, el('span', 'rlb-bar__label', label));
             bars.appendChild(bar);
         }
         section.appendChild(bars);
@@ -338,10 +414,42 @@ export function createDashboard() {
         render();
     };
 
+    const dialogFocusables = dialog =>
+        [...dialog.querySelectorAll('button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter(
+            node => !node.disabled && node.getAttribute('aria-hidden') !== 'true'
+        );
+
     const onKeyDown = event => {
-        if (event.key === 'Escape' && root?.classList.contains('rlb-root--open')) {
+        if (!root?.classList.contains('rlb-root--open')) return;
+        const dialog = root.querySelector('.rlb-dialog');
+        if (!dialog) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
             event.stopPropagation();
             close();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+
+        const focusables = dialogFocusables(dialog);
+        event.preventDefault();
+        event.stopPropagation();
+        if (focusables.length === 0) {
+            dialog.focus();
+            return;
+        }
+
+        const first = focusables[0];
+        const last = focusables.at(-1);
+        const active = document.activeElement;
+        const index = focusables.indexOf(active);
+        if (event.shiftKey) {
+            if (index <= 0) last.focus();
+            else focusables[index - 1].focus();
+        } else if (index < 0 || index === focusables.length - 1) {
+            first.focus();
+        } else {
+            focusables[index + 1].focus();
         }
     };
 
@@ -408,6 +516,8 @@ export function createDashboard() {
 
     function close() {
         if (!root) return;
+        clearLiveTicker();
+        resetDiscardConfirmation();
         root.classList.remove('rlb-root--open');
         root.setAttribute('aria-hidden', 'true');
         document.removeEventListener('keydown', onKeyDown, true);
@@ -416,19 +526,27 @@ export function createDashboard() {
     }
 
     return {
-        open() {
+        open({ returnFocusTo: requestedFocus } = {}) {
             const active = document.activeElement;
-            returnFocusTo = active && active !== document.body ? active : null;
+            returnFocusTo = requestedFocus?.isConnected
+                ? requestedFocus
+                : active && active !== document.body && active.isConnected
+                  ? active
+                  : null;
             if (!root) root = build();
             root.classList.add('rlb-root--open');
             root.setAttribute('aria-hidden', 'false');
             document.addEventListener('keydown', onKeyDown, true);
             clock.refresh();
             render();
-            root.querySelector('.rlb-dialog')?.focus();
+            const dialog = root.querySelector('.rlb-dialog');
+            const initial = dialogFocusables(dialog)[0];
+            (initial || dialog)?.focus();
         },
         close,
         destroy() {
+            clearLiveTicker();
+            resetDiscardConfirmation();
             document.removeEventListener('keydown', onKeyDown, true);
             root?.remove();
             root = null;

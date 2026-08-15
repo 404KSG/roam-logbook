@@ -137,33 +137,6 @@ export const STYLES = `
     color: #f29d49;
 }
 
-.rlb-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #0f9960;
-    flex: 0 0 auto;
-    animation: rlb-pulse 2s ease-in-out infinite;
-}
-
-.rlb-dot--stale {
-    background: #d9822b;
-    animation: none;
-}
-
-.rlb-dot--overrun {
-    background: #cd4246;
-}
-
-@keyframes rlb-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rlb-dot { animation: none; }
-}
-
 /* ---- popover ---- */
 
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
@@ -219,12 +192,16 @@ export const STYLES = `
 }
 
 .rlb-popover__footer {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding-top: 8px;
     margin-top: 4px;
     border-top: 1px solid rgba(16, 22, 26, 0.15);
+}
+
+.rlb-popover__footer .bp3-button {
+    min-width: 0;
 }
 
 .bp3-dark .rlb-popover__footer {
@@ -234,7 +211,7 @@ export const STYLES = `
 .rlb-run {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 6px;
     padding: 6px;
     border-radius: 3px;
 }
@@ -268,15 +245,58 @@ export const STYLES = `
 }
 
 .rlb-run__meta {
+    display: block;
+    min-width: 0;
     font-size: 11px;
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-run__meta-line {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-run__started {
+    cursor: help;
 }
 
 .rlb-run__actions {
     display: flex;
     gap: 2px;
     flex: 0 0 auto;
+}
+
+.rlb-run__actions .rlb-run__stop {
+    color: #5c7080;
+}
+
+.rlb-run__actions .rlb-run__stop:hover,
+.rlb-run__actions .rlb-run__stop:focus {
+    color: #c23030;
+}
+
+.rlb-run__actions .bp3-icon-trash {
+    color: #5c7080;
+    opacity: 0.65;
+}
+
+.rlb-run__actions .bp3-icon-trash:hover,
+.rlb-run__actions .bp3-icon-trash:focus {
+    color: #c23030;
+    opacity: 1;
+}
+
+.rlb-table .rlb-running__stop {
+    color: #5c7080;
+}
+
+.rlb-table .rlb-running__stop:hover,
+.rlb-table .rlb-running__stop:focus {
+    color: #c23030;
 }
 
 /* ---- dashboard ---- */
@@ -362,30 +382,88 @@ export const STYLES = `
 }
 
 .rlb-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    height: 96px;
+    display: grid;
+    grid-template-columns: repeat(var(--rlb-day-count, 7), minmax(0, 1fr));
+    align-items: stretch;
+    gap: 4px;
+    height: 112px;
+    min-width: 0;
     padding: 4px 0;
 }
 
 .rlb-bar {
-    flex: 1 1 0;
-    min-width: 4px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 4px;
+    min-width: 0;
+    height: 100%;
+}
+
+.rlb-bar__track {
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    align-items: flex-end;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
     height: 100%;
 }
 
 .rlb-bar__fill {
-    background: #2d72d2;
+    width: min(24px, 100%);
     border-radius: 2px 2px 0 0;
-    min-height: 2px;
+    min-height: 0;
+}
+
+.rlb-bar__label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: #5c7080;
+    font-size: 10px;
+    line-height: 1.1;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-bar--level-0 .rlb-bar__fill {
+    background: #d8eee0;
+}
+
+.rlb-bar--level-1 .rlb-bar__fill {
+    background: #a7d9b8;
+}
+
+.rlb-bar--level-2 .rlb-bar__fill {
+    background: #57ad79;
+}
+
+.rlb-bar--level-3 .rlb-bar__fill {
+    background: #16834a;
 }
 
 .rlb-bar--empty .rlb-bar__fill {
-    background: rgba(167, 182, 194, 0.35);
+    height: 2px !important;
+}
+
+.bp3-dark .rlb-bar__label {
+    color: #a7b6c2;
+}
+
+.bp3-dark .rlb-bar--level-0 .rlb-bar__fill {
+    background: #315945;
+}
+
+.bp3-dark .rlb-bar--level-1 .rlb-bar__fill {
+    background: #4b9b69;
+}
+
+.bp3-dark .rlb-bar--level-2 .rlb-bar__fill {
+    background: #64c486;
+}
+
+.bp3-dark .rlb-bar--level-3 .rlb-bar__fill {
+    background: #8be0a7;
 }
 
 .rlb-table {
@@ -823,15 +901,7 @@ export const STYLES = `
 
 .rlb-bars {
     height: 112px;
-    padding: 10px 0 6px;
-}
-
-.rlb-bar__fill {
-    background: var(--rlb-accent);
-}
-
-.rlb-bar--empty .rlb-bar__fill {
-    background: var(--rlb-border);
+    padding: 8px 0 4px;
 }
 
 .rlb-table th {

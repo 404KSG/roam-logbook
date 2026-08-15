@@ -166,3 +166,94 @@ test('Started date and time stay on one baseline-aligned compact line', async t 
     assert.equal(geometry.sameLine, true, JSON.stringify(geometry));
     assert.ok(Number.parseFloat(geometry.cellMinWidth) >= 120, JSON.stringify(geometry));
 });
+
+test('seven-day activity cells keep labels, green levels, and compact geometry on a narrow panel', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const cells = [0, 25, 50, 100, 0, 75, 10]
+        .map(
+            (minutes, index) =>
+                `<div class="rlb-bar rlb-bar--level-${minutes === 0 ? 0 : index === 3 ? 3 : 1}${minutes === 0 ? ' rlb-bar--empty' : ''}" role="listitem" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, day, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><div class="rlb-bar__track"><div class="rlb-bar__fill" style="height:${minutes}%"></div></div><span class="rlb-bar__label">Aug ${index + 9} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][index]}</span></div>`
+        )
+        .join('');
+    const expression = `(() => {
+        const chart = document.querySelector('.rlb-bars');
+        const cells = [...chart.querySelectorAll('.rlb-bar')];
+        const rect = node => {
+            const value = node.getBoundingClientRect();
+            return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+        };
+        const rects = cells.map(rect);
+        return {
+            chart: rect(chart),
+            count: cells.length,
+            columns: getComputedStyle(chart).gridTemplateColumns,
+            labels: cells.map(cell => cell.querySelector('.rlb-bar__label').textContent),
+            colors: cells.map(cell => getComputedStyle(cell.querySelector('.rlb-bar__fill')).backgroundColor),
+            accessible: cells.every(cell => cell.title.includes('2026-08-') && cell.getAttribute('aria-label').includes('m')),
+            overlap: rects.some((item, index) => index > 0 && item.left < rects[index - 1].right),
+            labelsInside: cells.every(cell => {
+                const cellRect = rect(cell);
+                const labelRect = rect(cell.querySelector('.rlb-bar__label'));
+                return labelRect.left >= cellRect.left && labelRect.right <= cellRect.right + 0.5;
+            }),
+        };
+    })()`;
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open"><div style="width:320px"><div class="rlb-bars" data-day-count="7" style="--rlb-day-count:7" role="list">${cells}</div></div></div>`),
+        expression
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.count, 7, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 100 && geometry.chart.height <= 120, JSON.stringify(geometry));
+    assert.match(geometry.columns, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
+    assert.equal(geometry.accessible, true, JSON.stringify(geometry));
+    assert.equal(geometry.overlap, false, JSON.stringify(geometry));
+    assert.equal(geometry.labelsInside, true, JSON.stringify(geometry));
+    assert.ok(new Set(geometry.colors).size >= 3, JSON.stringify(geometry));
+    assert.ok(geometry.colors.every(color => !color.includes('45, 114, 210')), JSON.stringify(geometry));
+});
+
+test('popover rows stay within 340px and 320px with two metadata lines and a two-row footer', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const width of [340, 320]) {
+        const expression = `(() => {
+            const popover = document.querySelector('.rlb-popover');
+            const row = popover.querySelector('.rlb-run');
+            const title = row.querySelector('.rlb-run__title');
+            const body = row.querySelector('.rlb-run__body');
+            const actions = row.querySelector('.rlb-run__actions');
+            const meta = row.querySelector('.rlb-run__meta');
+            const rect = node => {
+                const value = node.getBoundingClientRect();
+                return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+            };
+            const popRect = rect(popover);
+            const footerRects = [...popover.querySelectorAll('.rlb-popover__footer button')].map(rect);
+            return {
+                popover: popRect,
+                title: rect(title), body: rect(body), actions: rect(actions), meta: rect(meta),
+                lines: row.querySelectorAll('.rlb-run__meta-line').length,
+                titleClips: title.scrollWidth > title.clientWidth,
+                rowHasDot: Boolean(row.querySelector('.rlb-dot')),
+                footerInside: footerRects.every(item => item.left >= popRect.left && item.right <= popRect.right && item.top >= popRect.top && item.bottom <= popRect.bottom),
+                footerOverlap: footerRects.some((item, index) => footerRects.slice(index + 1).some(other => item.left < other.right && item.right > other.left && item.top < other.bottom && item.bottom > other.top)),
+                iconLabels: [...popover.querySelectorAll('.bp3-icon-stop, .bp3-icon-trash, .bp3-icon-refresh')].every(button => button.title && button.getAttribute('aria-label')),
+            };
+        })()`;
+        const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
+        const geometry = await withChromium(
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__title">1 Session Running</div><div class="rlb-run"><div class="rlb-run__body"><button class="bp3-button bp3-minimal bp3-icon-document-open rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop" data-action="clock-out" title="Clock out this Session" aria-label="Clock out this Session"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" title="Re-read clocks from the graph" aria-label="Re-read clocks from the graph"></button></div></div>`),
+            expression
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        assert.ok(geometry.popover.width <= width + 0.5, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.lines, 2, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.titleClips, true, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.meta.height <= 34, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.title.right <= geometry.actions.left + 0.5, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.rowHasDot, false, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.footerInside, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.footerOverlap, false, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
+    }
+});

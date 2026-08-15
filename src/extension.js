@@ -41,7 +41,7 @@ const PALETTE_COMMANDS = [
 
 function createController({ extensionAPI }) {
     const dashboard = createDashboard();
-    const topbar = createTopbar({ onOpenDashboard: () => dashboard.open() });
+    const topbar = createTopbar({ onOpenDashboard: trigger => dashboard.open({ returnFocusTo: trigger }) });
     let destroyed = false;
     let detachPomodoro = null;
 
@@ -92,7 +92,7 @@ function createController({ extensionAPI }) {
                 {
                     id: SETTING_TOPBAR,
                     name: 'Show topbar widget',
-                    description: 'The live counter and its running-task list in Roam’s left navigation.',
+                    description: 'The live counter and its running Session list in Roam’s left navigation.',
                     action: {
                         type: 'switch',
                         defaultValue: true,

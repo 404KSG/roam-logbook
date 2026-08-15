@@ -37,6 +37,13 @@ function formatStarted(start2, now = /* @__PURE__ */ new Date()) {
     datetime: `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`
   };
 }
+function formatDayLabel(date, now = /* @__PURE__ */ new Date()) {
+  if (!isValidDate(date))
+    return "";
+  const sameDay = isValidDate(now) && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  const dateLabel = sameDay ? "Today" : `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
+  return `${dateLabel} ${DAY_NAMES[date.getDay()]}`;
+}
 var STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 function parseTimestamp(text) {
   if (typeof text !== "string")
@@ -950,17 +957,52 @@ function findStaleClocks(entries, now, staleHours2) {
 
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
-function createDashboard() {
+function createDashboard({
+  now: nowFn = () => /* @__PURE__ */ new Date(),
+  setIntervalFn = (callback, delay) => setInterval(callback, delay),
+  clearIntervalFn = (ticker) => clearInterval(ticker)
+} = {}) {
   let root = null;
   let summaryNode = null;
   let bodyNode = null;
   let rangeId = "week";
   let returnFocusTo = null;
+  let liveTicker = null;
+  let discardConfirmUid = null;
+  let discardConfirmTimer = null;
   const collapsed = /* @__PURE__ */ new Set();
+  const clearLiveTicker = () => {
+    if (liveTicker !== null)
+      clearIntervalFn(liveTicker);
+    liveTicker = null;
+  };
+  const resetDiscardConfirmation = () => {
+    discardConfirmUid = null;
+    if (discardConfirmTimer)
+      clearTimeout(discardConfirmTimer);
+    discardConfirmTimer = null;
+  };
+  const updateRunningElapsed = () => {
+    if (!root?.classList.contains("rlb-root--open"))
+      return;
+    const now = nowFn().getTime();
+    for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
+      cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
+    }
+  };
+  const startLiveTicker = () => {
+    clearLiveTicker();
+    if (!root?.classList.contains("rlb-root--open"))
+      return;
+    if (!bodyNode?.querySelector('[data-running-elapsed="true"]'))
+      return;
+    liveTicker = setIntervalFn(updateRunningElapsed, 1e3);
+  };
   const render = () => {
     if (!bodyNode)
       return;
-    const now = /* @__PURE__ */ new Date();
+    clearLiveTicker();
+    const now = nowFn();
     const entries = readAllEntries();
     const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
     const model = buildDashboard(entries, { now, rangeId, hierarchy });
@@ -982,10 +1024,12 @@ function createDashboard() {
       bodyNode.appendChild(
         el("div", "rlb-empty", "No clock entries in this range yet.")
       );
+      startLiveTicker();
       return;
     }
-    bodyNode.appendChild(daysSection(model.days));
+    bodyNode.appendChild(daysSection(model.days, now));
     bodyNode.appendChild(tasksSection(model.tree));
+    startLiveTicker();
   };
   const statsRow = (pairs) => {
     const wrapper = el("div", "rlb-stats");
@@ -1025,20 +1069,39 @@ function createDashboard() {
         task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
       }
       const actions = el("td", "rlb-table__num");
+      const discarding = discardConfirmUid === entry.clockUid;
+      const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
+      const discard = button(
+        `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
+        "",
+        () => {
+          if (!discarding) {
+            discardConfirmUid = entry.clockUid;
+            if (discardConfirmTimer)
+              clearTimeout(discardConfirmTimer);
+            discardConfirmTimer = setTimeout(() => {
+              resetDiscardConfirmation();
+              render();
+            }, 5e3);
+            render();
+            return;
+          }
+          resetDiscardConfirmation();
+          void act(() => discardClock(entry.clockUid));
+        },
+        { title: discardTitle }
+      );
+      discard.dataset.action = "discard";
       actions.append(
         button(
-          "bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success",
+          "bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-running__stop",
           "",
           () => void act(() => clockOut(entry.clockUid)),
-          { title: "Clock out now" }
+          { title: "Clock out this Session" }
         ),
-        button(
-          "bp3-button bp3-minimal bp3-small bp3-icon-trash",
-          "",
-          () => void act(() => discardClock(entry.clockUid)),
-          { title: "Discard this entry" }
-        )
+        discard
       );
+      actions.firstElementChild.dataset.action = "clock-out";
       const started = formatStarted(entry.start, now);
       const startedTime = el("time", "rlb-started", "");
       startedTime.title = started.raw;
@@ -1055,29 +1118,49 @@ function createDashboard() {
       }
       const startedCell = el("td", "rlb-muted rlb-started-cell");
       startedCell.appendChild(startedTime);
-      row.append(
-        task,
-        startedCell,
-        el("td", "rlb-table__num", formatElapsed(now.getTime() - entry.start.getTime())),
-        actions
+      const elapsed = el(
+        "td",
+        "rlb-table__num rlb-running-elapsed",
+        formatElapsed(now.getTime() - entry.start.getTime())
       );
+      elapsed.dataset.runningElapsed = "true";
+      elapsed.dataset.clockUid = entry.clockUid;
+      elapsed.dataset.startMs = String(entry.start.getTime());
+      row.append(task, startedCell, elapsed, actions);
       tbody.appendChild(row);
     }
     table.appendChild(tbody);
     section.appendChild(table);
     return section;
   };
-  const daysSection = (days) => {
+  const daysSection = (days, now) => {
     const section = el("section", "rlb-section");
     section.appendChild(el("h3", "rlb-section__title", "By day"));
     const peak = Math.max(1, ...days.map((day) => day.minutes));
     const bars = el("div", "rlb-bars");
+    bars.dataset.dayCount = String(days.length);
+    bars.style.setProperty("--rlb-day-count", String(days.length));
+    bars.setAttribute("role", "list");
+    bars.setAttribute("aria-label", `Activity by day for ${days.length} days`);
     for (const day of days) {
-      const bar = el("div", `rlb-bar${day.minutes === 0 ? " rlb-bar--empty" : ""}`);
-      bar.title = `${day.key} \xB7 ${formatMinutesHuman(day.minutes)}`;
+      const level = day.minutes === 0 ? 0 : Math.max(1, Math.ceil(day.minutes / peak * 3));
+      const duration = formatMinutesHuman(day.minutes);
+      const label = formatDayLabel(day.date, now);
+      const bar = el(
+        "div",
+        `rlb-bar rlb-bar--level-${level}${day.minutes === 0 ? " rlb-bar--empty" : ""}`
+      );
+      bar.dataset.date = day.key;
+      bar.dataset.minutes = String(day.minutes);
+      bar.dataset.level = String(level);
+      bar.title = `${day.key} \xB7 ${duration}`;
+      bar.setAttribute("aria-label", `${day.key}, ${label}, ${duration}`);
+      bar.setAttribute("role", "listitem");
+      const track = el("div", "rlb-bar__track");
       const fill = el("div", "rlb-bar__fill");
-      fill.style.height = `${Math.max(2, Math.round(day.minutes / peak * 100))}%`;
-      bar.appendChild(fill);
+      fill.style.height = `${day.minutes === 0 ? 0 : Math.max(4, Math.round(day.minutes / peak * 100))}%`;
+      track.appendChild(fill);
+      bar.append(track, el("span", "rlb-bar__label", label));
       bars.appendChild(bar);
     }
     section.appendChild(bars);
@@ -1238,10 +1321,43 @@ function createDashboard() {
     }
     render();
   };
+  const dialogFocusables = (dialog) => [...dialog.querySelectorAll('button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter(
+    (node) => !node.disabled && node.getAttribute("aria-hidden") !== "true"
+  );
   const onKeyDown = (event) => {
-    if (event.key === "Escape" && root?.classList.contains("rlb-root--open")) {
+    if (!root?.classList.contains("rlb-root--open"))
+      return;
+    const dialog = root.querySelector(".rlb-dialog");
+    if (!dialog)
+      return;
+    if (event.key === "Escape") {
+      event.preventDefault();
       event.stopPropagation();
       close();
+      return;
+    }
+    if (event.key !== "Tab")
+      return;
+    const focusables = dialogFocusables(dialog);
+    event.preventDefault();
+    event.stopPropagation();
+    if (focusables.length === 0) {
+      dialog.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    const active = document.activeElement;
+    const index = focusables.indexOf(active);
+    if (event.shiftKey) {
+      if (index <= 0)
+        last.focus();
+      else
+        focusables[index - 1].focus();
+    } else if (index < 0 || index === focusables.length - 1) {
+      first.focus();
+    } else {
+      focusables[index + 1].focus();
     }
   };
   const build = () => {
@@ -1304,6 +1420,8 @@ function createDashboard() {
   function close() {
     if (!root)
       return;
+    clearLiveTicker();
+    resetDiscardConfirmation();
     root.classList.remove("rlb-root--open");
     root.setAttribute("aria-hidden", "true");
     document.removeEventListener("keydown", onKeyDown, true);
@@ -1312,9 +1430,9 @@ function createDashboard() {
     returnFocusTo = null;
   }
   return {
-    open() {
+    open({ returnFocusTo: requestedFocus } = {}) {
       const active = document.activeElement;
-      returnFocusTo = active && active !== document.body ? active : null;
+      returnFocusTo = requestedFocus?.isConnected ? requestedFocus : active && active !== document.body && active.isConnected ? active : null;
       if (!root)
         root = build();
       root.classList.add("rlb-root--open");
@@ -1322,10 +1440,14 @@ function createDashboard() {
       document.addEventListener("keydown", onKeyDown, true);
       refresh();
       render();
-      root.querySelector(".rlb-dialog")?.focus();
+      const dialog = root.querySelector(".rlb-dialog");
+      const initial = dialogFocusables(dialog)[0];
+      (initial || dialog)?.focus();
     },
     close,
     destroy() {
+      clearLiveTicker();
+      resetDiscardConfirmation();
       document.removeEventListener("keydown", onKeyDown, true);
       root?.remove();
       root = null;
@@ -1990,33 +2112,6 @@ var STYLES = `
     color: #f29d49;
 }
 
-.rlb-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #0f9960;
-    flex: 0 0 auto;
-    animation: rlb-pulse 2s ease-in-out infinite;
-}
-
-.rlb-dot--stale {
-    background: #d9822b;
-    animation: none;
-}
-
-.rlb-dot--overrun {
-    background: #cd4246;
-}
-
-@keyframes rlb-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rlb-dot { animation: none; }
-}
-
 /* ---- popover ---- */
 
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
@@ -2072,12 +2167,16 @@ var STYLES = `
 }
 
 .rlb-popover__footer {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding-top: 8px;
     margin-top: 4px;
     border-top: 1px solid rgba(16, 22, 26, 0.15);
+}
+
+.rlb-popover__footer .bp3-button {
+    min-width: 0;
 }
 
 .bp3-dark .rlb-popover__footer {
@@ -2087,7 +2186,7 @@ var STYLES = `
 .rlb-run {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: 6px;
     padding: 6px;
     border-radius: 3px;
 }
@@ -2121,15 +2220,58 @@ var STYLES = `
 }
 
 .rlb-run__meta {
+    display: block;
+    min-width: 0;
     font-size: 11px;
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-run__meta-line {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-run__started {
+    cursor: help;
 }
 
 .rlb-run__actions {
     display: flex;
     gap: 2px;
     flex: 0 0 auto;
+}
+
+.rlb-run__actions .rlb-run__stop {
+    color: #5c7080;
+}
+
+.rlb-run__actions .rlb-run__stop:hover,
+.rlb-run__actions .rlb-run__stop:focus {
+    color: #c23030;
+}
+
+.rlb-run__actions .bp3-icon-trash {
+    color: #5c7080;
+    opacity: 0.65;
+}
+
+.rlb-run__actions .bp3-icon-trash:hover,
+.rlb-run__actions .bp3-icon-trash:focus {
+    color: #c23030;
+    opacity: 1;
+}
+
+.rlb-table .rlb-running__stop {
+    color: #5c7080;
+}
+
+.rlb-table .rlb-running__stop:hover,
+.rlb-table .rlb-running__stop:focus {
+    color: #c23030;
 }
 
 /* ---- dashboard ---- */
@@ -2215,30 +2357,88 @@ var STYLES = `
 }
 
 .rlb-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    height: 96px;
+    display: grid;
+    grid-template-columns: repeat(var(--rlb-day-count, 7), minmax(0, 1fr));
+    align-items: stretch;
+    gap: 4px;
+    height: 112px;
+    min-width: 0;
     padding: 4px 0;
 }
 
 .rlb-bar {
-    flex: 1 1 0;
-    min-width: 4px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 4px;
+    min-width: 0;
+    height: 100%;
+}
+
+.rlb-bar__track {
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    align-items: flex-end;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
     height: 100%;
 }
 
 .rlb-bar__fill {
-    background: #2d72d2;
+    width: min(24px, 100%);
     border-radius: 2px 2px 0 0;
-    min-height: 2px;
+    min-height: 0;
+}
+
+.rlb-bar__label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: #5c7080;
+    font-size: 10px;
+    line-height: 1.1;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-bar--level-0 .rlb-bar__fill {
+    background: #d8eee0;
+}
+
+.rlb-bar--level-1 .rlb-bar__fill {
+    background: #a7d9b8;
+}
+
+.rlb-bar--level-2 .rlb-bar__fill {
+    background: #57ad79;
+}
+
+.rlb-bar--level-3 .rlb-bar__fill {
+    background: #16834a;
 }
 
 .rlb-bar--empty .rlb-bar__fill {
-    background: rgba(167, 182, 194, 0.35);
+    height: 2px !important;
+}
+
+.bp3-dark .rlb-bar__label {
+    color: #a7b6c2;
+}
+
+.bp3-dark .rlb-bar--level-0 .rlb-bar__fill {
+    background: #315945;
+}
+
+.bp3-dark .rlb-bar--level-1 .rlb-bar__fill {
+    background: #4b9b69;
+}
+
+.bp3-dark .rlb-bar--level-2 .rlb-bar__fill {
+    background: #64c486;
+}
+
+.bp3-dark .rlb-bar--level-3 .rlb-bar__fill {
+    background: #8be0a7;
 }
 
 .rlb-table {
@@ -2676,15 +2876,7 @@ var STYLES = `
 
 .rlb-bars {
     height: 112px;
-    padding: 10px 0 6px;
-}
-
-.rlb-bar__fill {
-    background: var(--rlb-accent);
-}
-
-.rlb-bar--empty .rlb-bar__fill {
-    background: var(--rlb-border);
+    padding: 8px 0 4px;
 }
 
 .rlb-table th {
@@ -2773,6 +2965,8 @@ var STYLES = `
 
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
+var POPOVER_ID = "roam-logbook-popover";
+var POPOVER_TITLE_ID = "roam-logbook-popover-title";
 var TOPBAR_SELECTOR = ".rm-topbar";
 var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
 var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
@@ -2793,7 +2987,8 @@ function createTopbar({ onOpenDashboard }) {
   let destroyed = false;
   let clockOutAllConfirm = false;
   let clockOutAllConfirmTimer = null;
-  const isStale = (entry) => findStaleClocks([entry], /* @__PURE__ */ new Date(), staleHours()).length > 0;
+  let discardConfirmUid = null;
+  let discardConfirmTimer = null;
   const taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
   const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
@@ -2803,13 +2998,23 @@ function createTopbar({ onOpenDashboard }) {
       clearTimeout(clockOutAllConfirmTimer);
     clockOutAllConfirmTimer = null;
   };
-  const closePopover = () => {
+  const resetDiscardConfirmation = () => {
+    discardConfirmUid = null;
+    if (discardConfirmTimer)
+      clearTimeout(discardConfirmTimer);
+    discardConfirmTimer = null;
+  };
+  const closePopover = ({ restoreFocus = true } = {}) => {
     resetClockOutConfirmation();
+    resetDiscardConfirmation();
     popover?.remove();
     popover = null;
     document.removeEventListener("mousedown", onDocumentMouseDown, true);
     document.removeEventListener("keydown", onPopoverKeyDown, true);
     window.removeEventListener("resize", closePopover);
+    buttonNode?.setAttribute("aria-expanded", "false");
+    if (restoreFocus && buttonNode?.isConnected)
+      buttonNode.focus();
   };
   function onDocumentMouseDown(event) {
     if (!popover)
@@ -2819,8 +3024,11 @@ function createTopbar({ onOpenDashboard }) {
     closePopover();
   }
   function onPopoverKeyDown(event) {
-    if (event.key === "Escape")
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       closePopover();
+    }
   }
   const positionPopover = () => {
     const anchor = buttonNode?.getBoundingClientRect();
@@ -2835,16 +3043,14 @@ function createTopbar({ onOpenDashboard }) {
     const target = targetMinutes(entry.clockUid);
     const elapsed = now - entry.start.getTime();
     const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
-    return formatElapsed(elapsed) + (target ? ` / ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
+    return formatElapsed(elapsed) + (target ? ` \xB7 target ${formatElapsed(target * 6e4)}` : "") + ` \xB7 ${formatMinutesHuman(total)} total`;
   };
   const runningRow = (entry) => {
     const now = Date.now();
     const overrun = isOverrun(entry, now);
     const row = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
-    row.appendChild(
-      el("span", `rlb-dot${overrun ? " rlb-dot--overrun" : isStale(entry) ? " rlb-dot--stale" : ""}`)
-    );
     const body = el("div", "rlb-run__body");
+    const taskLabel = `Open this block: ${entry.title}`;
     const title = button(
       "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
       entry.title,
@@ -2852,28 +3058,58 @@ function createTopbar({ onOpenDashboard }) {
         closePopover();
         void openBlock(entry.taskUid);
       },
-      { title: "Open this block" }
+      { title: taskLabel }
     );
-    const suffix = ` \xB7 since ${formatStamp(entry.start)}` + (entry.pageTitle ? ` \xB7 ${entry.pageTitle}` : "");
-    const meta = el("div", "rlb-run__meta", rowFigures(entry, now) + suffix);
+    const started = formatStarted(entry.start, new Date(now));
+    const startedDetails = `Started ${started.raw}` + (entry.pageTitle ? ` \xB7 Page: ${entry.pageTitle}` : "");
+    const meta = el("div", "rlb-run__meta");
+    const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now));
+    const startedNode = el(
+      "time",
+      "rlb-run__meta-line rlb-run__started",
+      started.valid ? `${started.dateLabel} ${started.timeLabel}` : started.raw
+    );
+    startedNode.title = startedDetails;
+    startedNode.setAttribute("aria-label", startedDetails);
+    if (started.datetime)
+      startedNode.dateTime = started.datetime;
+    meta.append(primary, startedNode);
     meta.dataset.clockUid = entry.clockUid;
-    meta.dataset.suffix = suffix;
     body.append(title, meta);
     const actions = el("div", "rlb-run__actions");
+    const discarding = discardConfirmUid === entry.clockUid;
+    const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
+    const discard = button(
+      `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
+      "",
+      () => {
+        if (!discarding) {
+          discardConfirmUid = entry.clockUid;
+          if (discardConfirmTimer)
+            clearTimeout(discardConfirmTimer);
+          discardConfirmTimer = setTimeout(() => {
+            resetDiscardConfirmation();
+            renderPopover();
+          }, 5e3);
+          renderPopover();
+          return;
+        }
+        resetDiscardConfirmation();
+        void run(() => discardClock(entry.clockUid));
+      },
+      { title: discardTitle }
+    );
+    discard.dataset.action = "discard";
     actions.append(
       button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-stop bp3-intent-success",
+        "bp3-button bp3-minimal bp3-small bp3-icon-stop rlb-run__stop",
         "",
         () => void run(() => clockOut(entry.clockUid)),
-        { title: "Clock out now" }
+        { title: "Clock out this Session" }
       ),
-      button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-trash",
-        "",
-        () => void run(() => discardClock(entry.clockUid)),
-        { title: "Discard this entry" }
-      )
+      discard
     );
+    actions.firstElementChild.dataset.action = "clock-out";
     row.append(body, actions);
     return row;
   };
@@ -2894,19 +3130,16 @@ function createTopbar({ onOpenDashboard }) {
     if (entries.length <= 1 && clockOutAllConfirm)
       resetClockOutConfirmation();
     popover.replaceChildren();
-    popover.appendChild(
-      el(
-        "div",
-        "rlb-popover__title",
-        entries.length ? `${sessionCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook"
-      )
-    );
+    const titleText = entries.length ? `${sessionCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook";
+    const heading = el("div", "rlb-popover__title", titleText);
+    heading.id = POPOVER_TITLE_ID;
+    popover.appendChild(heading);
     if (entries.length === 0 && pausedItems.length === 0) {
       popover.appendChild(
         el(
           "div",
           "rlb-popover__empty",
-          "No clock is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in."
+          "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in."
         )
       );
     } else {
@@ -2944,8 +3177,8 @@ function createTopbar({ onOpenDashboard }) {
     const footer = el("div", "rlb-popover__footer");
     footer.appendChild(
       button("bp3-button bp3-small", "Dashboard", () => {
-        closePopover();
-        onOpenDashboard();
+        closePopover({ restoreFocus: false });
+        onOpenDashboard?.(buttonNode);
       })
     );
     if (entries.length > 0) {
@@ -3003,12 +3236,19 @@ function createTopbar({ onOpenDashboard }) {
     }
     refresh();
     popover = el("div", "bp3-card bp3-elevation-3 rlb-popover");
+    popover.id = POPOVER_ID;
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-labelledby", POPOVER_TITLE_ID);
     document.body.appendChild(popover);
+    buttonNode?.setAttribute("aria-haspopup", "dialog");
+    buttonNode?.setAttribute("aria-controls", POPOVER_ID);
+    buttonNode?.setAttribute("aria-expanded", "true");
     renderPopover();
     positionPopover();
     document.addEventListener("mousedown", onDocumentMouseDown, true);
     document.addEventListener("keydown", onPopoverKeyDown, true);
     window.addEventListener("resize", closePopover);
+    popover.querySelector("button")?.focus();
   };
   const renderButton = () => {
     if (!buttonNode)
@@ -3068,7 +3308,9 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
         const entry = byUid.get(meta.dataset.clockUid);
         if (!entry)
           continue;
-        meta.textContent = rowFigures(entry, now) + (meta.dataset.suffix || "");
+        const primary = meta.querySelector(".rlb-run__meta-primary");
+        if (primary)
+          primary.textContent = rowFigures(entry, now);
         const row = meta.closest(".rlb-run");
         if (row) {
           row.classList.toggle("rlb-run--overrun", isOverrun(entry, now));
@@ -3085,6 +3327,9 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     separatorNode.setAttribute("aria-hidden", "true");
     timeNode = el("span", "rlb-topbar__time");
     buttonNode = button("bp3-button bp3-minimal rlb-topbar__button", "", togglePopover);
+    buttonNode.setAttribute("aria-haspopup", "dialog");
+    buttonNode.setAttribute("aria-controls", POPOVER_ID);
+    buttonNode.setAttribute("aria-expanded", "false");
     buttonNode.appendChild(iconNode);
     container.appendChild(buttonNode);
     renderButton();
@@ -3205,7 +3450,7 @@ var PALETTE_COMMANDS = [
 ];
 function createController({ extensionAPI: extensionAPI2 }) {
   const dashboard = createDashboard();
-  const topbar = createTopbar({ onOpenDashboard: () => dashboard.open() });
+  const topbar = createTopbar({ onOpenDashboard: (trigger) => dashboard.open({ returnFocusTo: trigger }) });
   let destroyed = false;
   let detachPomodoro = null;
   const targetString = (context) => {
@@ -3249,7 +3494,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
         {
           id: SETTING_TOPBAR,
           name: "Show topbar widget",
-          description: "The live counter and its running-task list in Roam\u2019s left navigation.",
+          description: "The live counter and its running Session list in Roam\u2019s left navigation.",
           action: {
             type: "switch",
             defaultValue: true,
