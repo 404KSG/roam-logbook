@@ -1,6 +1,6 @@
 {
   "name": "roam-logbook",
-  "version": "0.9.0",
+  "version": "0.9.0-beta.1",
   "description": "org-mode style clock tracking (LOGBOOK / CLOCK) for Roam Research TODOs",
   "type": "module",
   "main": "extension.js",
@@ -10,8 +10,9 @@
     "test": "node --test test/*.test.js",
     "verify:live": "node scripts/verify-live.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
+    "verify:workflow": "node scripts/verify-workflow.mjs",
     "lint": "eslint .",
-    "check": "npm run lint && npm test && npm run verify:bundle"
+    "check": "npm run lint && npm run verify:workflow && npm test && npm run verify:bundle"
   },
   "keywords": [
     "roam-research",

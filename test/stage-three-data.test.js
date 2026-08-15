@@ -169,3 +169,73 @@ test('Data issues is absent for a clean graph and exposes exact details only whe
     assert.match(issues.textContent, /Declared 0:30 differs/);
     issueDashboard.destroy();
 });
+
+test('Dashboard keeps the last successful hierarchy when a refresh query fails, then recovers', () => {
+    const graph = seed(false);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+    const before = document.querySelector('.rlb-task-link__text').textContent;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes('?parent-uid')) throw new Error('parent query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+
+    document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+
+    assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /could not be refreshed/i);
+    assert.equal(document.querySelector('.rlb-task-link__text').textContent, before);
+
+    graph.api.data.q = originalQuery;
+    document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    assert.equal(document.querySelector('.rlb-dashboard__notice'), null);
+    dashboard.destroy();
+});
+
+test('Dashboard treats a referenced parent string read failure as stale data, not a new root', () => {
+    const graph = installGraph([
+        { uid: 'health-ref-parent', string: '{{[[TODO]]}} Referenced parent', parent: null },
+        { uid: 'health-ref', string: '((health-ref-parent))', parent: 'health-ref-parent' },
+        { uid: 'health-ref-child', string: '{{[[TODO]]}} Referenced child', parent: 'health-ref' },
+        { uid: 'health-ref-drawer', string: 'LOGBOOK::', parent: 'health-ref-child' },
+        {
+            uid: 'health-ref-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'health-ref-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+    assert.ok(document.querySelector('.rlb-task-link__text'));
+
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?uid ?string')) throw new Error('block string query unavailable');
+        return originalQuery(datalog, ...args);
+    };
+    document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+
+    assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /last successful snapshot/i);
+    assert.equal(document.querySelectorAll('.rlb-tree__cell').length > 0, true);
+    dashboard.destroy();
+});
+
+test('an unresolved parent is visible in Data Issues without being promoted to a fake root', () => {
+    installGraph([
+        { uid: 'health-missing-parent-ref', string: '((health-deleted-parent))', parent: null },
+        { uid: 'health-missing-child', string: '{{[[TODO]]}} Child with missing parent', parent: 'health-missing-parent-ref' },
+        { uid: 'health-missing-drawer', string: 'LOGBOOK::', parent: 'health-missing-child' },
+        {
+            uid: 'health-missing-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'health-missing-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    assert.match(document.querySelector('.rlb-task-link__text')?.textContent || '', /Child with missing parent/);
+    assert.equal(document.querySelector('.rlb-dashboard__notice'), null);
+    assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /unresolved parent/i);
+    dashboard.destroy();
+});

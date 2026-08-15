@@ -16,13 +16,16 @@ bundle, not `src/`.
 
 The graph is the state. There is no cached mirror of clock data and no persisted
 timer: a `CLOCK::` block with no end stamp *is* a running clock, so a reload, a
-crash, or another device all converge on the same answer. Every mutation writes to
-the graph and then re-reads it (`clock.refresh()`), which costs one query per action
-and removes a whole class of desync bugs.
+crash, or another device all converge on the same answer. Queued mutations read
+before writing and check a post-write refresh. The queue is only per loaded plugin
+instance; it is not a cross-tab/device lock or CAS, so a last-moment external write
+can still race and must be surfaced conservatively.
 
-Writes are atomic: clocking looks only at the block being clocked (after resolving
-a bare `((reference))` to its original) and never at its parents. All hierarchy is
-resolved at *read* time in `stats.js`, so re-indenting or moving a task cannot
+Writes are issued one at a time, not atomically: clocking looks only at the block
+being clocked (after resolving a bare `((reference))` to its original) and never
+at its parents. A write followed by an unconfirmed read stops the remaining
+steps and returns retryable `uncertain/partial` state. All hierarchy is resolved
+at *read* time in `stats.js`, so re-indenting or moving a task cannot
 invalidate history that is already on disk. Keep it that way — the moment structure
 leaks into what gets written, every later structural edit makes old entries lie.
 
@@ -49,9 +52,11 @@ Layering, innermost first:
     `afterNavigation` walks the *leading run* of topbar children and stops at the
     first that carries no navigation icon. Whole-topbar searches let the right
     sidebar's own arrow win. `test/placement.test.js` pins every shape.
-  - `.rlb-topbar__labels` is a flex row, and flex strips leading whitespace from
-    an item — `" · 44m"` renders as `"· 44m"`. Separators are `::before`
-    pseudo-elements and spacing is `gap`; never put them in the text.
+  - The current separator is a dedicated `.rlb-topbar__separator` DOM span with
+    `aria-hidden="true"`; its visual spacing is CSS `gap`. Do not reintroduce
+    leading whitespace into text nodes. Elapsed state uses neutral Blueprint
+    gray, restrained amber stale state, and restrained red Pomodoro overrun state;
+    there is no success-green running dot.
 - `extension.js` — lifecycle, command/context-menu registration, settings panel.
 
 Persisted internal state uses explicit envelopes: Pause Batch format 2,
@@ -96,6 +101,8 @@ ones, and real Roam uids are 9.
 
 - Commit source and generated `extension.js` together.
 - Run `npm ci`, `npm run check`, and `npm run verify:bundle` from a clean clone.
+- Confirm `npm run verify:workflow` passes; it is the repository's lightweight
+  actionlint substitute when actionlint is unavailable.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release.
 - Run `npm run verify:live` manually against a disposable real graph; do not call

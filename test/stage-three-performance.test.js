@@ -72,6 +72,28 @@ test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
     topbar.unmount();
 });
 
+test('outer navigation shell replacement is recovered with one debounced attach', async () => {
+    document.body.innerHTML =
+        '<div class="rlb-outer-shell"><div class="rlb-nav-shell"><div class="rm-topbar">' +
+        '<button aria-label="Back"></button><button aria-label="Forward"></button>' +
+        '<input aria-label="Find or Create Page"></div></div></div>';
+    const topbar = createTopbar({ onOpenDashboard: () => {} });
+    topbar.mount();
+    const initial = topbar.getPerformanceSnapshot().attachCount;
+    const outer = document.querySelector('.rlb-outer-shell');
+    const replacement = document.createElement('div');
+    replacement.className = 'rlb-nav-shell';
+    replacement.innerHTML =
+        '<div class="rm-topbar"><button aria-label="Back"></button>' +
+        '<button aria-label="Forward"></button><input aria-label="Find or Create Page"></div>';
+    outer.replaceChildren(replacement);
+    await settleMutations();
+
+    assert.equal(topbar.getPerformanceSnapshot().attachCount, initial + 1);
+    assert.ok(document.querySelector('.rm-topbar #roam-logbook-topbar'));
+    topbar.unmount();
+});
+
 test('the one-second tick updates existing DOM handles without a graph read or replacement', async () => {
     let tick;
     const started = new Date('2026-08-15T09:00:00');

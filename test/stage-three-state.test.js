@@ -48,3 +48,17 @@ test('invalid current Pause Batch state remains recoverable and is not silently 
     assert.equal(store.get(SETTING_PAUSED_BATCH), raw);
     assert.equal(JSON.parse(JSON.parse(store.get(SETTING_STATE_BACKUPS)).data[SETTING_PAUSED_BATCH].raw).version, 2);
 });
+
+test('mixed legacy Pomodoro state is backed up as raw before valid entries are retained', () => {
+    const raw = JSON.stringify({ good: 25, bad: 'not-a-duration', alsoGood: 0 });
+    const store = useSettings({ [SETTING_POMODORO_STATE]: raw });
+
+    pomodoro.load();
+
+    assert.equal(store.get(SETTING_POMODORO_STATE), raw, 'mixed legacy data is not overwritten during migration');
+    assert.equal(pomodoro.targetMinutes('good'), 25);
+    assert.equal(pomodoro.targetMinutes('alsoGood'), null, 'valid suppression remains available in memory');
+    const backups = JSON.parse(store.get(SETTING_STATE_BACKUPS));
+    assert.equal(backups.data[SETTING_POMODORO_STATE].raw, raw);
+    assert.match(pomodoro.getNotice(), /invalid|kept|backup/i);
+});

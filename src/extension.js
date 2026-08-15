@@ -7,6 +7,7 @@
  */
 
 import * as clock from './clock.js';
+import { createConfirmationController } from './confirmation.js';
 import { createDashboard } from './dashboard.js';
 import { injectStyles, removeStyles } from './dom.js';
 import { getBlockString, getFocusedBlockUid } from './roam.js';
@@ -42,7 +43,11 @@ const PALETTE_COMMANDS = [
 
 function createController({ extensionAPI }) {
     const dashboard = createDashboard();
-    const topbar = createTopbar({ onOpenDashboard: trigger => dashboard.open({ returnFocusTo: trigger }) });
+    const confirmation = createConfirmationController();
+    const topbar = createTopbar({
+        confirmation,
+        onOpenDashboard: trigger => dashboard.open({ returnFocusTo: trigger }),
+    });
     let destroyed = false;
     let detachPomodoro = null;
 
@@ -177,7 +182,15 @@ function createController({ extensionAPI }) {
                 await clock.clockOutBlock(uid);
             })
         );
-        add(PALETTE_COMMANDS[2], () => guard(() => paused.clockOutAll()));
+        add(PALETTE_COMMANDS[2], () =>
+            guard(async () => {
+                if (!confirmation.arm('clock-out-all', 'command')) {
+                    notifyUser('Clock Out All is armed. Run again within 5 seconds to confirm.');
+                    return;
+                }
+                await paused.clockOutAll();
+            })
+        );
         add(PALETTE_COMMANDS[3], () => dashboard.open());
         add(PALETTE_COMMANDS[4], () => {
             clock.refresh();
@@ -213,6 +226,7 @@ function createController({ extensionAPI }) {
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            confirmation.reset();
             detachPomodoro?.();
             detachPomodoro = null;
             pomodoro.reset();

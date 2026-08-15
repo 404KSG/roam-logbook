@@ -5,6 +5,7 @@ import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 
 const TASK = { uid: 'recovery1', string: '{{[[TODO]]}} recovery task', parent: null };
 const OTHER = { uid: 'recovery2', string: '{{[[TODO]]}} another recovery task', parent: null };
+const UNRELATED = { uid: 'recovery3', string: '{{[[TODO]]}} unrelated running task', parent: null };
 const T0 = new Date('2026-08-15T09:00:00');
 
 let graph;
@@ -19,7 +20,7 @@ const extensionAPI = {
 };
 
 const install = async () => {
-    graph = installGraph([TASK, OTHER]);
+    graph = installGraph([TASK, OTHER, UNRELATED]);
     allowMultiple = true;
     store.clear();
     const { setExtensionAPI } = await import('../src/settings.js');
@@ -85,6 +86,107 @@ test('Clock Out All retains only the still-running Pause Batch records after a p
     assert.equal(pomodoro.getNotice(), '');
 });
 
+test('Clock Out All stops after a post-write refresh failure and keeps an exact retryable remainder', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+
+    const originalQuery = graph.api.data.q;
+    const originalUpdate = graph.api.data.block.update;
+    let failNextRead = 0;
+    let updateCount = 0;
+    graph.api.data.block.update = async args => {
+        updateCount += 1;
+        const result = await originalUpdate(args);
+        failNextRead = 2;
+        return result;
+    };
+    graph.api.data.q = (...args) => {
+        if (failNextRead > 0) {
+            failNextRead -= 1;
+            throw new Error('refresh failed after bulk close');
+        }
+        return originalQuery(...args);
+    };
+
+    try {
+        const result = await paused.clockOutAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+        assert.equal(result.uncertain, true);
+        assert.equal(result.partial, true);
+        assert.equal(updateCount, 1, 'the post-write read failure stops the next destructive update');
+        assert.match(paused.getNotice(), /Graph state could not be confirmed/i);
+        assert.equal(clock.getRunning().length >= 1, true, 'the cached running state remains non-empty');
+        const graphRunning = [clockLines(TASK.uid), clockLines(OTHER.uid)]
+            .flat()
+            .filter(line => typeof line === 'string' && !line.includes('--'));
+        assert.equal(graphRunning.length, 1, 'the unattempted Session was not destructively changed');
+    } finally {
+        graph.api.data.q = originalQuery;
+        graph.api.data.block.update = originalUpdate;
+    }
+});
+
+test('Pause All stops after a post-write refresh failure and resumes the exact remainder on retry', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+
+    const originalQuery = graph.api.data.q;
+    const originalUpdate = graph.api.data.block.update;
+    let failNextRead = 0;
+    let updateCount = 0;
+    graph.api.data.block.update = async args => {
+        updateCount += 1;
+        const result = await originalUpdate(args);
+        failNextRead = 2;
+        return result;
+    };
+    graph.api.data.q = (...args) => {
+        if (failNextRead > 0) {
+            failNextRead -= 1;
+            throw new Error('refresh failed after pause');
+        }
+        return originalQuery(...args);
+    };
+
+    let first;
+    try {
+        first = await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+        assert.equal(first.uncertain, true);
+        assert.equal(first.partial, true);
+        assert.equal(first.paused, 1);
+        assert.equal(first.failed, 1);
+        assert.equal(updateCount, 1, 'the failed confirmation stops the next pause write');
+        assert.equal(
+            [clockLines(TASK.uid), clockLines(OTHER.uid)]
+                .flat()
+                .filter(line => !line.includes('--')).length,
+            1
+        );
+        assert.equal(paused.getPaused().length, 1, 'only the confirmed closed Session is in the Pause Batch');
+        assert.match(paused.getNotice(), /Graph state could not be confirmed/i);
+    } finally {
+        graph.api.data.q = originalQuery;
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    const retry = await paused.pauseAll({ now: new Date(T0.getTime() + 6 * 60_000) });
+    assert.equal(retry.uncertain, false);
+    assert.equal(retry.failed, 0);
+    assert.equal(paused.getPaused().length, 2);
+    assert.equal(
+        [clockLines(TASK.uid), clockLines(OTHER.uid)]
+            .flat()
+            .filter(line => !line.includes('--')).length,
+        0,
+        'retry closes only the unconfirmed remainder and does not duplicate the first Session'
+    );
+});
+
 test('Resume retains a pending association when Pomodoro migration fails, then recovers without a duplicate Session', async () => {
     const { clock, paused, pomodoro } = await install();
     store.set(
@@ -141,6 +243,83 @@ test('Resume retains a pending association when Pomodoro migration fails, then r
     assert.equal(paused.getPendingResume().length, 0);
     const resumedUid = clock.getRunning()[0].clockUid;
     assert.equal(pomodoro.targetDurationMs(resumedUid), 17 * 60_000);
+});
+
+test('Resume does not close an unrelated Session while two exact pending associations are unresolved', async () => {
+    const { clock, paused, pomodoro } = await install();
+    allowMultiple = false;
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: TASK.uid,
+                        title: 'recovery task',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 12 * 60_000,
+                        clockUid: 'old-clock-one',
+                    },
+                    {
+                        taskUid: OTHER.uid,
+                        title: 'another recovery task',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 8 * 60_000,
+                        clockUid: 'old-clock-two',
+                    },
+                ],
+            },
+        })
+    );
+    paused.load();
+    pomodoro.load();
+
+    await clock.clockIn(UNRELATED.uid, { now: T0 });
+    const unrelatedUid = clock.getRunning()[0].clockUid;
+    const result = await paused.resumeAll({ now: new Date(T0.getTime() + 1_000) });
+
+    assert.equal(clock.getRunning().length, 1, 'the unrelated Session must remain the only running Session');
+    assert.equal(clock.getRunning()[0].clockUid, unrelatedUid);
+    assert.equal(clock.getRunning()[0].taskUid, UNRELATED.uid);
+    assert.equal(result.resumed, 0);
+    assert.equal(paused.getPendingResume().length, 2, 'unresolved exact pending entries remain retryable');
+    assert.match(paused.getNotice(), /conflict|could not be confirmed|old-clock/i);
+});
+
+test('a missing exact pending Session never transfers its Pomodoro remainder to a later Session', async () => {
+    const { clock, paused, pomodoro } = await install();
+    allowMultiple = true;
+    store.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: TASK.uid,
+                        title: 'recovery task',
+                        pausedAtMs: T0.getTime(),
+                        pomodoroRemainingMs: 7 * 60_000,
+                        clockUid: 'old-session-that-disappeared',
+                    },
+                ],
+            },
+        })
+    );
+    paused.load();
+    pomodoro.load();
+
+    await clock.clockIn(TASK.uid, { now: T0 });
+    const laterUid = clock.getRunning()[0].clockUid;
+    const result = await paused.resumeAll({ now: new Date(T0.getTime() + 1_000) });
+
+    assert.equal(result.resumed, 0);
+    assert.equal(paused.getPendingResume().length, 1);
+    assert.notEqual(pomodoro.targetDurationMs(laterUid), 7 * 60_000);
+    assert.match(paused.getNotice(), /conflict|exact Session/i);
 });
 
 test('legacy Pause and Pomodoro settings migrate to versioned data without losing values', async () => {

@@ -28,6 +28,7 @@ export function createDashboard({
     let liveTicker = null;
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
+    let lastSnapshot = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
     const collapsed = new Set();
@@ -62,7 +63,39 @@ export function createDashboard({
         if (!bodyNode) return;
         clearLiveTicker();
         const now = nowFn();
-        const snapshot = readDashboardSnapshot();
+        let snapshot;
+        let refreshNotice = '';
+        let hierarchyIssues = [];
+        try {
+            const candidate = readDashboardSnapshot();
+            hierarchyIssues = candidate.hierarchy.issues || [];
+            lastSnapshot = candidate;
+            snapshot = candidate;
+        } catch (error) {
+            hierarchyIssues = error.issues || hierarchyIssues;
+            if (!lastSnapshot) {
+                summaryNode.replaceChildren();
+                const notice = el(
+                    'div',
+                    'rlb-dashboard__notice',
+                    'Graph data could not be refreshed; no successful snapshot is available yet.'
+                );
+                notice.setAttribute('role', 'alert');
+                const issueRows = hierarchyIssues.map(issue => ({
+                    title: issue.title || issue.parentUid || 'Unresolved graph data',
+                    rawClock: issue.rawClock || '(hierarchy query)',
+                    issues: [issue],
+                }));
+                bodyNode.replaceChildren(
+                    notice,
+                    ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
+                );
+                return;
+            }
+            snapshot = lastSnapshot;
+            refreshNotice =
+                'Graph data could not be refreshed; showing last successful snapshot.';
+        }
         const entries = snapshot.entries;
         const hierarchy = snapshot.hierarchy;
         // Publish the exact snapshot to the clock seam. This updates running
@@ -84,7 +117,21 @@ export function createDashboard({
             ])
         );
 
-        if (model.issues.length > 0) bodyNode.appendChild(dataIssuesSection(model.issues));
+        if (refreshNotice) {
+            const notice = el('div', 'rlb-dashboard__notice', refreshNotice);
+            notice.setAttribute('role', 'status');
+            bodyNode.appendChild(notice);
+        }
+
+        const issues = [
+            ...model.issues,
+            ...hierarchyIssues.map(issue => ({
+                title: issue.title || issue.parentUid || 'Unresolved graph data',
+                rawClock: issue.rawClock || '(hierarchy query)',
+                issues: [issue],
+            })),
+        ];
+        if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
 
         if (model.running.length > 0) {
             bodyNode.appendChild(runningSection(model.running, now));
@@ -425,10 +472,11 @@ export function createDashboard({
     };
 
     const taskLink = (title, taskUid) => {
+        const accessibleName = `Open this block: ${title}`;
         const link = button('bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link', '', () => {
             close();
             void openBlock(taskUid);
-        }, { title: 'Open this block' });
+        }, { title: accessibleName });
         link.appendChild(el('span', 'rlb-task-link__text', title));
         return link;
     };

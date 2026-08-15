@@ -122,6 +122,37 @@ test('Clock Out All requires a second confirmation and resets when the popover c
     assert.equal(clock.getRunning().length, 0, 'only the confirmed action may close all Sessions');
 });
 
+test('Command Palette Clock Out All requires a second invocation before writing', async () => {
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    const command = paletteCommands.get('Logbook: Clock out all running clocks');
+
+    await command();
+
+    assert.equal(clock.getRunning().length, 2, 'the first command invocation must only arm confirmation');
+    assert.match(toasts.join(' '), /run again.*confirm/i);
+
+    await command();
+    assert.equal(clock.getRunning().length, 0, 'the second command invocation performs the confirmed action');
+});
+
+test('Command Palette confirmation expires and unload resets the armed state', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    const command = paletteCommands.get('Logbook: Clock out all running clocks');
+
+    await command();
+    t.mock.timers.tick(5_001);
+    await command();
+    assert.equal(clock.getRunning().length, 2, 'an expired confirmation cannot execute');
+
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await paletteCommands.get('Logbook: Clock out all running clocks')();
+    assert.equal(clock.getRunning().length, 2, 'unload clears a pending command confirmation');
+});
+
 test('Pause All remains a one-click recoverable action', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
     openPopover();

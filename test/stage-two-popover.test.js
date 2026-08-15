@@ -184,6 +184,34 @@ test('popover is a labelled dialog and returns focus to its trigger on every clo
     assert.equal(document.activeElement, trigger);
 });
 
+test('popover is modal to keyboard focus and falls back to the dialog when empty', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+
+    const trigger = topbarButton();
+    click(trigger);
+    const popover = document.querySelector('body > .rlb-popover');
+    assert.equal(popover.getAttribute('aria-modal'), 'true');
+    const focusables = () => [...popover.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')];
+    const first = focusables()[0];
+    const last = focusables().at(-1);
+    last.focus();
+    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    assert.equal(document.activeElement, first);
+    first.focus();
+    document.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })
+    );
+    assert.equal(document.activeElement, last);
+
+    popover.querySelectorAll('button').forEach(control => control.remove());
+    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    assert.equal(document.activeElement, popover);
+
+    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(document.activeElement, trigger);
+});
+
 test('dashboard traps focus and returns it to both topbar and command entry points', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });

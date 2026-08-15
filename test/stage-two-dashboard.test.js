@@ -152,6 +152,23 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     dashboard.destroy();
 });
 
+test('Dashboard Running and By Task links expose the complete Task title', async () => {
+    const nowMs = new Date('2026-08-15T09:00:00').getTime();
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+    dashboard.open();
+
+    const links = [...document.querySelectorAll('.rlb-task-link')];
+    assert.ok(links.length >= 2, 'the running and By Task sections both expose the Task');
+    for (const link of links) {
+        assert.match(link.getAttribute('aria-label'), /^Open this block: .+/);
+        assert.equal(link.getAttribute('aria-label'), link.title);
+        assert.notEqual(link.getAttribute('aria-label'), 'Open this block');
+    }
+    assert.ok(links.some(link => /Child running task/.test(link.title)));
+    dashboard.destroy();
+});
+
 test('Last 7 days renders seven accessible green intensity cells including zero days', () => {
     graph = installGraph([
         { uid: 'day-task', string: '{{[[TODO]]}} Activity task', parent: null },

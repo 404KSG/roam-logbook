@@ -6,6 +6,7 @@
  */
 
 import * as clock from './clock.js';
+import { createConfirmationController } from './confirmation.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
@@ -34,6 +35,7 @@ const MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|ri
 
 export function createTopbar({
     onOpenDashboard,
+    confirmation = createConfirmationController(),
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
     clearIntervalFn = tickerId => clearInterval(tickerId),
@@ -48,14 +50,14 @@ export function createTopbar({
     let observer = null;
     let hostObserver = null;
     let recoveryObserver = null;
+    let outerRecoveryObserver = null;
     let recoveryTarget = null;
+    let outerRecoveryTarget = null;
     let observedTopbar = null;
     let ticker = null;
     let unsubscribe = null;
     let unsubscribePaused = null;
     let destroyed = false;
-    let clockOutAllConfirm = false;
-    let clockOutAllConfirmTimer = null;
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
     let attachQueued = false;
@@ -77,9 +79,7 @@ export function createTopbar({
     // ---- popover ----
 
     const resetClockOutConfirmation = () => {
-        clockOutAllConfirm = false;
-        if (clockOutAllConfirmTimer) clearTimeout(clockOutAllConfirmTimer);
-        clockOutAllConfirmTimer = null;
+        confirmation?.reset();
     };
 
     const resetDiscardConfirmation = () => {
@@ -111,6 +111,33 @@ export function createTopbar({
             event.preventDefault();
             event.stopPropagation();
             closePopover();
+            return;
+        }
+        if (event.key !== 'Tab' || !popover) return;
+
+        const focusables = [
+            ...popover.querySelectorAll(
+                'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+            ),
+        ].filter(node => !node.disabled && node.getAttribute('aria-hidden') !== 'true');
+        event.preventDefault();
+        event.stopPropagation();
+        if (focusables.length === 0) {
+            popover.tabIndex = -1;
+            popover.focus();
+            return;
+        }
+
+        const first = focusables[0];
+        const last = focusables.at(-1);
+        const index = focusables.indexOf(document.activeElement);
+        if (event.shiftKey) {
+            if (index <= 0) last.focus();
+            else focusables[index - 1].focus();
+        } else if (index < 0 || index === focusables.length - 1) {
+            first.focus();
+        } else {
+            focusables[index + 1].focus();
         }
     }
 
@@ -229,7 +256,9 @@ export function createTopbar({
         if (!popover) return;
         const entries = clock.getRunning();
         const pausedItems = paused.getPaused();
-        if (entries.length <= 1 && clockOutAllConfirm) resetClockOutConfirmation();
+        if (entries.length <= 1 && confirmation?.isArmed('clock-out-all', 'popover')) {
+            resetClockOutConfirmation();
+        }
         popover.replaceChildren();
 
         const titleText = entries.length
@@ -299,6 +328,7 @@ export function createTopbar({
             );
         }
         if (entries.length > 1) {
+            const clockOutAllConfirm = confirmation?.isArmed('clock-out-all', 'popover');
             const confirmLabel = clockOutAllConfirm ? 'Confirm Clock Out All' : 'Clock Out All';
             const confirmTitle = clockOutAllConfirm
                 ? 'Confirm permanent Clock Out All'
@@ -308,12 +338,7 @@ export function createTopbar({
                     `bp3-button bp3-small${clockOutAllConfirm ? ' bp3-intent-danger' : ''}`,
                     confirmLabel,
                     () => {
-                        if (!clockOutAllConfirm) {
-                            clockOutAllConfirm = true;
-                            clockOutAllConfirmTimer = setTimeout(() => {
-                                resetClockOutConfirmation();
-                                renderPopover();
-                            }, 5000);
+                        if (!confirmation?.arm('clock-out-all', 'popover')) {
                             renderPopover();
                             return;
                         }
@@ -349,6 +374,7 @@ export function createTopbar({
         popover = el('div', 'bp3-card bp3-elevation-3 rlb-popover');
         popover.id = POPOVER_ID;
         popover.setAttribute('role', 'dialog');
+        popover.setAttribute('aria-modal', 'true');
         popover.setAttribute('aria-labelledby', POPOVER_TITLE_ID);
         document.body.appendChild(popover);
         buttonNode?.setAttribute('aria-haspopup', 'dialog');
@@ -359,8 +385,17 @@ export function createTopbar({
         document.addEventListener('mousedown', onDocumentMouseDown, true);
         document.addEventListener('keydown', onPopoverKeyDown, true);
         window.addEventListener('resize', closePopover);
-        popover.querySelector('button')?.focus();
+        const firstFocusable = popover.querySelector('button');
+        if (firstFocusable) firstFocusable.focus();
+        else {
+            popover.tabIndex = -1;
+            popover.focus();
+        }
     };
+
+    confirmation?.setOnChange(() => {
+        if (popover) renderPopover();
+    });
 
     // ---- widget ----
 
@@ -567,13 +602,32 @@ export function createTopbar({
     const observeRecoveryTarget = topbar => {
         const target = topbar?.parentElement || document.body;
         const subtree = !topbar;
-        if (recoveryObserver && recoveryTarget === target) return;
+        const outerTarget = topbar?.parentElement?.parentElement || null;
+        if (
+            recoveryObserver &&
+            recoveryTarget === target &&
+            outerRecoveryTarget === outerTarget
+        ) return;
         recoveryObserver?.disconnect();
+        outerRecoveryObserver?.disconnect();
         recoveryObserver = new MutationObserver(records => {
             if (records.some(touchesTopbar)) scheduleAttach();
         });
         recoveryTarget = target;
         recoveryObserver.observe(target, { childList: true, ...(subtree ? { subtree: true } : {}) });
+
+        // Observe only the direct outer shell. This catches replacement of the
+        // navigation wrapper while avoiding a document.body subtree observer once
+        // Roam's topbar has been found.
+        outerRecoveryTarget = outerTarget;
+        if (outerTarget && outerTarget !== target) {
+            outerRecoveryObserver = new MutationObserver(records => {
+                if (records.some(touchesTopbar)) scheduleAttach();
+            });
+            outerRecoveryObserver.observe(outerTarget, { childList: true });
+        } else {
+            outerRecoveryObserver = null;
+        }
         observer = recoveryObserver;
     };
 
@@ -705,7 +759,10 @@ export function createTopbar({
             hostObserver = null;
             recoveryObserver?.disconnect();
             recoveryObserver = null;
+            outerRecoveryObserver?.disconnect();
+            outerRecoveryObserver = null;
             recoveryTarget = null;
+            outerRecoveryTarget = null;
             observedTopbar = null;
             attachQueued = false;
             if (attachTimer) clearTimeout(attachTimer);

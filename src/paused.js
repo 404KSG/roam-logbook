@@ -50,8 +50,12 @@ const cleanRecord = value => {
 const cleanPending = value => {
     const record = cleanRecord(value);
     if (!record) return null;
+    const hasClockUid = Object.prototype.hasOwnProperty.call(value, 'clockUid');
+    if (hasClockUid && value.clockUid !== null && (typeof value.clockUid !== 'string' || !value.clockUid)) {
+        return null;
+    }
     const clockUid = typeof value.clockUid === 'string' && value.clockUid ? value.clockUid : null;
-    return { ...record, clockUid };
+    return { ...record, clockUid, legacy: !hasClockUid };
 };
 
 const serialized = () =>
@@ -223,10 +227,20 @@ export async function pauseAll({ now = new Date() } = {}) {
     }
 
     items = [...merged.values()];
-    if (failed > 0) notice = `${failed} Task${failed === 1 ? '' : 's'} could not be paused.`;
+    if (outcome.uncertain) {
+        notice = clock.GRAPH_UNCERTAIN;
+    } else if (failed > 0) {
+        notice = `${failed} Task${failed === 1 ? '' : 's'} could not be paused.`;
+    }
     persist();
     notify();
-    return { paused: outcome.closed, failed };
+    return {
+        paused: outcome.closed,
+        failed,
+        uncertain: Boolean(outcome.uncertain),
+        partial: Boolean(outcome.partial),
+        retry: outcome.retry,
+    };
 }
 
 const existingTask = record => {
@@ -256,30 +270,45 @@ const removeTask = taskUid => {
 
 /**
  * Complete durable Resume associations that survived a reload or an interrupted
- * Pomodoro write. A pending entry is consumed only after the target is saved.
+ * Pomodoro write. This function never creates a CLOCK: a pending clockUid is an
+ * exact foreign-key-like association, and a missing exact Session is a conflict.
+ * Only legacy records without a clockUid may be scheduled for a fresh resume.
  */
-async function recoverPending({ now = new Date() } = {}) {
+async function recoverPending({ running = [] } = {}) {
     let recovered = 0;
     let failed = 0;
+    const conflicts = [];
+    const legacyToCreate = [];
+    const byClockUid = new Map(running.map(entry => [entry.clockUid, entry]));
+
     for (const pending of [...pendingResume]) {
-        let entry = clock.getRunning().find(item => item.taskUid === pending.taskUid);
-        if (!entry) {
-            clock.refresh();
-            if (!clock.getLastRefreshStatus().ok) {
-                failed += 1;
+        let entry = null;
+        if (pending.clockUid) {
+            entry = byClockUid.get(pending.clockUid) || null;
+            if (!entry || entry.taskUid !== pending.taskUid) {
+                conflicts.push({
+                    taskUid: pending.taskUid,
+                    clockUid: pending.clockUid,
+                    reason: 'exact Session association is missing or belongs to another Task',
+                });
                 continue;
             }
-            entry = clock.getRunning().find(item => item.taskUid === pending.taskUid);
+        } else {
+            const matches = running.filter(item => item.taskUid === pending.taskUid);
+            if (matches.length === 1) entry = matches[0];
+            else if (matches.length > 1) {
+                conflicts.push({
+                    taskUid: pending.taskUid,
+                    reason: 'legacy pending record matched more than one running Session',
+                });
+                continue;
+            } else {
+                legacyToCreate.push(pending);
+                continue;
+            }
         }
+
         try {
-            if (!entry) {
-                const result = await clock.clockIn(pending.taskUid, { now });
-                entry = clock.getRunning().find(item => item.clockUid === result.clockUid) || result;
-            }
-            if (pending.clockUid !== entry.clockUid) {
-                pending.clockUid = entry.clockUid;
-                persist();
-            }
             applyPomodoro({ ...pending, clockUid: entry.clockUid });
             pendingResume = pendingResume.filter(item => item.taskUid !== pending.taskUid);
             removeTask(pending.taskUid);
@@ -290,7 +319,7 @@ async function recoverPending({ now = new Date() } = {}) {
             console.error('[roam-logbook] could not recover paused task', pending.taskUid, error);
         }
     }
-    return { recovered, failed };
+    return { recovered, failed, conflicts, legacyToCreate };
 }
 
 const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
@@ -304,12 +333,31 @@ async function resumeRecord(record, now) {
         persist();
     }
 
-    let entry = clock.getRunning().find(item => item.taskUid === record.taskUid);
+    let entry = pending.clockUid
+        ? clock.getRunning().find(item => item.clockUid === pending.clockUid)
+        : clock.getRunning().find(item => item.taskUid === record.taskUid);
+    if (pending.clockUid && (!entry || entry.taskUid !== record.taskUid)) {
+        const conflict = new Error(
+            `Resume conflict for ${record.taskUid}: exact Session ${pending.clockUid} is unavailable.`
+        );
+        conflict.conflict = true;
+        throw conflict;
+    }
     if (!entry) {
         const result = await clock.clockIn(record.taskUid, { now });
+        if (result?.uncertain) {
+            if (result.clockUid) {
+                pending.clockUid = result.clockUid;
+                persist();
+            }
+            const uncertain = new Error(result.notice || clock.getNotice());
+            uncertain.uncertain = true;
+            throw uncertain;
+        }
         entry = clock.getRunning().find(item => item.clockUid === result.clockUid) || result;
     }
     pending.clockUid = entry.clockUid;
+    pending.legacy = false;
     // This write is intentionally before the Pomodoro migration. If the next
     // line fails, reload can find this exact Session and finish it.
     persist();
@@ -330,8 +378,26 @@ export async function resumeAll({ now = new Date() } = {}) {
     }
 
     notice = '';
-    const recovered = await recoverPending({ now });
-    const runningTasks = new Set(clock.getRunning().map(entry => entry.taskUid));
+    // Read the complete graph snapshot before planning any CLOCK writes. The
+    // multiple-clock setting must be enabled before the first resume so a batch
+    // cannot make its own later Sessions clock one another out.
+    const initial = clock.refreshResult();
+    if (!initial.ok) {
+        notice = clock.getNotice() || 'Graph state could not be confirmed; no further changes were made.';
+        notify();
+        return {
+            resumed: 0,
+            failed: pendingResume.length + items.length,
+            pruned: 0,
+            satisfied: 0,
+            blocked: true,
+            uncertain: true,
+        };
+    }
+
+    const recovered = await recoverPending({ running: initial.running });
+    const runningEntries = clock.getRunning();
+    const runningTasks = new Set(runningEntries.map(entry => entry.taskUid));
     const retained = [];
     const ready = [];
     const plannedTasks = new Set();
@@ -339,6 +405,25 @@ export async function resumeAll({ now = new Date() } = {}) {
     let pruned = 0;
     let satisfied = 0;
     let uncertain = 0;
+
+    for (const pending of recovered.legacyToCreate) {
+        const valid = existingTask(pending);
+        if (valid?.uncertain) {
+            uncertain += 1;
+            continue;
+        }
+        if (!valid) {
+            recovered.conflicts.push({
+                taskUid: pending.taskUid,
+                reason: 'legacy pending Task could not be found',
+            });
+            continue;
+        }
+        if (!plannedTasks.has(valid.taskUid)) {
+            plannedTasks.add(valid.taskUid);
+            ready.push(valid);
+        }
+    }
 
     for (const record of [...items]) {
         const valid = existingTask(record);
@@ -363,34 +448,53 @@ export async function resumeAll({ now = new Date() } = {}) {
         ready.push(valid);
     }
 
-    const needsMultiple = ready.length > 1 || (ready.length > 0 && runningTasks.size > 0);
+    const needsMultiple = ready.length > 1 || (ready.length > 0 && runningEntries.length > 0);
     let enabledMultiple = false;
     if (needsMultiple && !allowMultipleClocks()) {
-        writeSetting(SETTING_MULTIPLE, true);
+        try {
+            writeSetting(SETTING_MULTIPLE, true);
+        } catch (error) {
+            console.error('[roam-logbook] could not enable multiple clocks for Resume All', error);
+        }
         if (!allowMultipleClocks()) {
             notice = 'Multiple clocks could not be enabled; no paused Tasks were resumed.';
             items = [...retained, ...ready];
             persist();
             notify();
-            return { resumed: recovered.recovered, failed: recovered.failed, pruned, satisfied, blocked: true };
+            return {
+                resumed: recovered.recovered,
+                failed: recovered.failed + recovered.conflicts.length,
+                pruned,
+                satisfied,
+                blocked: true,
+                conflicts: recovered.conflicts,
+            };
         }
         enabledMultiple = true;
     }
 
     let resumed = recovered.recovered;
-    let failed = recovered.failed + uncertain;
+    let failed = recovered.failed + uncertain + recovered.conflicts.length;
+    const completedTasks = new Set();
     for (const record of ready) {
         try {
             await resumeRecord(record, now);
             resumed += 1;
+            completedTasks.add(record.taskUid);
         } catch (error) {
             failed += 1;
             retained.push(record);
             console.error('[roam-logbook] could not resume task', record.taskUid, error);
+            if (error?.uncertain) {
+                // The graph may contain the just-created CLOCK, but the read
+                // could not confirm it. Do not perform another destructive step.
+                for (const remaining of ready.slice(ready.indexOf(record) + 1)) retained.push(remaining);
+                break;
+            }
         }
     }
 
-    items = retained;
+    items = retained.filter(item => !completedTasks.has(item.taskUid));
     const messages = [];
     if (enabledMultiple) messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
     if (pruned > 0) messages.push(`${pruned} missing Task${pruned === 1 ? ' was' : 's were'} removed.`);
@@ -398,6 +502,11 @@ export async function resumeAll({ now = new Date() } = {}) {
     if (uncertain > 0) {
         messages.push(
             `${uncertain} Task${uncertain === 1 ? '' : 's'} could not be confirmed because the graph is unavailable.`
+        );
+    }
+    if (recovered.conflicts.length > 0) {
+        messages.push(
+            `${recovered.conflicts.length} pending Resume conflict${recovered.conflicts.length === 1 ? '' : 's'} were retained; exact Session associations were not changed.`
         );
     }
     notice = messages.join(' ');
@@ -420,8 +529,13 @@ export async function clockOutAll({ now = new Date() } = {}) {
         return 0;
     }
 
-    const stillRunning = clock.getRunning();
-    if (outcome.failed === 0 && stillRunning.length === 0) {
+    const closedUids = new Set(
+        outcome.results.filter(result => result.closed).map(result => result.clockUid)
+    );
+    const stillRunning = (outcome.entries || clock.getRunning()).filter(
+        entry => entry.running && !closedUids.has(entry.clockUid)
+    );
+    if (!outcome.uncertain && outcome.failed === 0 && stillRunning.length === 0) {
         items = [];
         pendingResume = [];
         notice = '';
@@ -444,10 +558,12 @@ export async function clockOutAll({ now = new Date() } = {}) {
     }
     items = [...retained.values()];
     pendingResume = pendingResume.filter(item => stillRunning.some(entry => entry.taskUid === item.taskUid));
-    notice = `${stillRunning.length} Session${stillRunning.length === 1 ? '' : 's'} could not be closed.`;
+    notice = outcome.uncertain
+        ? clock.GRAPH_UNCERTAIN
+        : `${stillRunning.length} Session${stillRunning.length === 1 ? '' : 's'} could not be closed.`;
     persist();
     notify();
-    return outcome.closed;
+    return outcome.uncertain ? { ...outcome, retry: outcome.retry } : outcome.closed;
 }
 
 export function clear() {

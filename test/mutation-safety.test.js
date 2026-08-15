@@ -88,7 +88,7 @@ test('concurrent Clock in on different Tasks is allowed in parallel mode', async
     assert.equal(clockBlocksFor(OTHER.uid).length, 1);
 });
 
-test('Clock in re-reads graph state and refuses a Session written by another instance', async () => {
+test('Clock in re-reads graph state and refuses an external change observed before mutation', async () => {
     allowMultiple = true;
     const clock = await import('../src/clock.js');
     graph.store.set('externaldr', {
@@ -137,4 +137,41 @@ test('a failed Clock in can be retried without duplicating a successful drawer',
 
     assert.equal(clockBlocksFor(TASK.uid).length, 1);
     assert.equal(clock.getRunning().length, 1);
+});
+
+test('Clock in stops after a successful close whose refresh cannot confirm graph state', async () => {
+    const clock = await import('../src/clock.js');
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+
+    const originalQuery = graph.api.data.q;
+    const originalUpdate = graph.api.data.block.update;
+    let closeFinished = false;
+    let failNextRead = 0;
+    graph.api.data.block.update = async args => {
+        const result = await originalUpdate(args);
+        closeFinished = true;
+        failNextRead = 2;
+        return result;
+    };
+    graph.api.data.q = (...args) => {
+        if (closeFinished && failNextRead > 0) {
+            failNextRead -= 1;
+            throw new Error('refresh failed after close');
+        }
+        return originalQuery(...args);
+    };
+
+    try {
+        const result = await clock.clockIn(OTHER.uid, {
+            now: new Date('2026-08-15T09:01:00'),
+        });
+
+        assert.equal(result.uncertain, true);
+        assert.equal(result.partial, true);
+        assert.equal(drawerFor(OTHER.uid), undefined, 'uncertain state must not create a drawer');
+        assert.equal(clockBlocksFor(OTHER.uid).length, 0, 'uncertain state must not create a CLOCK');
+    } finally {
+        graph.api.data.q = originalQuery;
+        graph.api.data.block.update = originalUpdate;
+    }
 });

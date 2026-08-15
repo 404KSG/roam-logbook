@@ -484,40 +484,33 @@ var readBlockStrings = (uids) => {
   if (uids.length === 0)
     return {};
   const result = {};
-  try {
-    const rows = validateQueryRows(
-      queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-      "block string batch",
-      (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
-    );
-    for (const [uid, string] of rows)
-      result[uid] = string;
-  } catch (error) {
-    console.warn("[roam-logbook] referenced task strings unavailable for roll-up", error);
-  }
+  const rows = validateQueryRows(
+    queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+    "block string batch",
+    (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
+  );
+  for (const [uid, string] of rows)
+    result[uid] = string;
   return result;
 };
 function readHierarchy(taskUids) {
   const parentOf = {};
   const stringOf = {};
   const mirrorsOf = {};
+  const issues = [];
   const seeds = new Set(taskUids);
   if (seeds.size === 0)
-    return { parentOf, stringOf, mirrorsOf };
-  try {
-    const mirrorRows = validateQueryRows(
-      queryOrThrow(MIRRORS_QUERY, [...seeds]),
-      "mirror",
-      (row) => row.length >= 3 && row.every((value) => typeof value === "string")
-    );
-    for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
-      if (referencedBlockUid(mirrorString) !== targetUid)
-        continue;
-      (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
-      stringOf[mirrorUid] = mirrorString;
-    }
-  } catch (error) {
-    console.warn("[roam-logbook] block references unavailable for roll-up", error);
+    return { parentOf, stringOf, mirrorsOf, issues };
+  const mirrorRows = validateQueryRows(
+    queryOrThrow(MIRRORS_QUERY, [...seeds]),
+    "mirror",
+    (row) => row.length >= 3 && row.every((value) => typeof value === "string")
+  );
+  for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
+    if (referencedBlockUid(mirrorString) !== targetUid)
+      continue;
+    (mirrorsOf[targetUid] || (mirrorsOf[targetUid] = [])).push(mirrorUid);
+    stringOf[mirrorUid] = mirrorString;
   }
   let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
@@ -534,6 +527,17 @@ function readHierarchy(taskUids) {
       const parentUid = referenced || rawParentUid;
       const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
       parentOf[uid] = parentUid;
+      if (referenced && typeof parentString !== "string") {
+        issues.push({
+          code: "unresolved-parent",
+          taskUid: uid,
+          parentUid,
+          title: `Unresolved parent \xB7 ${parentUid}`,
+          rawClock: "",
+          message: `Parent Task ${parentUid} could not be resolved; the known hierarchy was retained.`
+        });
+        continue;
+      }
       if (parentUid in stringOf)
         continue;
       stringOf[parentUid] = parentString;
@@ -541,7 +545,7 @@ function readHierarchy(taskUids) {
     }
     frontier = next;
   }
-  return { parentOf, stringOf, mirrorsOf };
+  return { parentOf, stringOf, mirrorsOf, issues };
 }
 
 // src/mutations.js
@@ -556,7 +560,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0";
+var PLUGIN_VERSION = "0.9.0-beta.1";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -666,7 +670,7 @@ var running = [];
 var lastRefreshStatus = { ok: true, error: null };
 var notice = "";
 var listeners = /* @__PURE__ */ new Set();
-var GRAPH_UNCERTAIN = "Unable to read the graph; no changes were made. Please try again.";
+var GRAPH_UNCERTAIN = "Graph state could not be confirmed; no further changes were made.";
 async function withGraphGuard(action) {
   try {
     return await action();
@@ -686,9 +690,6 @@ function subscribe(listener) {
 function getRunning() {
   return running;
 }
-function getLastRefreshStatus() {
-  return { ...lastRefreshStatus };
-}
 function getNotice() {
   return notice;
 }
@@ -701,7 +702,7 @@ function notify() {
     }
   }
 }
-function refresh({ entries } = {}) {
+function refresh({ entries, notify: shouldNotify = true } = {}) {
   let all;
   try {
     if (entries !== void 0 && !Array.isArray(entries)) {
@@ -723,8 +724,22 @@ function refresh({ entries } = {}) {
   running = all.filter((entry) => entry.running).map((entry) => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
   lastRefreshStatus = { ok: true, error: null };
   notice = "";
-  notify();
+  if (shouldNotify)
+    notify();
   return running;
+}
+function refreshResult({ entries, notify: shouldNotify = true } = {}) {
+  const snapshot = refresh({ entries, notify: shouldNotify });
+  if (!lastRefreshStatus.ok) {
+    return {
+      ok: false,
+      uncertain: true,
+      running: snapshot,
+      error: lastRefreshStatus.error,
+      notice: GRAPH_UNCERTAIN
+    };
+  }
+  return { ok: true, uncertain: false, running: snapshot, error: null, notice: "" };
 }
 function reset() {
   running = [];
@@ -740,8 +755,10 @@ async function ensureDrawer(taskUid) {
   const children = getChildren(taskUid);
   const existing = children.find((child) => isDrawerBlock(child.string));
   if (existing)
-    return existing.uid;
-  return createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+    return { uid: existing.uid, created: false };
+  const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+  const confirmation = refreshResult({ notify: false });
+  return { uid, created: true, confirmation };
 }
 async function closeEntry(entry, end) {
   if (!entry?.running)
@@ -750,10 +767,11 @@ async function closeEntry(entry, end) {
   await updateBlock({ uid: entry.clockUid, string });
   return true;
 }
-async function closeEntriesNow(entries, clockUids, now) {
+async function closeEntriesNow(entries, clockUids, now, { publish = true } = {}) {
   const byUid = new Map(entries.filter((entry) => entry.running).map((entry) => [entry.clockUid, entry]));
   const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
   const results = [];
+  let uncertain = null;
   for (const clockUid of ids) {
     const entry = byUid.get(clockUid);
     if (!entry) {
@@ -761,17 +779,37 @@ async function closeEntriesNow(entries, clockUids, now) {
       continue;
     }
     try {
-      const closed = await closeEntry(entry, now);
-      results.push({ clockUid, closed });
+      const closed2 = await closeEntry(entry, now);
+      results.push({ clockUid, closed: closed2 });
+      if (closed2) {
+        const confirmation = refreshResult({ notify: false });
+        if (!confirmation.ok) {
+          uncertain = confirmation;
+          break;
+        }
+      }
     } catch (error) {
       results.push({ clockUid, closed: false, error });
     }
   }
-  refresh();
+  const attempted = new Set(results.map((result) => result.clockUid));
+  const retryClockUids = ids.filter((clockUid) => !attempted.has(clockUid));
+  const closed = results.filter((result) => result.closed).length;
+  if (publish && (closed > 0 || uncertain))
+    notify();
   return {
     results,
-    closed: results.filter((result) => result.closed).length,
-    failed: results.filter((result) => result.error).length
+    closed,
+    failed: results.filter((result) => result.error).length,
+    uncertain: Boolean(uncertain),
+    partial: Boolean(uncertain && results.some((result) => result.closed)),
+    retry: uncertain ? {
+      action: "close",
+      retryClockUids,
+      writtenClockUids: results.filter((result) => result.closed).map((result) => result.clockUid)
+    } : null,
+    refresh: uncertain,
+    error: uncertain?.error || null
   };
 }
 async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
@@ -789,19 +827,50 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date() } = {}) {
         }
       } else {
         if (open.length > 0) {
-          const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now);
+          const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
+            publish: false
+          });
+          if (outcome.uncertain) {
+            return {
+              taskUid,
+              uncertain: true,
+              partial: outcome.partial,
+              notice: GRAPH_UNCERTAIN,
+              retry: outcome.retry
+            };
+          }
           if (outcome.failed > 0)
             throw outcome.results.find((result) => result.error).error;
         }
       }
-      const drawerUid = await ensureDrawer(taskUid);
-      const order = getChildren(drawerUid).length;
+      const drawer = await ensureDrawer(taskUid);
+      if (drawer.confirmation && !drawer.confirmation.ok) {
+        return {
+          taskUid,
+          drawerUid: drawer.uid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: { action: "clock-in", taskUid, drawerUid: drawer.uid }
+        };
+      }
+      const order = getChildren(drawer.uid).length;
       const clockUid = await createBlock({
-        parentUid: drawerUid,
+        parentUid: drawer.uid,
         order,
         string: formatClockLine(now)
       });
-      refresh();
+      const confirmation = refreshResult();
+      if (!confirmation.ok) {
+        return {
+          clockUid,
+          taskUid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: { action: "clock-in", taskUid, drawerUid: drawer.uid, clockUid }
+        };
+      }
       return { clockUid, taskUid };
     })
   );
@@ -814,6 +883,15 @@ async function clockOut(clockUid, { now = /* @__PURE__ */ new Date() } = {}) {
       const result = outcome.results[0];
       if (result?.error)
         throw result.error;
+      if (outcome.uncertain) {
+        return {
+          closed: result?.closed === true,
+          uncertain: true,
+          partial: outcome.partial,
+          notice: GRAPH_UNCERTAIN,
+          retry: outcome.retry
+        };
+      }
       return result?.closed === true;
     })
   );
@@ -822,7 +900,8 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
   return enqueueMutation(
     () => withGraphGuard(async () => {
       const entries = readAllEntries();
-      return closeEntriesNow(entries, clockUids, now);
+      const outcome = await closeEntriesNow(entries, clockUids, now);
+      return { ...outcome, entries };
     })
   );
 }
@@ -834,7 +913,8 @@ async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare } = {}) 
       const outcome = await closeEntriesNow(
         entries,
         records.map((record) => record.clockUid),
-        now
+        now,
+        { publish: false }
       );
       return { entries, records, ...outcome };
     })
@@ -852,6 +932,15 @@ async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date() } = {}
       const result = outcome.results[0];
       if (result?.error)
         throw result.error;
+      if (outcome.uncertain) {
+        return {
+          closed: result?.closed === true,
+          uncertain: true,
+          partial: outcome.partial,
+          notice: GRAPH_UNCERTAIN,
+          retry: outcome.retry
+        };
+      }
       return result?.closed === true;
     })
   );
@@ -862,12 +951,33 @@ async function discardClock(clockUid) {
       const entries = readAllEntries();
       const entry = entries.find((item) => item.clockUid === clockUid);
       await deleteBlock(clockUid);
+      let confirmation = refreshResult({ notify: false });
+      if (!confirmation.ok) {
+        return {
+          deleted: true,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: { action: "discard", clockUid }
+        };
+      }
       if (entry) {
         const drawer = getChildren(entry.taskUid).find((child) => isDrawerBlock(child.string));
-        if (drawer && getChildren(drawer.uid).length === 0)
+        if (drawer && getChildren(drawer.uid).length === 0) {
           await deleteBlock(drawer.uid);
+          confirmation = refreshResult({ notify: false });
+          if (!confirmation.ok) {
+            return {
+              deleted: true,
+              uncertain: true,
+              partial: true,
+              notice: GRAPH_UNCERTAIN,
+              retry: { action: "discard-drawer", drawerUid: drawer.uid }
+            };
+          }
+        }
       }
-      refresh();
+      notify();
       return true;
     })
   );
@@ -875,6 +985,43 @@ async function discardClock(clockUid) {
 function isBlockRunning(blockUid) {
   const taskUid = resolveTaskUid(blockUid);
   return running.some((entry) => entry.taskUid === taskUid);
+}
+
+// src/confirmation.js
+function createConfirmationController({
+  timeoutMs = 5e3,
+  setTimeoutFn = (callback, delay) => setTimeout(callback, delay),
+  clearTimeoutFn = (timer) => clearTimeout(timer),
+  onChange: initialOnChange = () => {
+  }
+} = {}) {
+  let active = null;
+  let timer = null;
+  let onChange = initialOnChange;
+  const reset4 = () => {
+    if (timer !== null)
+      clearTimeoutFn(timer);
+    timer = null;
+    active = null;
+    onChange();
+  };
+  const arm = (key, source = "default") => {
+    if (active?.key === key && active.source === source) {
+      reset4();
+      return true;
+    }
+    reset4();
+    active = { key, source };
+    timer = setTimeoutFn(() => reset4(), timeoutMs);
+    onChange();
+    return false;
+  };
+  const isArmed = (key, source = null) => active?.key === key && (source === null || active.source === source);
+  const setOnChange = (listener) => {
+    onChange = typeof listener === "function" ? listener : () => {
+    };
+  };
+  return { arm, isArmed, reset: reset4, setOnChange };
 }
 
 // src/dom.js
@@ -1123,6 +1270,7 @@ function createDashboard({
   let liveTicker = null;
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
+  let lastSnapshot = null;
   const collapsed = /* @__PURE__ */ new Set();
   const clearLiveTicker = () => {
     if (liveTicker !== null)
@@ -1156,7 +1304,38 @@ function createDashboard({
       return;
     clearLiveTicker();
     const now = nowFn();
-    const snapshot = readDashboardSnapshot();
+    let snapshot;
+    let refreshNotice = "";
+    let hierarchyIssues = [];
+    try {
+      const candidate = readDashboardSnapshot();
+      hierarchyIssues = candidate.hierarchy.issues || [];
+      lastSnapshot = candidate;
+      snapshot = candidate;
+    } catch (error) {
+      hierarchyIssues = error.issues || hierarchyIssues;
+      if (!lastSnapshot) {
+        summaryNode.replaceChildren();
+        const notice4 = el(
+          "div",
+          "rlb-dashboard__notice",
+          "Graph data could not be refreshed; no successful snapshot is available yet."
+        );
+        notice4.setAttribute("role", "alert");
+        const issueRows = hierarchyIssues.map((issue) => ({
+          title: issue.title || issue.parentUid || "Unresolved graph data",
+          rawClock: issue.rawClock || "(hierarchy query)",
+          issues: [issue]
+        }));
+        bodyNode.replaceChildren(
+          notice4,
+          ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
+        );
+        return;
+      }
+      snapshot = lastSnapshot;
+      refreshNotice = "Graph data could not be refreshed; showing last successful snapshot.";
+    }
     const entries = snapshot.entries;
     const hierarchy = snapshot.hierarchy;
     refresh({ entries });
@@ -1172,8 +1351,21 @@ function createDashboard({
         ["Tasks tracked", String(model.tasks.length)]
       ])
     );
-    if (model.issues.length > 0)
-      bodyNode.appendChild(dataIssuesSection(model.issues));
+    if (refreshNotice) {
+      const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
+      notice4.setAttribute("role", "status");
+      bodyNode.appendChild(notice4);
+    }
+    const issues = [
+      ...model.issues,
+      ...hierarchyIssues.map((issue) => ({
+        title: issue.title || issue.parentUid || "Unresolved graph data",
+        rawClock: issue.rawClock || "(hierarchy query)",
+        issues: [issue]
+      }))
+    ];
+    if (issues.length > 0)
+      bodyNode.appendChild(dataIssuesSection(issues));
     if (model.running.length > 0) {
       bodyNode.appendChild(runningSection(model.running, now));
     }
@@ -1484,10 +1676,11 @@ function createDashboard({
     return mark;
   };
   const taskLink = (title, taskUid) => {
+    const accessibleName = `Open this block: ${title}`;
     const link = button("bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link", "", () => {
       close();
       void openBlock(taskUid);
-    }, { title: "Open this block" });
+    }, { title: accessibleName });
     link.appendChild(el("span", "rlb-task-link__text", title));
     return link;
   };
@@ -1643,14 +1836,18 @@ var mapFromData = (data, { strict = false } = {}) => {
   if (!isRecord(data))
     throw new Error("pomodoro data must be an object");
   const next = /* @__PURE__ */ new Map();
+  const invalid = [];
   for (const [clockUid, minutes] of Object.entries(data)) {
     const value = Number(minutes);
     if (Number.isFinite(value) && value >= 0)
       next.set(clockUid, value);
-    else if (strict)
-      throw new Error(`invalid Pomodoro target for ${clockUid}`);
+    else
+      invalid.push(clockUid);
   }
-  return next;
+  if (strict && invalid.length > 0) {
+    throw new Error(`invalid Pomodoro target for ${invalid[0]}`);
+  }
+  return { next, invalid };
 };
 var serialized = (values) => JSON.stringify({ version: VERSION, data: Object.fromEntries(values) });
 function writeTargets(next) {
@@ -1673,9 +1870,20 @@ function load() {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     let next;
     if (isRecord(parsed) && parsed.version === VERSION && "data" in parsed) {
-      next = mapFromData(parsed.data, { strict: true });
+      next = mapFromData(parsed.data, { strict: true }).next;
     } else if (isRecord(parsed) && !("version" in parsed)) {
-      next = mapFromData(parsed);
+      const legacy = mapFromData(parsed);
+      if (legacy.invalid.length > 0) {
+        targets = legacy.next;
+        unsupportedRaw = raw;
+        const firstWarning = preserveStateBackup(SETTING_POMODORO_STATE, raw);
+        notice2 = firstWarning ? "Legacy Pomodoro state contains invalid entries; its raw value was backed up and kept." : "";
+        if (firstWarning) {
+          console.warn("[roam-logbook] could not safely migrate mixed Pomodoro state", legacy.invalid);
+        }
+        return;
+      }
+      next = legacy.next;
     } else {
       throw new Error("unsupported pomodoro state version");
     }
@@ -1797,8 +2005,12 @@ var cleanPending = (value) => {
   const record = cleanRecord(value);
   if (!record)
     return null;
+  const hasClockUid = Object.prototype.hasOwnProperty.call(value, "clockUid");
+  if (hasClockUid && value.clockUid !== null && (typeof value.clockUid !== "string" || !value.clockUid)) {
+    return null;
+  }
   const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
-  return { ...record, clockUid };
+  return { ...record, clockUid, legacy: !hasClockUid };
 };
 var serialized2 = () => JSON.stringify({
   version: VERSION2,
@@ -1951,11 +2163,20 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
     console.error("[roam-logbook] could not pause task", snapshot.taskUid, result?.error);
   }
   items = [...merged.values()];
-  if (failed > 0)
+  if (outcome.uncertain) {
+    notice3 = GRAPH_UNCERTAIN;
+  } else if (failed > 0) {
     notice3 = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
+  }
   persist();
   notify2();
-  return { paused: outcome.closed, failed };
+  return {
+    paused: outcome.closed,
+    failed,
+    uncertain: Boolean(outcome.uncertain),
+    partial: Boolean(outcome.partial),
+    retry: outcome.retry
+  };
 }
 var existingTask = (record) => {
   try {
@@ -1981,28 +2202,40 @@ var applyPomodoro = (record) => {
 var removeTask = (taskUid) => {
   items = items.filter((item) => item.taskUid !== taskUid);
 };
-async function recoverPending({ now = /* @__PURE__ */ new Date() } = {}) {
+async function recoverPending({ running: running2 = [] } = {}) {
   let recovered = 0;
   let failed = 0;
+  const conflicts = [];
+  const legacyToCreate = [];
+  const byClockUid = new Map(running2.map((entry) => [entry.clockUid, entry]));
   for (const pending of [...pendingResume]) {
-    let entry = getRunning().find((item) => item.taskUid === pending.taskUid);
-    if (!entry) {
-      refresh();
-      if (!getLastRefreshStatus().ok) {
-        failed += 1;
+    let entry = null;
+    if (pending.clockUid) {
+      entry = byClockUid.get(pending.clockUid) || null;
+      if (!entry || entry.taskUid !== pending.taskUid) {
+        conflicts.push({
+          taskUid: pending.taskUid,
+          clockUid: pending.clockUid,
+          reason: "exact Session association is missing or belongs to another Task"
+        });
         continue;
       }
-      entry = getRunning().find((item) => item.taskUid === pending.taskUid);
+    } else {
+      const matches = running2.filter((item) => item.taskUid === pending.taskUid);
+      if (matches.length === 1)
+        entry = matches[0];
+      else if (matches.length > 1) {
+        conflicts.push({
+          taskUid: pending.taskUid,
+          reason: "legacy pending record matched more than one running Session"
+        });
+        continue;
+      } else {
+        legacyToCreate.push(pending);
+        continue;
+      }
     }
     try {
-      if (!entry) {
-        const result = await clockIn(pending.taskUid, { now });
-        entry = getRunning().find((item) => item.clockUid === result.clockUid) || result;
-      }
-      if (pending.clockUid !== entry.clockUid) {
-        pending.clockUid = entry.clockUid;
-        persist();
-      }
       applyPomodoro({ ...pending, clockUid: entry.clockUid });
       pendingResume = pendingResume.filter((item) => item.taskUid !== pending.taskUid);
       removeTask(pending.taskUid);
@@ -2013,7 +2246,7 @@ async function recoverPending({ now = /* @__PURE__ */ new Date() } = {}) {
       console.error("[roam-logbook] could not recover paused task", pending.taskUid, error);
     }
   }
-  return { recovered, failed };
+  return { recovered, failed, conflicts, legacyToCreate };
 }
 var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
 async function resumeRecord(record, now) {
@@ -2023,12 +2256,29 @@ async function resumeRecord(record, now) {
     pendingResume.push(pending);
     persist();
   }
-  let entry = getRunning().find((item) => item.taskUid === record.taskUid);
+  let entry = pending.clockUid ? getRunning().find((item) => item.clockUid === pending.clockUid) : getRunning().find((item) => item.taskUid === record.taskUid);
+  if (pending.clockUid && (!entry || entry.taskUid !== record.taskUid)) {
+    const conflict = new Error(
+      `Resume conflict for ${record.taskUid}: exact Session ${pending.clockUid} is unavailable.`
+    );
+    conflict.conflict = true;
+    throw conflict;
+  }
   if (!entry) {
     const result = await clockIn(record.taskUid, { now });
+    if (result?.uncertain) {
+      if (result.clockUid) {
+        pending.clockUid = result.clockUid;
+        persist();
+      }
+      const uncertain = new Error(result.notice || getNotice());
+      uncertain.uncertain = true;
+      throw uncertain;
+    }
     entry = getRunning().find((item) => item.clockUid === result.clockUid) || result;
   }
   pending.clockUid = entry.clockUid;
+  pending.legacy = false;
   persist();
   applyPomodoro({ ...record, clockUid: entry.clockUid });
   pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
@@ -2043,8 +2293,22 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     return { resumed: 0, failed: 0, pruned: 0, satisfied: 0, blocked: true };
   }
   notice3 = "";
-  const recovered = await recoverPending({ now });
-  const runningTasks = new Set(getRunning().map((entry) => entry.taskUid));
+  const initial = refreshResult();
+  if (!initial.ok) {
+    notice3 = getNotice() || "Graph state could not be confirmed; no further changes were made.";
+    notify2();
+    return {
+      resumed: 0,
+      failed: pendingResume.length + items.length,
+      pruned: 0,
+      satisfied: 0,
+      blocked: true,
+      uncertain: true
+    };
+  }
+  const recovered = await recoverPending({ running: initial.running });
+  const runningEntries = getRunning();
+  const runningTasks = new Set(runningEntries.map((entry) => entry.taskUid));
   const retained = [];
   const ready = [];
   const plannedTasks = /* @__PURE__ */ new Set();
@@ -2052,6 +2316,24 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let pruned = 0;
   let satisfied = 0;
   let uncertain = 0;
+  for (const pending of recovered.legacyToCreate) {
+    const valid = existingTask(pending);
+    if (valid?.uncertain) {
+      uncertain += 1;
+      continue;
+    }
+    if (!valid) {
+      recovered.conflicts.push({
+        taskUid: pending.taskUid,
+        reason: "legacy pending Task could not be found"
+      });
+      continue;
+    }
+    if (!plannedTasks.has(valid.taskUid)) {
+      plannedTasks.add(valid.taskUid);
+      ready.push(valid);
+    }
+  }
   for (const record of [...items]) {
     const valid = existingTask(record);
     if (valid?.uncertain) {
@@ -2074,32 +2356,50 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     plannedTasks.add(valid.taskUid);
     ready.push(valid);
   }
-  const needsMultiple = ready.length > 1 || ready.length > 0 && runningTasks.size > 0;
+  const needsMultiple = ready.length > 1 || ready.length > 0 && runningEntries.length > 0;
   let enabledMultiple = false;
   if (needsMultiple && !allowMultipleClocks()) {
-    writeSetting(SETTING_MULTIPLE, true);
+    try {
+      writeSetting(SETTING_MULTIPLE, true);
+    } catch (error) {
+      console.error("[roam-logbook] could not enable multiple clocks for Resume All", error);
+    }
     if (!allowMultipleClocks()) {
       notice3 = "Multiple clocks could not be enabled; no paused Tasks were resumed.";
       items = [...retained, ...ready];
       persist();
       notify2();
-      return { resumed: recovered.recovered, failed: recovered.failed, pruned, satisfied, blocked: true };
+      return {
+        resumed: recovered.recovered,
+        failed: recovered.failed + recovered.conflicts.length,
+        pruned,
+        satisfied,
+        blocked: true,
+        conflicts: recovered.conflicts
+      };
     }
     enabledMultiple = true;
   }
   let resumed = recovered.recovered;
-  let failed = recovered.failed + uncertain;
+  let failed = recovered.failed + uncertain + recovered.conflicts.length;
+  const completedTasks = /* @__PURE__ */ new Set();
   for (const record of ready) {
     try {
       await resumeRecord(record, now);
       resumed += 1;
+      completedTasks.add(record.taskUid);
     } catch (error) {
       failed += 1;
       retained.push(record);
       console.error("[roam-logbook] could not resume task", record.taskUid, error);
+      if (error?.uncertain) {
+        for (const remaining of ready.slice(ready.indexOf(record) + 1))
+          retained.push(remaining);
+        break;
+      }
     }
   }
-  items = retained;
+  items = retained.filter((item) => !completedTasks.has(item.taskUid));
   const messages = [];
   if (enabledMultiple)
     messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
@@ -2110,6 +2410,11 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   if (uncertain > 0) {
     messages.push(
       `${uncertain} Task${uncertain === 1 ? "" : "s"} could not be confirmed because the graph is unavailable.`
+    );
+  }
+  if (recovered.conflicts.length > 0) {
+    messages.push(
+      `${recovered.conflicts.length} pending Resume conflict${recovered.conflicts.length === 1 ? "" : "s"} were retained; exact Session associations were not changed.`
     );
   }
   notice3 = messages.join(" ");
@@ -2126,8 +2431,13 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
     notify2();
     return 0;
   }
-  const stillRunning = getRunning();
-  if (outcome.failed === 0 && stillRunning.length === 0) {
+  const closedUids = new Set(
+    outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
+  );
+  const stillRunning = (outcome.entries || getRunning()).filter(
+    (entry) => entry.running && !closedUids.has(entry.clockUid)
+  );
+  if (!outcome.uncertain && outcome.failed === 0 && stillRunning.length === 0) {
     items = [];
     pendingResume = [];
     notice3 = "";
@@ -2149,10 +2459,10 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   items = [...retained.values()];
   pendingResume = pendingResume.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid));
-  notice3 = `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
+  notice3 = outcome.uncertain ? GRAPH_UNCERTAIN : `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
   persist();
   notify2();
-  return outcome.closed;
+  return outcome.uncertain ? { ...outcome, retry: outcome.retry } : outcome.closed;
 }
 function reset3() {
   items = [];
@@ -3183,6 +3493,7 @@ var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
 var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 function createTopbar({
   onOpenDashboard,
+  confirmation = createConfirmationController(),
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
   clearIntervalFn = (tickerId) => clearInterval(tickerId)
@@ -3197,14 +3508,14 @@ function createTopbar({
   let observer = null;
   let hostObserver = null;
   let recoveryObserver = null;
+  let outerRecoveryObserver = null;
   let recoveryTarget = null;
+  let outerRecoveryTarget = null;
   let observedTopbar = null;
   let ticker = null;
   let unsubscribe = null;
   let unsubscribePaused = null;
   let destroyed = false;
-  let clockOutAllConfirm = false;
-  let clockOutAllConfirmTimer = null;
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
   let attachQueued = false;
@@ -3220,10 +3531,7 @@ function createTopbar({
   const sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const pomodoroLabel = (minutes) => Number.isInteger(minutes) ? `${minutes}m` : formatElapsed(minutes * 6e4);
   const resetClockOutConfirmation = () => {
-    clockOutAllConfirm = false;
-    if (clockOutAllConfirmTimer)
-      clearTimeout(clockOutAllConfirmTimer);
-    clockOutAllConfirmTimer = null;
+    confirmation?.reset();
   };
   const resetDiscardConfirmation = () => {
     discardConfirmUid = null;
@@ -3255,6 +3563,34 @@ function createTopbar({
       event.preventDefault();
       event.stopPropagation();
       closePopover();
+      return;
+    }
+    if (event.key !== "Tab" || !popover)
+      return;
+    const focusables = [
+      ...popover.querySelectorAll(
+        'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+      )
+    ].filter((node) => !node.disabled && node.getAttribute("aria-hidden") !== "true");
+    event.preventDefault();
+    event.stopPropagation();
+    if (focusables.length === 0) {
+      popover.tabIndex = -1;
+      popover.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    const index = focusables.indexOf(document.activeElement);
+    if (event.shiftKey) {
+      if (index <= 0)
+        last.focus();
+      else
+        focusables[index - 1].focus();
+    } else if (index < 0 || index === focusables.length - 1) {
+      first.focus();
+    } else {
+      focusables[index + 1].focus();
     }
   }
   const positionPopover = () => {
@@ -3353,8 +3689,9 @@ function createTopbar({
       return;
     const entries = getRunning();
     const pausedItems = getPaused();
-    if (entries.length <= 1 && clockOutAllConfirm)
+    if (entries.length <= 1 && confirmation?.isArmed("clock-out-all", "popover")) {
       resetClockOutConfirmation();
+    }
     popover.replaceChildren();
     const titleText = entries.length ? `${sessionCount(entries.length)} Running` : pausedItems.length ? `${taskCount(pausedItems.length)} Paused` : "Logbook";
     const heading = el("div", "rlb-popover__title", titleText);
@@ -3417,6 +3754,7 @@ function createTopbar({
       );
     }
     if (entries.length > 1) {
+      const clockOutAllConfirm = confirmation?.isArmed("clock-out-all", "popover");
       const confirmLabel = clockOutAllConfirm ? "Confirm Clock Out All" : "Clock Out All";
       const confirmTitle = clockOutAllConfirm ? "Confirm permanent Clock Out All" : "Permanently close all running Sessions";
       footer.appendChild(
@@ -3424,12 +3762,7 @@ function createTopbar({
           `bp3-button bp3-small${clockOutAllConfirm ? " bp3-intent-danger" : ""}`,
           confirmLabel,
           () => {
-            if (!clockOutAllConfirm) {
-              clockOutAllConfirm = true;
-              clockOutAllConfirmTimer = setTimeout(() => {
-                resetClockOutConfirmation();
-                renderPopover();
-              }, 5e3);
+            if (!confirmation?.arm("clock-out-all", "popover")) {
               renderPopover();
               return;
             }
@@ -3464,6 +3797,7 @@ function createTopbar({
     popover = el("div", "bp3-card bp3-elevation-3 rlb-popover");
     popover.id = POPOVER_ID;
     popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-modal", "true");
     popover.setAttribute("aria-labelledby", POPOVER_TITLE_ID);
     document.body.appendChild(popover);
     buttonNode?.setAttribute("aria-haspopup", "dialog");
@@ -3474,8 +3808,18 @@ function createTopbar({
     document.addEventListener("mousedown", onDocumentMouseDown, true);
     document.addEventListener("keydown", onPopoverKeyDown, true);
     window.addEventListener("resize", closePopover);
-    popover.querySelector("button")?.focus();
+    const firstFocusable = popover.querySelector("button");
+    if (firstFocusable)
+      firstFocusable.focus();
+    else {
+      popover.tabIndex = -1;
+      popover.focus();
+    }
   };
+  confirmation?.setOnChange(() => {
+    if (popover)
+      renderPopover();
+  });
   const syncButtonLayout = (mode) => {
     if (layoutMode === mode)
       return;
@@ -3644,15 +3988,27 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
   const observeRecoveryTarget = (topbar) => {
     const target = topbar?.parentElement || document.body;
     const subtree = !topbar;
-    if (recoveryObserver && recoveryTarget === target)
+    const outerTarget = topbar?.parentElement?.parentElement || null;
+    if (recoveryObserver && recoveryTarget === target && outerRecoveryTarget === outerTarget)
       return;
     recoveryObserver?.disconnect();
+    outerRecoveryObserver?.disconnect();
     recoveryObserver = new MutationObserver((records) => {
       if (records.some(touchesTopbar))
         scheduleAttach();
     });
     recoveryTarget = target;
     recoveryObserver.observe(target, { childList: true, ...subtree ? { subtree: true } : {} });
+    outerRecoveryTarget = outerTarget;
+    if (outerTarget && outerTarget !== target) {
+      outerRecoveryObserver = new MutationObserver((records) => {
+        if (records.some(touchesTopbar))
+          scheduleAttach();
+      });
+      outerRecoveryObserver.observe(outerTarget, { childList: true });
+    } else {
+      outerRecoveryObserver = null;
+    }
     observer = recoveryObserver;
   };
   const afterNavigation = (topbar) => {
@@ -3741,7 +4097,10 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
       hostObserver = null;
       recoveryObserver?.disconnect();
       recoveryObserver = null;
+      outerRecoveryObserver?.disconnect();
+      outerRecoveryObserver = null;
       recoveryTarget = null;
+      outerRecoveryTarget = null;
       observedTopbar = null;
       attachQueued = false;
       if (attachTimer)
@@ -3765,7 +4124,11 @@ var PALETTE_COMMANDS = [
 ];
 function createController({ extensionAPI: extensionAPI2 }) {
   const dashboard = createDashboard();
-  const topbar = createTopbar({ onOpenDashboard: (trigger) => dashboard.open({ returnFocusTo: trigger }) });
+  const confirmation = createConfirmationController();
+  const topbar = createTopbar({
+    confirmation,
+    onOpenDashboard: (trigger) => dashboard.open({ returnFocusTo: trigger })
+  });
   let destroyed = false;
   let detachPomodoro = null;
   const targetString = (context) => {
@@ -3887,7 +4250,16 @@ function createController({ extensionAPI: extensionAPI2 }) {
         await clockOutBlock(uid);
       })
     );
-    add(PALETTE_COMMANDS[2], () => guard(() => clockOutAll()));
+    add(
+      PALETTE_COMMANDS[2],
+      () => guard(async () => {
+        if (!confirmation.arm("clock-out-all", "command")) {
+          notifyUser("Clock Out All is armed. Run again within 5 seconds to confirm.");
+          return;
+        }
+        await clockOutAll();
+      })
+    );
     add(PALETTE_COMMANDS[3], () => dashboard.open());
     add(PALETTE_COMMANDS[4], () => {
       refresh();
@@ -3920,6 +4292,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       if (destroyed)
         return;
       destroyed = true;
+      confirmation.reset();
       detachPomodoro?.();
       detachPomodoro = null;
       reset2();

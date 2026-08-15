@@ -45,3 +45,10 @@ _Avoid_: paused Session, frozen Session
 The intended focus duration attached to one Session. Passing the target changes
 the reminder state but does not end the Session.
 _Avoid_: Pomodoro Session, timer limit
+
+## Mutation boundary
+
+Graph mutations are serialized only within one loaded plugin instance. Each queued
+action re-reads the graph before writing and checks a post-write refresh, but this
+is not a cross-tab/device lock or compare-and-swap guarantee. Writes are issued
+one at a time; a partial failure remains recoverable and is reported as uncertain.

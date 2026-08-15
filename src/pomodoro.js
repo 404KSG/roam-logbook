@@ -27,12 +27,16 @@ const isRecord = value => value && typeof value === 'object' && !Array.isArray(v
 const mapFromData = (data, { strict = false } = {}) => {
     if (!isRecord(data)) throw new Error('pomodoro data must be an object');
     const next = new Map();
+    const invalid = [];
     for (const [clockUid, minutes] of Object.entries(data)) {
         const value = Number(minutes);
         if (Number.isFinite(value) && value >= 0) next.set(clockUid, value);
-        else if (strict) throw new Error(`invalid Pomodoro target for ${clockUid}`);
+        else invalid.push(clockUid);
     }
-    return next;
+    if (strict && invalid.length > 0) {
+        throw new Error(`invalid Pomodoro target for ${invalid[0]}`);
+    }
+    return { next, invalid };
 };
 
 const serialized = values =>
@@ -60,9 +64,25 @@ export function load() {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         let next;
         if (isRecord(parsed) && parsed.version === VERSION && 'data' in parsed) {
-            next = mapFromData(parsed.data, { strict: true });
+            next = mapFromData(parsed.data, { strict: true }).next;
         } else if (isRecord(parsed) && !('version' in parsed)) {
-            next = mapFromData(parsed);
+            const legacy = mapFromData(parsed);
+            if (legacy.invalid.length > 0) {
+                // Do not migrate a mixed map by silently dropping the bad keys.
+                // Valid values remain usable in memory, while the complete raw
+                // source is backed up and left untouched for manual recovery.
+                targets = legacy.next;
+                unsupportedRaw = raw;
+                const firstWarning = preserveStateBackup(SETTING_POMODORO_STATE, raw);
+                notice = firstWarning
+                    ? 'Legacy Pomodoro state contains invalid entries; its raw value was backed up and kept.'
+                    : '';
+                if (firstWarning) {
+                    console.warn('[roam-logbook] could not safely migrate mixed Pomodoro state', legacy.invalid);
+                }
+                return;
+            }
+            next = legacy.next;
         } else {
             throw new Error('unsupported pomodoro state version');
         }

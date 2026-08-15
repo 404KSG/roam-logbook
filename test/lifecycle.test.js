@@ -530,6 +530,7 @@ test('Escape closes the dashboard', () => {
 
 test('clocking out through the palette closes the entry', async () => {
     await paletteCommands.get('Logbook: Clock out all running clocks')();
+    await paletteCommands.get('Logbook: Clock out all running clocks')();
 
     const drawer = graph.childrenOf('taskone01')[0];
     assert.match(graph.childrenOf(drawer.uid)[0].string, /\]--\[.*\] => \d+:\d\d$/);

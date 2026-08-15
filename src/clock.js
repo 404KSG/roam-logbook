@@ -17,7 +17,7 @@ let lastRefreshStatus = { ok: true, error: null };
 let notice = '';
 const listeners = new Set();
 
-const GRAPH_UNCERTAIN = 'Unable to read the graph; no changes were made. Please try again.';
+export const GRAPH_UNCERTAIN = 'Graph state could not be confirmed; no further changes were made.';
 
 async function withGraphGuard(action) {
     try {
@@ -66,7 +66,7 @@ function notify() {
  * Each open clock is tagged with `priorMinutes`, the time already banked against
  * the same task. A failed read leaves the last valid snapshot untouched.
  */
-export function refresh({ entries } = {}) {
+export function refresh({ entries, notify: shouldNotify = true } = {}) {
     let all;
     try {
         if (entries !== undefined && !Array.isArray(entries)) {
@@ -92,8 +92,28 @@ export function refresh({ entries } = {}) {
 
     lastRefreshStatus = { ok: true, error: null };
     notice = '';
-    notify();
+    if (shouldNotify) notify();
     return running;
+}
+
+/**
+ * Refresh with an explicit outcome for callers that have just written the graph.
+ * A failed post-write read is different from a failed preflight: the write may
+ * have reached Roam, so the caller must stop and retain a retryable state rather
+ * than pretend the mutation failed or continue with another write.
+ */
+export function refreshResult({ entries, notify: shouldNotify = true } = {}) {
+    const snapshot = refresh({ entries, notify: shouldNotify });
+    if (!lastRefreshStatus.ok) {
+        return {
+            ok: false,
+            uncertain: true,
+            running: snapshot,
+            error: lastRefreshStatus.error,
+            notice: GRAPH_UNCERTAIN,
+        };
+    }
+    return { ok: true, uncertain: false, running: snapshot, error: null, notice: '' };
 }
 
 export function reset() {
@@ -118,9 +138,11 @@ export function resolveTaskUid(uid) {
 async function ensureDrawer(taskUid) {
     const children = getChildren(taskUid);
     const existing = children.find(child => isDrawerBlock(child.string));
-    if (existing) return existing.uid;
+    if (existing) return { uid: existing.uid, created: false };
     // Order 0 mirrors org, where the drawer sits immediately under the heading.
-    return createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+    const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+    const confirmation = refreshResult({ notify: false });
+    return { uid, created: true, confirmation };
 }
 
 /** Rewrite one confirmed running entry into its closed form. */
@@ -138,11 +160,12 @@ async function closeEntry(entry, end) {
  * exact retry set. A read failure before this function is called is still thrown
  * by the public action and therefore produces zero writes.
  */
-async function closeEntriesNow(entries, clockUids, now) {
+async function closeEntriesNow(entries, clockUids, now, { publish = true } = {}) {
     const byUid = new Map(entries.filter(entry => entry.running).map(entry => [entry.clockUid, entry]));
     const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
     const results = [];
 
+    let uncertain = null;
     for (const clockUid of ids) {
         const entry = byUid.get(clockUid);
         if (!entry) {
@@ -152,16 +175,37 @@ async function closeEntriesNow(entries, clockUids, now) {
         try {
             const closed = await closeEntry(entry, now);
             results.push({ clockUid, closed });
+            if (closed) {
+                const confirmation = refreshResult({ notify: false });
+                if (!confirmation.ok) {
+                    uncertain = confirmation;
+                    break;
+                }
+            }
         } catch (error) {
             results.push({ clockUid, closed: false, error });
         }
     }
 
-    refresh();
+    const attempted = new Set(results.map(result => result.clockUid));
+    const retryClockUids = ids.filter(clockUid => !attempted.has(clockUid));
+    const closed = results.filter(result => result.closed).length;
+    if (publish && (closed > 0 || uncertain)) notify();
     return {
         results,
-        closed: results.filter(result => result.closed).length,
+        closed,
         failed: results.filter(result => result.error).length,
+        uncertain: Boolean(uncertain),
+        partial: Boolean(uncertain && results.some(result => result.closed)),
+        retry: uncertain
+            ? {
+                  action: 'close',
+                  retryClockUids,
+                  writtenClockUids: results.filter(result => result.closed).map(result => result.clockUid),
+              }
+            : null,
+        refresh: uncertain,
+        error: uncertain?.error || null,
     };
 }
 
@@ -177,7 +221,7 @@ export async function clockIn(blockUid, { now = new Date() } = {}) {
             if (!taskUid) throw new Error('No block to clock in');
 
             // This read is deliberately inside the queue. It is the boundary that
-            // prevents two concurrent actions, or another instance's fresh write,
+            // prevents two concurrent actions, or an external fresh write observed
             // from both deciding that the task is free.
             const entries = readAllEntries();
             const open = entries.filter(entry => entry.running);
@@ -189,20 +233,51 @@ export async function clockIn(blockUid, { now = new Date() } = {}) {
             } else {
                 // Org allows one clock at a time; closing the others keeps totals honest.
                 if (open.length > 0) {
-                    const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now);
+                    const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now, {
+                        publish: false,
+                    });
+                    if (outcome.uncertain) {
+                        return {
+                            taskUid,
+                            uncertain: true,
+                            partial: outcome.partial,
+                            notice: GRAPH_UNCERTAIN,
+                            retry: outcome.retry,
+                        };
+                    }
                     if (outcome.failed > 0) throw outcome.results.find(result => result.error).error;
                 }
             }
 
-            const drawerUid = await ensureDrawer(taskUid);
-            const order = getChildren(drawerUid).length;
+            const drawer = await ensureDrawer(taskUid);
+            if (drawer.confirmation && !drawer.confirmation.ok) {
+                return {
+                    taskUid,
+                    drawerUid: drawer.uid,
+                    uncertain: true,
+                    partial: true,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid },
+                };
+            }
+            const order = getChildren(drawer.uid).length;
             const clockUid = await createBlock({
-                parentUid: drawerUid,
+                parentUid: drawer.uid,
                 order,
                 string: formatClockLine(now),
             });
 
-            refresh();
+            const confirmation = refreshResult();
+            if (!confirmation.ok) {
+                return {
+                    clockUid,
+                    taskUid,
+                    uncertain: true,
+                    partial: true,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid, clockUid },
+                };
+            }
             return { clockUid, taskUid };
         })
     );
@@ -216,6 +291,15 @@ export async function clockOut(clockUid, { now = new Date() } = {}) {
             const outcome = await closeEntriesNow(entries, [clockUid], now);
             const result = outcome.results[0];
             if (result?.error) throw result.error;
+            if (outcome.uncertain) {
+                return {
+                    closed: result?.closed === true,
+                    uncertain: true,
+                    partial: outcome.partial,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: outcome.retry,
+                };
+            }
             return result?.closed === true;
         })
     );
@@ -226,7 +310,8 @@ export async function clockOutEntries(clockUids = null, { now = new Date() } = {
     return enqueueMutation(() =>
         withGraphGuard(async () => {
             const entries = readAllEntries();
-            return closeEntriesNow(entries, clockUids, now);
+            const outcome = await closeEntriesNow(entries, clockUids, now);
+            return { ...outcome, entries };
         })
     );
 }
@@ -246,7 +331,8 @@ export async function pauseEntries({ now = new Date(), prepare } = {}) {
             const outcome = await closeEntriesNow(
                 entries,
                 records.map(record => record.clockUid),
-                now
+                now,
+                { publish: false }
             );
             return { entries, records, ...outcome };
         })
@@ -256,6 +342,10 @@ export async function pauseEntries({ now = new Date(), prepare } = {}) {
 /** Close all currently running clocks. The legacy return value is the count closed. */
 export async function clockOutAll({ now = new Date() } = {}) {
     const outcome = await clockOutEntries(null, { now });
+    if (outcome.uncertain) {
+        notice = GRAPH_UNCERTAIN;
+        return outcome;
+    }
     if (outcome.failed > 0) {
         notice = `${outcome.failed} Session${outcome.failed === 1 ? '' : 's'} could not be closed.`;
     }
@@ -273,6 +363,15 @@ export async function clockOutBlock(blockUid, { now = new Date() } = {}) {
             const outcome = await closeEntriesNow(entries, [entry.clockUid], now);
             const result = outcome.results[0];
             if (result?.error) throw result.error;
+            if (outcome.uncertain) {
+                return {
+                    closed: result?.closed === true,
+                    uncertain: true,
+                    partial: outcome.partial,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: outcome.retry,
+                };
+            }
             return result?.closed === true;
         })
     );
@@ -289,12 +388,35 @@ export async function discardClock(clockUid) {
             const entry = entries.find(item => item.clockUid === clockUid);
             await deleteBlock(clockUid);
 
-            if (entry) {
-                const drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
-                if (drawer && getChildren(drawer.uid).length === 0) await deleteBlock(drawer.uid);
+            let confirmation = refreshResult({ notify: false });
+            if (!confirmation.ok) {
+                return {
+                    deleted: true,
+                    uncertain: true,
+                    partial: true,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: { action: 'discard', clockUid },
+                };
             }
 
-            refresh();
+            if (entry) {
+                const drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
+                if (drawer && getChildren(drawer.uid).length === 0) {
+                    await deleteBlock(drawer.uid);
+                    confirmation = refreshResult({ notify: false });
+                    if (!confirmation.ok) {
+                        return {
+                            deleted: true,
+                            uncertain: true,
+                            partial: true,
+                            notice: GRAPH_UNCERTAIN,
+                            retry: { action: 'discard-drawer', drawerUid: drawer.uid },
+                        };
+                    }
+                }
+            }
+
+            notify();
             return true;
         })
     );

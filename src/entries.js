@@ -182,16 +182,12 @@ const BLOCK_STRINGS_QUERY = `[:find ?uid ?string
 const readBlockStrings = uids => {
     if (uids.length === 0) return {};
     const result = {};
-    try {
-        const rows = validateQueryRows(
-            queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-            'block string batch',
-            row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
-        );
-        for (const [uid, string] of rows) result[uid] = string;
-    } catch (error) {
-        console.warn('[roam-logbook] referenced task strings unavailable for roll-up', error);
-    }
+    const rows = validateQueryRows(
+        queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+        'block string batch',
+        row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
+    );
+    for (const [uid, string] of rows) result[uid] = string;
     return result;
 };
 
@@ -213,26 +209,22 @@ export function readHierarchy(taskUids) {
     const parentOf = {};
     const stringOf = {};
     const mirrorsOf = {};
+    const issues = [];
     const seeds = new Set(taskUids);
 
-    if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf };
+    if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf, issues };
 
-    try {
-        const mirrorRows = validateQueryRows(
-            queryOrThrow(MIRRORS_QUERY, [...seeds]),
-            'mirror',
-            row => row.length >= 3 && row.every(value => typeof value === 'string')
-        );
-        for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
-            // `:block/refs` also fires for a block that merely mentions the task
-            // in passing; only a block that is *nothing but* the reference counts.
-            if (referencedBlockUid(mirrorString) !== targetUid) continue;
-            (mirrorsOf[targetUid] ||= []).push(mirrorUid);
-            stringOf[mirrorUid] = mirrorString;
-        }
-    } catch (error) {
-        // Roll-up degrades to real block structure only, rather than going blank.
-        console.warn('[roam-logbook] block references unavailable for roll-up', error);
+    const mirrorRows = validateQueryRows(
+        queryOrThrow(MIRRORS_QUERY, [...seeds]),
+        'mirror',
+        row => row.length >= 3 && row.every(value => typeof value === 'string')
+    );
+    for (const [targetUid, mirrorUid, mirrorString] of mirrorRows) {
+        // `:block/refs` also fires for a block that merely mentions the task
+        // in passing; only a block that is *nothing but* the reference counts.
+        if (referencedBlockUid(mirrorString) !== targetUid) continue;
+        (mirrorsOf[targetUid] ||= []).push(mirrorUid);
+        stringOf[mirrorUid] = mirrorString;
     }
 
     let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
@@ -257,6 +249,17 @@ export function readHierarchy(taskUids) {
             const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
 
             parentOf[uid] = parentUid;
+            if (referenced && typeof parentString !== 'string') {
+                issues.push({
+                    code: 'unresolved-parent',
+                    taskUid: uid,
+                    parentUid,
+                    title: `Unresolved parent · ${parentUid}`,
+                    rawClock: '',
+                    message: `Parent Task ${parentUid} could not be resolved; the known hierarchy was retained.`,
+                });
+                continue;
+            }
             if (parentUid in stringOf) continue;
             stringOf[parentUid] = parentString;
             next.push(parentUid);
@@ -264,5 +267,5 @@ export function readHierarchy(taskUids) {
         frontier = next;
     }
 
-    return { parentOf, stringOf, mirrorsOf };
+    return { parentOf, stringOf, mirrorsOf, issues };
 }

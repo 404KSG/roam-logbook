@@ -121,7 +121,7 @@ test('clock in performs zero graph writes when the current graph state is uncert
 
     await assert.rejects(
         () => clock.clockIn(TASK.uid),
-        /Unable to read the graph; no changes were made/
+        /Graph state could not be confirmed; no further changes were made/
     );
     assert.deepEqual(count, { creates: 0, updates: 0, deletes: 0 });
 });

@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.1**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -23,6 +23,11 @@ The extension is an ESM Roam Depot extension whose default export exposes `onloa
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only. There are no analytics, network calls, or runtime services.
+
+Graph writes are serialized only inside one loaded plugin instance. A fresh read
+before each action and a post-write refresh reduce races, but there is no
+cross-tab/device CAS or distributed lock; a partial write remains retryable and
+is reported as uncertain.
 
 ## Use
 
@@ -113,11 +118,15 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 
 Pause Batch state is stored as version 2 `{ version, data }`; Pomodoro targets
 use version 1 `{ version, data }`. The extension migrates the legacy Pause Batch
-shape and flat Pomodoro map in place. Unknown or corrupt composite state is kept
-untouched, copied once into the versioned internal `stateBackups` setting, and
-reported without destructive migration. A valid orphan CLOCK is reported under
-`Deleted task · UID` and remains part of global and by-day totals. Data issues
-are review-only: the extension never auto-rewrites CLOCK records.
+shape and a clean flat Pomodoro map in place. A mixed legacy Pomodoro map is
+backed up as raw and is not overwritten until its invalid entries are reviewed.
+Unknown or corrupt composite state is kept untouched, copied once into the
+versioned internal `stateBackups` setting, and reported without destructive
+migration. A CLOCK whose query row is still available but whose Task metadata is
+missing is reported under `Deleted task · UID` and remains part of global and
+by-day totals. Whether deleting a parent in a live Roam graph also deletes its
+children is left to the manual live smoke. Data issues are review-only: the
+extension never auto-rewrites CLOCK records.
 
 ## Development
 
@@ -134,8 +143,9 @@ npm run check
 destination is also supported, for example `node build.js --outfile=/tmp/extension.js`
 or `RLB_BUILD_OUTFILE=/tmp/extension.js npm run build`. `npm run verify:bundle`
 builds into a temporary directory and compares the result byte-for-byte with the
-checked-in bundle; `npm run check` runs this drift check without rewriting the
-working tree. Commit the bundle alongside the source.
+checked-in bundle; `npm run check` also validates the CI workflow contract and
+runs this drift check without rewriting the working tree. Commit the bundle
+alongside the source.
 
 ### Release checklist
 
@@ -147,6 +157,10 @@ working tree. Commit the bundle alongside the source.
 - Run the real Roam live smoke manually (`npm run verify:live`) against a disposable
   graph. Automated tests use a fake adapter and must not be described as a live
   Roam verification.
+
+The performance tests are synthetic query-count and complexity-regression stubs,
+not benchmarks of a real Roam graph. The final live verification still requires
+manual testing in a disposable Roam graph.
 
 ## Attribution
 
