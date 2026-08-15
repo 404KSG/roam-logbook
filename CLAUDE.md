@@ -75,17 +75,21 @@ Layering, innermost first:
     never the elapsed value.
   - A Shift+Click on the trigger mounts one DOM-only `Current Sessions` panel in
     Roam's existing right-sidebar host. It creates no page or block. The panel is
-    removed on its close action and during extension unload; a missing host uses a
+    removed on its close action and during extension unload; because Roam may
+    mount the host asynchronously, the extension waits briefly before using a
     visibly marked DOM fallback only for unusual shells/test fixtures.
-  - Dashboard is a content-fit inspector with an adaptive width and viewport
-    max-height: its header is compact, its body scrolls only for long reports,
-    and short reports end shortly after the final row. It uses exactly three
-    inline summary metrics: Today, the selected range, and Tasks tracked. The
-    selected-range metric owns the real daily micro rail (finite ranges keep
-    their bucket count; All time is labelled as a recent activity window).
-    There is no standalone By Day section or visible activity axis. Running
-    appears only when populated, then By Task is the primary list; summary and
-    table rows avoid repeated card, track, and per-row border treatment.
+    Shift+Clicking a task entry uses the native `rightSidebar.open()` plus
+    `addWindow({ window: { type: 'block', 'block-uid': uid } })` seam; ordinary
+    task clicks still use the main window and action buttons stop propagation.
+  - Dashboard is a beta.9 content-fit, Linear-inspired inspector with an
+    adaptive width and viewport max-height: its header is compact, its body
+    scrolls only for long reports, and short reports end shortly after the final
+    row. It uses exactly three low-contrast stat panels: Today, the selected
+    range with a readable daily activity chart, and Tasks tracked. Finite ranges
+    keep their bucket count; All time is labelled as a recent activity window.
+    There is no standalone By Day section or visible chart axis. Running appears
+    only when populated, then By Task is the primary bordered list; hierarchy and
+    numeric columns stay unchanged, while panel/list borders remain light.
   - Current-session rows use a shared grid with the status point and title on
     row one, metadata on row two, and actions spanning both rows. Alignment is
     structural (`display: contents` plus explicit grid tracks), not a margin
@@ -145,6 +149,6 @@ ones, and real Roam uids are 9.
   `rhysd/actionlint:1.7.7`.
 - Confirm required Chromium layout tests and the final-bundle lifecycle smoke.
 - Inspect the Roam Depot build and update the final PR test count only at release
-  (the beta.8 clean run currently contains 228 tests).
+  (the beta.9 clean run currently contains 234 tests).
 - Run `npm run verify:live` manually against the configured graph after reading
   its guidelines; do not call fake-adapter lifecycle coverage a live Roam test.

@@ -31,7 +31,7 @@ const renderTitle = (row, onOpenTask) => {
     const taskButton = button(
         'bp3-button bp3-minimal bp3-icon-document-open rlb-run__title',
         title,
-        () => onOpenTask?.(row.taskUid),
+        event => onOpenTask?.(row.taskUid, event),
         { title: fullTaskLabel(title) }
     );
     taskButton.setAttribute('aria-label', fullTaskLabel(title));
@@ -70,7 +70,10 @@ const renderRunningRow = (row, now, options) => {
     const checkout = button(
         'bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout',
         '',
-        () => void options.onCheckOut?.(entry),
+        event => {
+            event.stopPropagation();
+            void options.onCheckOut?.(entry, event);
+        },
         { title: 'Check Out' }
     );
     checkout.dataset.action = 'clock-out';
@@ -82,7 +85,10 @@ const renderRunningRow = (row, now, options) => {
     const discard = button(
         `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
         '',
-        () => void options.onDiscard?.(entry),
+        event => {
+            event.stopPropagation();
+            void options.onDiscard?.(entry, event);
+        },
         { title: discardTitle }
     );
     discard.dataset.action = 'discard';
@@ -118,7 +124,10 @@ const renderPausedRow = (row, now, options) => {
     const resume = button(
         'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume',
         '',
-        () => void options.onResume?.(item),
+        event => {
+            event.stopPropagation();
+            void options.onResume?.(item, event);
+        },
         { title: 'Resume' }
     );
     resume.dataset.action = 'resume';

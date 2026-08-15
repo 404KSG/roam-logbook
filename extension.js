@@ -410,6 +410,51 @@ async function openBlock(uid) {
     console.error("[roam-logbook] could not open block", uid, error);
   }
 }
+var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
+async function openBlockInRightSidebar(uid) {
+  if (typeof uid !== "string" || uid.length === 0) {
+    return { ok: false, reason: "missing-uid", message: "This Task has no block UID." };
+  }
+  const sidebar = getApi()?.ui?.rightSidebar;
+  if (typeof sidebar?.addWindow !== "function") {
+    return {
+      ok: false,
+      reason: "unavailable",
+      message: "Roam right-sidebar block windows are unavailable."
+    };
+  }
+  try {
+    await sidebar.open?.();
+    if (typeof sidebar.getWindows === "function") {
+      const windows = await sidebar.getWindows();
+      if (Array.isArray(windows) && windows.some(
+        (window2) => window2?.type === "block" && window2?.["block-uid"] === uid
+      )) {
+        return { ok: true, deduped: true };
+      }
+    }
+    let requested = requestedSidebarBlocks.get(sidebar);
+    if (!requested) {
+      requested = /* @__PURE__ */ new Set();
+      requestedSidebarBlocks.set(sidebar, requested);
+    }
+    if (requested.has(uid))
+      return { ok: true, deduped: true };
+    await sidebar.addWindow({
+      window: { type: "block", "block-uid": uid }
+    });
+    requested.add(uid);
+    return { ok: true };
+  } catch (error) {
+    console.debug("[roam-logbook] could not open task in right sidebar", uid, error);
+    return {
+      ok: false,
+      reason: "sidebar-open-failed",
+      message: error?.message || "Roam could not open this Task in the right sidebar.",
+      error
+    };
+  }
+}
 
 // src/entries.js
 var entriesQuery = (predicate) => `[:find ?clock-uid ?clock-string ?drawer-string ?task-uid ?task-string ?page-title
@@ -610,7 +655,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.8";
+var PLUGIN_VERSION = "0.9.0-beta.9";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -1533,12 +1578,15 @@ function createDashboard({
     summaryNode.replaceChildren(
       overviewBar({
         today: formatMinutesHuman(model.todayMinutes),
+        todayContext: model.running.length > 0 ? `${model.running.length} active Session${model.running.length === 1 ? "" : "s"}` : "No active Sessions",
         selected: formatMinutesHuman(model.totalMinutes),
         selectedLabel: rangeLabel,
+        selectedContext: `${(model.activity || model.days || []).length} day${(model.activity || model.days || []).length === 1 ? "" : "s"} in range`,
         activity: model.activity || model.days,
         activityLabel: model.activityLabel || rangeLabel,
         activityScope: model.activityScope || "selected-range",
         tasks: String(model.tasks.length),
+        tasksContext: "in selected period",
         now
       })
     );
@@ -1645,28 +1693,36 @@ function createDashboard({
   };
   const overviewBar = ({
     today,
+    todayContext,
     selected,
     selectedLabel,
+    selectedContext,
     activity,
     activityLabel,
     activityScope,
     tasks,
+    tasksContext,
     now
   }) => {
     const wrapper = el("dl", "rlb-overview");
     wrapper.setAttribute("aria-label", "Logbook overview");
     const metrics = [
-      ["Today", today],
-      [selectedLabel, selected],
-      ["Tasks tracked", tasks]
+      ["Today", today, todayContext],
+      [selectedLabel, selected, selectedContext],
+      ["Tasks tracked", tasks, tasksContext]
     ];
-    for (const [index, [label, value]] of metrics.entries()) {
-      const item = el("div", "rlb-overview__item");
+    for (const [index, [label, value, context]] of metrics.entries()) {
+      const item = el("div", "rlb-overview__item rlb-overview__panel");
       if (index === 1)
         item.classList.add("rlb-overview__item--selected");
+      const valueNode = el("dd", "rlb-overview__value");
+      valueNode.append(
+        el("span", "rlb-overview__number", value),
+        el("span", "rlb-overview__context", context)
+      );
       item.append(
         el("dt", "rlb-overview__label", label),
-        el("dd", "rlb-overview__value", value)
+        valueNode
       );
       if (index === 1) {
         item.querySelector(".rlb-overview__value").appendChild(
@@ -1680,13 +1736,22 @@ function createDashboard({
   const runningSection = (running2, now) => {
     const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
     const section = el("section", "rlb-dashboard-section rlb-running");
-    section.appendChild(
+    section.classList.add("rlb-dashboard-panel");
+    const heading = el("div", "rlb-panel__header");
+    heading.appendChild(el("h3", "rlb-section__title", "Running"));
+    heading.appendChild(
       el(
-        "h3",
-        "rlb-section__title",
-        stale.size > 0 ? `Running \xB7 ${stale.size} unfinished for over ${staleHours()}h` : "Running"
+        "span",
+        "rlb-panel__count",
+        `${running2.length} Session${running2.length === 1 ? "" : "s"}`
       )
     );
+    if (stale.size > 0) {
+      heading.appendChild(
+        el("span", "bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice", `${stale.size} stale`)
+      );
+    }
+    section.appendChild(heading);
     const table = el("table", "rlb-table");
     table.appendChild(
       headerRow(["Task", "Started", { label: "Elapsed", numeric: true }, ""])
@@ -1708,7 +1773,8 @@ function createDashboard({
       const discard = button(
         `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
         "",
-        () => {
+        (event) => {
+          event.stopPropagation();
           if (!discarding) {
             discardConfirmUid = entry.clockUid;
             if (discardConfirmTimer)
@@ -1730,7 +1796,10 @@ function createDashboard({
         button(
           "bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout",
           "",
-          () => void act(() => clockOut(entry.clockUid)),
+          (event) => {
+            event.stopPropagation();
+            void act(() => clockOut(entry.clockUid));
+          },
           { title: "Check Out" }
         ),
         discard
@@ -1770,8 +1839,8 @@ function createDashboard({
   const tasksSection = (tree) => {
     const everyRow = flattenForest(tree);
     const parentUids = everyRow.filter((node) => node.hasChildren).map((node) => node.taskUid);
-    const section = el("section", "rlb-dashboard-section rlb-by-task");
-    const heading = el("div", "rlb-section__heading");
+    const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
+    const heading = el("div", "rlb-section__heading rlb-panel__header");
     heading.appendChild(el("h3", "rlb-section__title", "By task"));
     const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
     const info = button(
@@ -1908,10 +1977,21 @@ function createDashboard({
   };
   const taskLink = (title, taskUid) => {
     const accessibleName = `Open this block: ${title}`;
-    const link = button("bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link", "", () => {
-      close();
-      void openBlock(taskUid);
-    }, { title: accessibleName });
+    const link = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link",
+      "",
+      (event) => {
+        event.stopPropagation();
+        if (event.shiftKey) {
+          event.preventDefault();
+          void openBlockInRightSidebar(taskUid);
+          return;
+        }
+        close();
+        void openBlock(taskUid);
+      },
+      { title: accessibleName }
+    );
     link.appendChild(el("span", "rlb-task-link__text", title));
     return link;
   };
@@ -3392,6 +3472,7 @@ var STYLES = `
 
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
 .rlb-popover {
+    --rlb-surface-action-height: 32px;
     --rlb-surface-title-size: 10px;
     --rlb-surface-task-size: 13px;
     --rlb-surface-meta-size: 10px;
@@ -3441,6 +3522,7 @@ var STYLES = `
 }
 
 .rlb-sidebar {
+    --rlb-surface-action-height: 32px;
     --rlb-surface-title-size: 10px;
     --rlb-surface-task-size: 13px;
     --rlb-surface-meta-size: 10px;
@@ -3523,6 +3605,7 @@ var STYLES = `
 .rlb-popover__footer {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, var(--rlb-surface-action-height));
     gap: 6px;
     padding-top: 8px;
     margin-top: 4px;
@@ -3531,18 +3614,27 @@ var STYLES = `
 
 .rlb-popover__footer .bp3-button {
     min-width: 0;
+    width: 100%;
+    height: var(--rlb-surface-action-height);
+    min-height: var(--rlb-surface-action-height);
+    max-height: var(--rlb-surface-action-height);
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
     font-size: var(--rlb-surface-action-size, 12px);
-    line-height: 1.2;
+    line-height: 1;
+    padding: 0 8px;
 }
 
 .rlb-popover__footer .rlb-surface__refresh {
-    width: 32px;
-    min-width: 32px;
-    max-width: 32px;
-    height: 32px;
-    min-height: 32px;
-    max-height: 32px;
-    justify-self: center;
+    grid-column: 2;
+    grid-row: 2;
+    width: 100%;
+    min-width: var(--rlb-surface-action-height);
+    max-width: none;
+    justify-self: stretch;
     padding: 0 !important;
     align-items: center;
     justify-content: center;
@@ -4048,13 +4140,14 @@ var STYLES = `
 /* ---- Roam-native analytical dashboard shell ---- */
 
 .rlb-root {
-    --rlb-surface: #ffffff;
-    --rlb-surface-subtle: #f5f8fa;
-    --rlb-text: #182026;
-    --rlb-muted: #5c7080;
+    --rlb-canvas: var(--roam-bg-color, #fdfdfd);
+    --rlb-surface: var(--roam-bg-color, #fdfdfd);
+    --rlb-surface-subtle: var(--roam-secondary-bg-color, #f5f8fa);
+    --rlb-text: var(--roam-primary-color, #182026);
+    --rlb-muted: var(--roam-muted-color, #5c7080);
     --rlb-border: rgba(16, 22, 26, 0.14);
     --rlb-border-light: rgba(16, 22, 26, 0.08);
-    --rlb-accent: #2d72d2;
+    --rlb-accent: var(--roam-accent-color, #2d72d2);
     --rlb-accent-soft: rgba(45, 114, 210, 0.12);
     --rlb-activity-zero: rgba(167, 182, 194, 0.22);
     --rlb-activity-1: #a7d9b8;
@@ -4070,10 +4163,11 @@ var STYLES = `
 }
 
 .bp3-dark .rlb-root {
-    --rlb-surface: #293742;
-    --rlb-surface-subtle: #202b33;
-    --rlb-text: #f5f8fa;
-    --rlb-muted: #a7b6c2;
+    --rlb-canvas: var(--roam-bg-color, #293742);
+    --rlb-surface: var(--roam-bg-color, #293742);
+    --rlb-surface-subtle: var(--roam-secondary-bg-color, #202b33);
+    --rlb-text: var(--roam-primary-color, #f5f8fa);
+    --rlb-muted: var(--roam-muted-color, #a7b6c2);
     --rlb-border: rgba(255, 255, 255, 0.17);
     --rlb-border-light: rgba(255, 255, 255, 0.09);
     --rlb-accent: #48aff0;
@@ -4086,7 +4180,7 @@ var STYLES = `
 }
 
 .rlb-dialog {
-    width: min(1040px, calc(100vw - 48px));
+    width: min(1160px, calc(100vw - 48px));
     height: auto;
     min-height: 0;
     max-height: min(84vh, calc(100vh - 48px));
@@ -4095,7 +4189,7 @@ var STYLES = `
     border-radius: 4px;
     background: var(--rlb-surface);
     color: var(--rlb-text);
-    box-shadow: 0 6px 24px rgba(16, 22, 26, 0.16);
+    box-shadow: 0 4px 16px rgba(16, 22, 26, 0.14);
 }
 
 .rlb-dashboard .rlb-header.bp3-dialog-header {
@@ -4148,61 +4242,86 @@ var STYLES = `
 .rlb-summary {
     flex: 0 0 auto;
     min-width: 0;
-    padding: 10px 20px 9px;
+    padding: 12px 20px 14px;
     background: var(--rlb-surface);
 }
 
 .rlb-overview {
     display: grid;
-    grid-template-columns: max-content minmax(0, 1fr) max-content;
-    align-items: center;
-    column-gap: 24px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr) minmax(0, 1fr);
+    align-items: stretch;
+    gap: 10px;
     margin: 0;
     padding: 0;
 }
 
 .rlb-overview__item {
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 7px;
     min-width: 0;
-    white-space: nowrap;
+    min-height: 112px;
+    padding: 12px 14px;
+    border: 1px solid var(--rlb-border-light);
+    border-radius: 7px;
+    background: var(--rlb-surface-subtle);
 }
 
 .rlb-overview__item--selected {
     min-width: 0;
 }
 
+.rlb-overview__panel {
+    overflow: hidden;
+}
+
 .rlb-overview__label {
     flex: 0 0 auto;
     margin: 0;
     color: var(--rlb-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.15px;
+    letter-spacing: 0.25px;
+    line-height: 1.2;
+    text-transform: uppercase;
 }
 
 .rlb-overview__value {
     display: flex;
-    align-items: center;
-    gap: 7px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
     min-width: 0;
     margin: 0;
     color: var(--rlb-text);
-    font-size: 17px;
+    font-size: 19px;
     font-weight: 600;
     line-height: 1.3;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-overview__number {
+    display: block;
+    white-space: nowrap;
+}
+
+.rlb-overview__context {
+    display: block;
+    color: var(--rlb-muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
 }
 
 .rlb-activity-rail {
     display: grid;
     grid-template-columns: repeat(var(--rlb-activity-count, 7), minmax(0, 1fr));
     align-items: end;
-    flex: 0 1 132px;
-    gap: 2px;
-    width: clamp(64px, 12vw, 132px);
-    height: 14px;
+    gap: 4px;
+    width: 100%;
+    height: 68px;
     min-width: 0;
     margin: 0;
     overflow: hidden;
@@ -4214,7 +4333,7 @@ var STYLES = `
     align-items: end;
     width: 100%;
     min-width: 0;
-    height: 14px;
+    height: 68px;
     margin: 0 !important;
     padding: 0 !important;
     border: 0;
@@ -4241,7 +4360,7 @@ var STYLES = `
 
 .rlb-activity__fill {
     display: block;
-    width: min(8px, 100%);
+    width: min(20px, 100%);
     height: 100%;
     min-height: 0;
     justify-self: center;
@@ -4258,8 +4377,8 @@ var STYLES = `
 }
 
 .rlb-activity__bucket--empty .rlb-activity__fill {
-    width: min(6px, 80%);
-    height: 2px !important;
+    width: min(14px, 80%);
+    height: 4px !important;
     background: var(--rlb-activity-zero, rgba(167, 182, 194, 0.22));
 }
 
@@ -4275,11 +4394,42 @@ var STYLES = `
 
 .rlb-dashboard-section {
     margin: 0;
-    padding: 8px 0 6px;
+    padding: 0;
 }
 
 .rlb-dashboard-section + .rlb-dashboard-section {
-    padding-top: 8px;
+    margin-top: 10px;
+}
+
+.rlb-dashboard-panel {
+    overflow: hidden;
+    padding: 12px 14px 10px;
+    border: 1px solid var(--rlb-border);
+    border-radius: 7px;
+    background: var(--rlb-surface);
+}
+
+.rlb-panel__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 7px;
+}
+
+.rlb-panel__header .rlb-section__title {
+    flex: 0 0 auto;
+}
+
+.rlb-panel__count,
+.rlb-panel__notice {
+    color: var(--rlb-muted);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.rlb-panel__notice {
+    margin-left: auto;
 }
 
 .rlb-section__title {
@@ -4318,6 +4468,10 @@ var STYLES = `
 
 .rlb-dashboard .rlb-table tbody tr:hover td {
     background: rgba(167, 182, 194, 0.12);
+}
+
+.rlb-dashboard .rlb-table tbody tr + tr td {
+    border-top: 1px solid var(--rlb-border-light);
 }
 
 .rlb-dashboard .rlb-data-issues {
@@ -4407,9 +4561,13 @@ var STYLES = `
         min-width: 0;
     }
 
+    .rlb-overview__context {
+        white-space: normal;
+    }
+
     .rlb-activity-rail,
     .rlb-activity__bucket {
-        height: 14px;
+        height: 56px;
     }
 
     .rlb-body,
@@ -4442,7 +4600,7 @@ var renderTitle = (row, onOpenTask) => {
   const taskButton = button(
     "bp3-button bp3-minimal bp3-icon-document-open rlb-run__title",
     title,
-    () => onOpenTask?.(row.taskUid),
+    (event) => onOpenTask?.(row.taskUid, event),
     { title: fullTaskLabel(title) }
   );
   taskButton.setAttribute("aria-label", fullTaskLabel(title));
@@ -4477,7 +4635,10 @@ var renderRunningRow = (row, now, options) => {
   const checkout = button(
     "bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout",
     "",
-    () => void options.onCheckOut?.(entry),
+    (event) => {
+      event.stopPropagation();
+      void options.onCheckOut?.(entry, event);
+    },
     { title: "Check Out" }
   );
   checkout.dataset.action = "clock-out";
@@ -4486,7 +4647,10 @@ var renderRunningRow = (row, now, options) => {
   const discard = button(
     `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
     "",
-    () => void options.onDiscard?.(entry),
+    (event) => {
+      event.stopPropagation();
+      void options.onDiscard?.(entry, event);
+    },
     { title: discardTitle }
   );
   discard.dataset.action = "discard";
@@ -4520,7 +4684,10 @@ var renderPausedRow = (row, now, options) => {
   const resume = button(
     "bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume",
     "",
-    () => void options.onResume?.(item),
+    (event) => {
+      event.stopPropagation();
+      void options.onResume?.(item, event);
+    },
     { title: "Resume" }
   );
   resume.dataset.action = "resume";
@@ -4827,7 +4994,21 @@ function createTopbar({
       notices: surfaceNotices(),
       clockOutAllConfirm: confirmation?.isArmed("clock-out-all", scope),
       onRefresh: () => run(() => refreshResult()),
-      onOpenTask: (taskUid) => {
+      onOpenTask: (taskUid, event) => {
+        if (event?.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          closePopover({ restoreFocus: false });
+          closeSidebar({ restoreFocus: false });
+          void openBlockInRightSidebar(taskUid).then((result) => {
+            if (!result.ok) {
+              actionNotice = result.message || "Could not open this Task in the right sidebar.";
+              renderSurfaces();
+            }
+          });
+          return;
+        }
+        event?.stopPropagation();
         closePopover({ restoreFocus: false });
         closeSidebar({ restoreFocus: false });
         void openBlock(taskUid);
@@ -4909,14 +5090,10 @@ function createTopbar({
       console.debug("[roam-logbook] right sidebar open helper unavailable", error);
     }
   };
-  const openSidebar = () => {
-    if (sidebar?.isConnected) {
-      sidebar.querySelector(".rlb-surface__close, button")?.focus();
+  const mountSidebar = (host) => {
+    if (destroyed || sidebar?.isConnected)
       return;
-    }
-    closePopover({ restoreFocus: false });
-    requestRoamSidebarOpen();
-    sidebarHost = findSidebarHost();
+    sidebarHost = host;
     sidebar = el("section", "bp3-card rlb-sidebar");
     if (sidebarHost === document.body)
       sidebar.classList.add("rlb-sidebar--fallback");
@@ -4928,6 +5105,33 @@ function createTopbar({
     refresh();
     renderSidebar();
     sidebar.querySelector("button")?.focus();
+  };
+  const waitForSidebarHost = () => new Promise((resolve2) => {
+    let attempts = 0;
+    const probe = () => {
+      const host = findSidebarHost();
+      if (host !== document.body || attempts >= 2) {
+        resolve2(host);
+        return;
+      }
+      attempts += 1;
+      setTimeout(probe, 0);
+    };
+    queueMicrotask(probe);
+  });
+  const openSidebar = () => {
+    if (sidebar?.isConnected) {
+      sidebar.querySelector(".rlb-surface__close, button")?.focus();
+      return;
+    }
+    closePopover({ restoreFocus: false });
+    requestRoamSidebarOpen();
+    const host = findSidebarHost();
+    if (host !== document.body) {
+      mountSidebar(host);
+      return;
+    }
+    void waitForSidebarHost().then(mountSidebar);
   };
   const togglePopover = (event) => {
     if (event?.shiftKey) {

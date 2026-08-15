@@ -98,7 +98,7 @@ test('onload mounts the topbar widget and registers every command', () => {
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.equal(document.querySelectorAll('#roam-logbook-styles').length, 1);
-    assert.match(css, /width: min\(1040px, calc\(100vw - 48px\)\)/);
+    assert.match(css, /width: min\(1160px, calc\(100vw - 48px\)\)/);
     assert.match(css, /max-height: min\(84vh, calc\(100vh - 48px\)\)/);
     assert.doesNotMatch(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);

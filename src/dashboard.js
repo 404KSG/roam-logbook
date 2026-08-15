@@ -1,7 +1,7 @@
 /**
  * The dashboard dialog: a compact overview, running sessions, and a per-task
- * breakdown. Activity remains available as an accessible micro rail inside the
- * selected-range overview item rather than as a separate chart section.
+ * breakdown. Activity remains available as an accessible chart inside the
+ * selected-range overview panel rather than as a separate chart section.
  *
  * Reads the graph on open and on refresh only — there is no live subscription,
  * because a dialog that reshuffles under the cursor is worse than a stale one.
@@ -10,7 +10,7 @@
 import * as clock from './clock.js';
 import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
-import { openBlock } from './roam.js';
+import { openBlock, openBlockInRightSidebar } from './roam.js';
 import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
 import { staleHours } from './settings.js';
 import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
@@ -105,12 +105,18 @@ export function createDashboard({
         summaryNode.replaceChildren(
             overviewBar({
                 today: formatMinutesHuman(model.todayMinutes),
+                todayContext:
+                    model.running.length > 0
+                        ? `${model.running.length} active Session${model.running.length === 1 ? '' : 's'}`
+                        : 'No active Sessions',
                 selected: formatMinutesHuman(model.totalMinutes),
                 selectedLabel: rangeLabel,
+                selectedContext: `${(model.activity || model.days || []).length} day${(model.activity || model.days || []).length === 1 ? '' : 's'} in range`,
                 activity: model.activity || model.days,
                 activityLabel: model.activityLabel || rangeLabel,
                 activityScope: model.activityScope || 'selected-range',
                 tasks: String(model.tasks.length),
+                tasksContext: 'in selected period',
                 now,
             })
         );
@@ -235,27 +241,35 @@ export function createDashboard({
 
     const overviewBar = ({
         today,
+        todayContext,
         selected,
         selectedLabel,
+        selectedContext,
         activity,
         activityLabel,
         activityScope,
         tasks,
+        tasksContext,
         now,
     }) => {
         const wrapper = el('dl', 'rlb-overview');
         wrapper.setAttribute('aria-label', 'Logbook overview');
         const metrics = [
-            ['Today', today],
-            [selectedLabel, selected],
-            ['Tasks tracked', tasks],
+            ['Today', today, todayContext],
+            [selectedLabel, selected, selectedContext],
+            ['Tasks tracked', tasks, tasksContext],
         ];
-        for (const [index, [label, value]] of metrics.entries()) {
-            const item = el('div', 'rlb-overview__item');
+        for (const [index, [label, value, context]] of metrics.entries()) {
+            const item = el('div', 'rlb-overview__item rlb-overview__panel');
             if (index === 1) item.classList.add('rlb-overview__item--selected');
+            const valueNode = el('dd', 'rlb-overview__value');
+            valueNode.append(
+                el('span', 'rlb-overview__number', value),
+                el('span', 'rlb-overview__context', context)
+            );
             item.append(
                 el('dt', 'rlb-overview__label', label),
-                el('dd', 'rlb-overview__value', value)
+                valueNode
             );
             if (index === 1) {
                 item.querySelector('.rlb-overview__value').appendChild(
@@ -270,15 +284,22 @@ export function createDashboard({
     const runningSection = (running, now) => {
         const stale = new Set(findStaleClocks(running, now, staleHours()).map(e => e.clockUid));
         const section = el('section', 'rlb-dashboard-section rlb-running');
-        section.appendChild(
+        section.classList.add('rlb-dashboard-panel');
+        const heading = el('div', 'rlb-panel__header');
+        heading.appendChild(el('h3', 'rlb-section__title', 'Running'));
+        heading.appendChild(
             el(
-                'h3',
-                'rlb-section__title',
-                stale.size > 0
-                    ? `Running · ${stale.size} unfinished for over ${staleHours()}h`
-                    : 'Running'
+                'span',
+                'rlb-panel__count',
+                `${running.length} Session${running.length === 1 ? '' : 's'}`
             )
         );
+        if (stale.size > 0) {
+            heading.appendChild(
+                el('span', 'bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice', `${stale.size} stale`)
+            );
+        }
+        section.appendChild(heading);
 
         const table = el('table', 'rlb-table');
         table.appendChild(
@@ -303,7 +324,8 @@ export function createDashboard({
             const discard = button(
                 `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
                 '',
-                () => {
+                event => {
+                    event.stopPropagation();
                     if (!discarding) {
                         discardConfirmUid = entry.clockUid;
                         if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
@@ -324,7 +346,10 @@ export function createDashboard({
                 button(
                     'bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout',
                     '',
-                    () => void act(() => clock.clockOut(entry.clockUid)),
+                    event => {
+                        event.stopPropagation();
+                        void act(() => clock.clockOut(entry.clockUid));
+                    },
                     { title: 'Check Out' }
                 ),
                 discard
@@ -368,8 +393,8 @@ export function createDashboard({
         const everyRow = flattenForest(tree);
         const parentUids = everyRow.filter(node => node.hasChildren).map(node => node.taskUid);
 
-        const section = el('section', 'rlb-dashboard-section rlb-by-task');
-        const heading = el('div', 'rlb-section__heading');
+        const section = el('section', 'rlb-dashboard-section rlb-dashboard-panel rlb-by-task');
+        const heading = el('div', 'rlb-section__heading rlb-panel__header');
         heading.appendChild(el('h3', 'rlb-section__title', 'By task'));
 
         const rollupHelp =
@@ -522,10 +547,21 @@ export function createDashboard({
 
     const taskLink = (title, taskUid) => {
         const accessibleName = `Open this block: ${title}`;
-        const link = button('bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link', '', () => {
-            close();
-            void openBlock(taskUid);
-        }, { title: accessibleName });
+        const link = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link',
+            '',
+            event => {
+                event.stopPropagation();
+                if (event.shiftKey) {
+                    event.preventDefault();
+                    void openBlockInRightSidebar(taskUid);
+                    return;
+                }
+                close();
+                void openBlock(taskUid);
+            },
+            { title: accessibleName }
+        );
         link.appendChild(el('span', 'rlb-task-link__text', title));
         return link;
     };

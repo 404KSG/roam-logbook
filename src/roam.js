@@ -241,3 +241,65 @@ export async function openBlock(uid) {
         console.error('[roam-logbook] could not open block', uid, error);
     }
 }
+
+// Roam owns the right-sidebar window stack. Keep the small extension-level
+// dedupe here so repeated Shift+Click does not create an unbounded set of the
+// same block windows when an older Roam build does not dedupe addWindow itself.
+const requestedSidebarBlocks = new WeakMap();
+
+/** Open a task in Roam's native right-sidebar block window. */
+export async function openBlockInRightSidebar(uid) {
+    if (typeof uid !== 'string' || uid.length === 0) {
+        return { ok: false, reason: 'missing-uid', message: 'This Task has no block UID.' };
+    }
+
+    const sidebar = getApi()?.ui?.rightSidebar;
+    if (typeof sidebar?.addWindow !== 'function') {
+        return {
+            ok: false,
+            reason: 'unavailable',
+            message: 'Roam right-sidebar block windows are unavailable.',
+        };
+    }
+
+    try {
+        await sidebar.open?.();
+
+        // Prefer Roam's own window list when available. The local set is only
+        // a fallback for older APIs without getWindows; it is never a graph
+        // lock or a cross-tab atomicity claim.
+        if (typeof sidebar.getWindows === 'function') {
+            const windows = await sidebar.getWindows();
+            if (
+                Array.isArray(windows) &&
+                windows.some(
+                    window =>
+                        window?.type === 'block' && window?.['block-uid'] === uid
+                )
+            ) {
+                return { ok: true, deduped: true };
+            }
+        }
+
+        let requested = requestedSidebarBlocks.get(sidebar);
+        if (!requested) {
+            requested = new Set();
+            requestedSidebarBlocks.set(sidebar, requested);
+        }
+        if (requested.has(uid)) return { ok: true, deduped: true };
+
+        await sidebar.addWindow({
+            window: { type: 'block', 'block-uid': uid },
+        });
+        requested.add(uid);
+        return { ok: true };
+    } catch (error) {
+        console.debug('[roam-logbook] could not open task in right sidebar', uid, error);
+        return {
+            ok: false,
+            reason: 'sidebar-open-failed',
+            message: error?.message || 'Roam could not open this Task in the right sidebar.',
+            error,
+        };
+    }
+}

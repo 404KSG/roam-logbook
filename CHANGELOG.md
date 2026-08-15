@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.9 — 2026-08-15
+
+- Made Shift+Click Roam-native for both the topbar Current Sessions surface and task entries: task blocks use the right-sidebar `open`/`addWindow` API, repeated block windows are extension-deduped, and delayed sidebar host mounting is handled safely.
+- Unified the four current-session footer actions on a shared 32px height token across popover/sidebar and kept Refresh as the centered icon in the lower-right grid cell.
+- Rebuilt the Dashboard overview as three low-contrast Linear-inspired stat panels with a readable selected-range activity chart, then placed compact Running and By Task list panels directly below it without changing statistics or hierarchy semantics.
+- Added RED→GREEN public interaction and Chromium geometry coverage for native sidebar calls, missing UIDs, action non-bubbling, async host mounting, equal footer heights, three-panel overview geometry, and 56–84px activity bars.
+- The complete local suite now contains 234 tests, including browser geometry, accessibility, data-health ordering, and final-bundle lifecycle coverage.
+
 ## 0.9.0-beta.8 — 2026-08-15
 
 - Reworked the Dashboard as a content-fit inspector: short reports no longer reserve a near-full-screen shell, while long task lists scroll inside the body below a compact header.

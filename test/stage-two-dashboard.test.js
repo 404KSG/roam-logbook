@@ -19,6 +19,7 @@ const extensionAPI = {
 const { setExtensionAPI } = await import('../src/settings.js');
 const { createDashboard } = await import('../src/dashboard.js');
 const clock = await import('../src/clock.js');
+const { openBlockInRightSidebar } = await import('../src/roam.js');
 
 let graph;
 
@@ -172,6 +173,51 @@ test('Dashboard Running and By Task links expose the complete Task title', async
     dashboard.destroy();
 });
 
+test('Shift+Click Dashboard task entries opens the matching block in Roam right sidebar', async () => {
+    const nativeCalls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => nativeCalls.push({ action: 'open' }),
+        addWindow: async spec => nativeCalls.push({ action: 'addWindow', spec }),
+    };
+    const nowMs = new Date('2026-08-15T09:00:00').getTime();
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+    dashboard.open();
+
+    const runningLink = document.querySelector('.rlb-running .rlb-task-link');
+    runningLink.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(nativeCalls, [
+        { action: 'open' },
+        {
+            action: 'addWindow',
+            spec: { window: { type: 'block', 'block-uid': 'live-child' } },
+        },
+    ]);
+    assert.equal(document.querySelector('.rlb-root--open') !== null, true);
+    dashboard.destroy();
+});
+
+test('native task sidebar seam rejects missing UIDs and dedupes repeated block windows', async () => {
+    const missing = await openBlockInRightSidebar('');
+    assert.equal(missing.ok, false);
+    assert.equal(missing.reason, 'missing-uid');
+
+    const calls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => calls.push('open'),
+        addWindow: async spec => calls.push(spec),
+    };
+    assert.equal((await openBlockInRightSidebar('live-child')).ok, true);
+    assert.equal((await openBlockInRightSidebar('live-child')).deduped, true);
+    assert.deepEqual(calls, [
+        'open',
+        { window: { type: 'block', 'block-uid': 'live-child' } },
+        'open',
+    ]);
+});
+
 test('Integrated summary owns the selected-range activity rail and keeps three metrics', () => {
     graph = installGraph([
         { uid: 'day-task', string: '{{[[TODO]]}} Activity task', parent: null },
@@ -231,7 +277,7 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
     dashboard.destroy();
 });
 
-test('beta.8 exposes one inline semantic overview and keeps activity buckets accessible without a visible axis', () => {
+test('beta.9 exposes three semantic overview panels and keeps activity buckets accessible without a visible axis', () => {
     graph = installGraph([
         { uid: 'compact-task', string: '{{[[TODO]]}} Compact dashboard task', parent: null },
         { uid: 'compact-drawer', string: 'LOGBOOK::', parent: 'compact-task' },

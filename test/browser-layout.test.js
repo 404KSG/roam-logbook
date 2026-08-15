@@ -272,7 +272,7 @@ test('activity rail keeps accessible green intensity cells compact on a narrow p
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.equal(geometry.count, 7, JSON.stringify(geometry));
-    assert.ok(geometry.chart.height >= 12 && geometry.chart.height <= 18, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 56 && geometry.chart.height <= 84, JSON.stringify(geometry));
     assert.match(geometry.columns, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
     assert.equal(geometry.accessible, true, JSON.stringify(geometry));
     assert.equal(geometry.keyboard, true, JSON.stringify(geometry));
@@ -382,7 +382,7 @@ test('beta.7 integrated summary stays three-column, embeds activity, and keeps t
     }
 });
 
-test('beta.8 Dashboard is content-fit and uses an inline overview at desktop and narrow widths', async t => {
+test('Dashboard remains content-fit while the overview is ready for panel treatment at desktop and narrow widths', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const shortTask = '<tr><td>Short task</td><td>1</td><td>30m</td><td>30m</td></tr>';
     const longTasks = Array.from(
@@ -606,4 +606,82 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         assert.equal(geometry.footerOverlap, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
     }
+});
+
+test('beta.9 surface footer uses one action height across both rows', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh" aria-label="Refresh" title="Refresh"></button></div></div>`),
+        `(() => {
+            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+            const footer = document.querySelector('.rlb-popover__footer');
+            const buttons = [...footer.querySelectorAll('button')];
+            const rows = getComputedStyle(footer).gridTemplateRows.split(' ').map(value => parseFloat(value));
+            const refreshStyle = getComputedStyle(buttons[3]);
+            const rects = buttons.map(rect);
+            return {
+                rows,
+                heights: rects.map(item => item.height),
+                equal: Math.max(...rects.map(item => item.height)) - Math.min(...rects.map(item => item.height)) <= 1,
+                refreshCenter: Math.abs(rects[3].left + rects[3].width / 2 - (rects[1].left + rects[1].width / 2)) <= 1,
+                refreshGrid: [refreshStyle.gridColumnStart, refreshStyle.gridRowStart],
+                inside: rects.every(item => item.left >= rect(footer).left && item.right <= rect(footer).right + .5),
+                token: getComputedStyle(footer).getPropertyValue('--rlb-surface-action-height').trim()
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.equal, true, JSON.stringify(geometry));
+    assert.equal(geometry.rows.length, 2, JSON.stringify(geometry));
+    assert.ok(geometry.rows.every(row => row >= 31), JSON.stringify(geometry));
+    assert.equal(geometry.refreshCenter, true, JSON.stringify(geometry));
+    assert.deepEqual(geometry.refreshGrid, ['2', '2'], JSON.stringify(geometry));
+    assert.equal(geometry.inside, true, JSON.stringify(geometry));
+    assert.match(geometry.token, /\d+px/, JSON.stringify(geometry));
+});
+
+test('beta.9 Dashboard presents three Linear-style panels and a readable activity chart', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const buckets = [0, 30, 60, 120, 0, 15, 90]
+        .map((minutes, index) => `<button class="rlb-activity__bucket rlb-activity__bucket--level-${minutes ? 2 : 0}${minutes ? '' : ' rlb-activity__bucket--empty'}" aria-label="2026-08-${String(index + 9).padStart(2, '0')}, ${minutes}m" title="2026-08-${String(index + 9).padStart(2, '0')} · ${minutes}m"><span class="rlb-activity__fill" style="height:${minutes ? Math.max(8, Math.round(minutes / 120 * 100)) : 0}%"></span></button>`)
+        .join('');
+    const geometry = await withChromium(
+        htmlWithLateHost(`<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:1120px"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="rlb-header__title">Logbook</h2></div></header><div class="rlb-summary"><dl class="rlb-overview" aria-label="Logbook overview"><div class="rlb-overview__item rlb-overview__panel"><dt class="rlb-overview__label">Today</dt><dd class="rlb-overview__value">9h 34m<span class="rlb-overview__context">2 active Sessions</span></dd></div><div class="rlb-overview__item rlb-overview__item--selected rlb-overview__panel"><dt class="rlb-overview__label">Last 7 days</dt><dd class="rlb-overview__value">21h 04m<span class="rlb-overview__context">7 days</span><div class="rlb-activity-rail" data-day-count="7" role="group" aria-label="Last 7 days activity">${buckets}</div></dd></div><div class="rlb-overview__item rlb-overview__panel"><dt class="rlb-overview__label">Tasks tracked</dt><dd class="rlb-overview__value">6<span class="rlb-overview__context">in selected period</span></dd></div></dl></div><div class="rlb-body"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-by-task"><div class="rlb-section__heading"><h3 class="rlb-section__title">By Task</h3></div><table class="rlb-table"><tbody><tr><td>Reading</td><td>2</td><td>1h</td><td>1h</td></tr></tbody></table></section></div></div></div>`),
+        `(() => {
+            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+            const overview = document.querySelector('.rlb-overview');
+            const panels = [...document.querySelectorAll('.rlb-overview__panel')];
+            const rail = document.querySelector('.rlb-activity-rail');
+            const chartBars = [...document.querySelectorAll('.rlb-activity__fill')];
+            const panelStyle = getComputedStyle(panels[0]);
+            const dialog = document.querySelector('.rlb-dialog');
+            const task = document.querySelector('.rlb-by-task');
+            return {
+                panelCount: panels.length,
+                panelGrid: getComputedStyle(overview).gridTemplateColumns,
+                panelBorder: panelStyle.borderTopWidth,
+                panelRadius: panelStyle.borderTopLeftRadius,
+                chart: rect(rail),
+                barRects: chartBars.map(rect),
+                barCount: chartBars.length,
+                taskTop: rect(task).top,
+                summaryBottom: rect(document.querySelector('.rlb-summary')).bottom,
+                noDaySection: !document.querySelector('.rlb-by-day'),
+                noAxis: getComputedStyle(rail, '::before').content === 'none' && getComputedStyle(rail, '::after').content === 'none',
+                dialogWidth: rect(dialog).width
+            };
+        })()`
+    );
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.equal(geometry.panelCount, 3, JSON.stringify(geometry));
+    assert.match(geometry.panelGrid, /\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px\s+\d+(?:\.\d+)?px/, JSON.stringify(geometry));
+    assert.equal(geometry.panelBorder, '1px', JSON.stringify(geometry));
+    assert.ok(Number.parseFloat(geometry.panelRadius) >= 6, JSON.stringify(geometry));
+    assert.ok(geometry.chart.height >= 56 && geometry.chart.height <= 84, JSON.stringify(geometry));
+    assert.equal(geometry.barCount, 7, JSON.stringify(geometry));
+    assert.ok(geometry.barRects.every(item => item.height <= geometry.chart.height && item.width > 0), JSON.stringify(geometry));
+    assert.equal(geometry.noDaySection, true, JSON.stringify(geometry));
+    assert.equal(geometry.noAxis, true, JSON.stringify(geometry));
+    assert.ok(geometry.dialogWidth >= 640 && geometry.dialogWidth <= 1240, JSON.stringify(geometry));
+    assert.ok(geometry.taskTop >= geometry.summaryBottom, JSON.stringify(geometry));
 });

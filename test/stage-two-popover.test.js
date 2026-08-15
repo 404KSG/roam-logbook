@@ -343,6 +343,72 @@ test('Shift+Click opens one shared Current Sessions sidebar without graph writes
     }
 });
 
+test('Shift+Click on a Session task uses Roam native block-sidebar API and action icons do not navigate', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    const nativeCalls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => nativeCalls.push({ action: 'open' }),
+        addWindow: async spec => nativeCalls.push({ action: 'addWindow', spec }),
+    };
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+
+    const popover = openPopover();
+    const row = popover.querySelector('.rlb-run');
+    let rowClicks = 0;
+    row.addEventListener('click', () => {
+        rowClicks += 1;
+    });
+
+    shiftClick(row.querySelector('.rlb-run__title'));
+    await settle();
+
+    assert.deepEqual(nativeCalls, [
+        { action: 'open' },
+        {
+            action: 'addWindow',
+            spec: { window: { type: 'block', 'block-uid': 'popover-task-01' } },
+        },
+    ]);
+    assert.equal(document.querySelector('.rlb-popover'), null);
+    assert.equal(rowClicks, 0, 'task navigation should not bubble into the Session row');
+
+    // A per-session action is an action, not a task navigation gesture.
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
+    const refreshed = openPopover();
+    const refreshedRow = refreshed.querySelector('.rlb-run');
+    let actionRowClicks = 0;
+    refreshedRow.addEventListener('click', () => {
+        actionRowClicks += 1;
+    });
+    click(refreshedRow.querySelector('[data-action="clock-out"]'));
+    await settle();
+    assert.equal(actionRowClicks, 0);
+});
+
+test('Shift+Click waits for Roam to mount the native sidebar host after open', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    const nativeCalls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => {
+            nativeCalls.push('open');
+            queueMicrotask(() => {
+                if (!document.querySelector('#right-sidebar-content')) {
+                    document.body.insertAdjacentHTML('beforeend', '<aside id="right-sidebar-content"></aside>');
+                }
+            });
+        },
+    };
+
+    shiftClick(topbarButton());
+    await settle();
+
+    const sidebar = document.querySelector('#roam-logbook-current-sessions');
+    assert.equal(nativeCalls.length, 1);
+    assert.ok(sidebar);
+    assert.equal(sidebar.parentElement.id, 'right-sidebar-content');
+});
+
 test('sidebar paused rows use the same actionable Resume icon as the popover', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);

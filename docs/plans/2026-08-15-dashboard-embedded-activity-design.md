@@ -1,7 +1,7 @@
 # Dashboard embedded activity design
 
 Date: 2026-08-15  
-Status: approved for beta.8 implementation
+Status: approved for beta.9 implementation
 
 ## Purpose
 
@@ -103,3 +103,39 @@ few-row and max-height many-row behavior, inline overview semantics, hidden
 activity labels, responsive widths, focusable buckets, and paused icon-only
 color/background priority. Existing task hierarchy, running/session actions,
 data-health behavior, sidebar behavior, and graph formats remain unchanged.
+
+## Beta.9 decision — Linear-inspired compact panels
+
+The beta.8 inline overview was semantically correct but visually too quiet: the
+values floated apart and the activity rail became a few unreadable pixels. Beta.9
+keeps direction A and the same three metrics, but gives each metric a small
+Linear-inspired stat panel. The selected-range panel receives a 68px activity
+chart with one equal-width bar per real bucket; it has no axis or gridlines, and
+each bucket remains a keyboard-focusable control with its exact date and
+duration in its accessible name and tooltip. The grid is `1 : 1.8 : 1` on
+desktop and stacks safely at narrow widths.
+
+The content flow is now:
+
+```text
+Header → three-panel Overview → Running panel (when present) → By Task panel
+```
+
+Running and By Task use a light container boundary, compact header/count, and
+subtle hover/hairline treatment. Hierarchy, Sessions/Own/Total semantics,
+multi-parent overlap, range filtering, and content-fit scrolling are unchanged.
+The redundant visible subtitle remains an accessible description only.
+
+Beta.9 also makes task navigation honor Roam's native right-sidebar contract:
+ordinary clicks use the main window, while a real Shift+Click invokes
+`rightSidebar.open()` and `addWindow({ window: { type: 'block', 'block-uid': uid } })`.
+The current-session panel still mounts only into the existing Roam sidebar host;
+because Roam may mount that host asynchronously, the extension waits briefly for
+the host before using its explicitly marked test/fallback shell. No graph block
+is created. All shared surface footer controls use one 32px action-height token
+so Refresh is aligned with the three text actions.
+
+The beta.8 pure inline rail is deprecated as a visual structure, not as a data
+source: the same daily series now powers the selected-range panel chart. This
+keeps the dashboard compact and list-first while making the range activity
+legible at normal desktop and high-DPI sizes.

@@ -13,7 +13,7 @@ import * as paused from './paused.js';
 import { formatElapsed, formatMinutesHuman } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
-import { openBlock } from './roam.js';
+import { openBlock, openBlockInRightSidebar } from './roam.js';
 import { mutationResultNotice } from './action-result.js';
 import {
     buildSessionSurfaceModel,
@@ -212,7 +212,21 @@ export function createTopbar({
             notices: surfaceNotices(),
             clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
             onRefresh: () => run(() => clock.refreshResult()),
-            onOpenTask: taskUid => {
+            onOpenTask: (taskUid, event) => {
+                if (event?.shiftKey) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closePopover({ restoreFocus: false });
+                    closeSidebar({ restoreFocus: false });
+                    void openBlockInRightSidebar(taskUid).then(result => {
+                        if (!result.ok) {
+                            actionNotice = result.message || 'Could not open this Task in the right sidebar.';
+                            renderSurfaces();
+                        }
+                    });
+                    return;
+                }
+                event?.stopPropagation();
                 closePopover({ restoreFocus: false });
                 closeSidebar({ restoreFocus: false });
                 void openBlock(taskUid);
@@ -303,14 +317,9 @@ export function createTopbar({
         }
     };
 
-    const openSidebar = () => {
-        if (sidebar?.isConnected) {
-            sidebar.querySelector('.rlb-surface__close, button')?.focus();
-            return;
-        }
-        closePopover({ restoreFocus: false });
-        requestRoamSidebarOpen();
-        sidebarHost = findSidebarHost();
+    const mountSidebar = host => {
+        if (destroyed || sidebar?.isConnected) return;
+        sidebarHost = host;
         sidebar = el('section', 'bp3-card rlb-sidebar');
         if (sidebarHost === document.body) sidebar.classList.add('rlb-sidebar--fallback');
         sidebar.id = SIDEBAR_ID;
@@ -321,6 +330,36 @@ export function createTopbar({
         clock.refresh();
         renderSidebar();
         sidebar.querySelector('button')?.focus();
+    };
+
+    const waitForSidebarHost = () =>
+        new Promise(resolve => {
+            let attempts = 0;
+            const probe = () => {
+                const host = findSidebarHost();
+                if (host !== document.body || attempts >= 2) {
+                    resolve(host);
+                    return;
+                }
+                attempts += 1;
+                setTimeout(probe, 0);
+            };
+            queueMicrotask(probe);
+        });
+
+    const openSidebar = () => {
+        if (sidebar?.isConnected) {
+            sidebar.querySelector('.rlb-surface__close, button')?.focus();
+            return;
+        }
+        closePopover({ restoreFocus: false });
+        requestRoamSidebarOpen();
+        const host = findSidebarHost();
+        if (host !== document.body) {
+            mountSidebar(host);
+            return;
+        }
+        void waitForSidebarHost().then(mountSidebar);
     };
 
     const togglePopover = event => {
