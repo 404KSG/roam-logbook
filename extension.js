@@ -610,7 +610,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.5";
+var PLUGIN_VERSION = "0.9.0-beta.6";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -3154,6 +3154,7 @@ var STYLES = `
    Blueprint button rules otherwise collapse the hit target to the icon's
    pseudo-element, which paints the hover state as a narrow vertical strip. */
 .rlb-topbar__button--icon-only {
+    position: relative;
     width: 32px !important;
     min-width: 32px !important;
     max-width: 34px !important;
@@ -3180,6 +3181,38 @@ var STYLES = `
 .rlb-topbar__button--icon-only:hover,
 .rlb-topbar__button--icon-only:focus-visible {
     background: rgba(167, 182, 194, 0.24) !important;
+}
+
+.rlb-topbar__button--paused {
+    --rlb-pause-accent: #a66a1f;
+    --rlb-pause-surface: rgba(184, 132, 55, 0.12);
+    background: var(--rlb-pause-surface) !important;
+    box-shadow: inset 0 0 0 1px rgba(184, 132, 55, 0.22);
+}
+
+.rlb-topbar__pause-badge {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgba(166, 106, 31, 0.32);
+    border-radius: 3px;
+    color: var(--rlb-pause-accent, #a66a1f);
+    background: var(--rlb-pause-surface, rgba(184, 132, 55, 0.12));
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.bp3-dark .rlb-topbar__button--paused {
+    --rlb-pause-accent: #d6a15d;
+    --rlb-pause-surface: rgba(214, 161, 93, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(214, 161, 93, 0.28);
 }
 
 /* The widget shares the left navigation row with Roam's expanding search.
@@ -3511,6 +3544,7 @@ var STYLES = `
     display: grid;
     grid-template-columns: 8px minmax(0, 1fr) max-content;
     align-items: start;
+    grid-auto-rows: minmax(0, auto);
     gap: 5px;
     padding: var(--rlb-surface-row-padding, 5px) 6px;
     border-radius: 3px;
@@ -3531,12 +3565,16 @@ var STYLES = `
 
 .rlb-run__body {
     min-width: 0;
+    display: contents;
 }
 
 .rlb-run__status {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
     width: 7px;
     height: 7px;
-    margin-top: 6px;
+    margin-top: 0;
     border-radius: 50%;
     background: #7a9e87;
     opacity: 0.75;
@@ -3547,6 +3585,8 @@ var STYLES = `
 }
 
 .rlb-run__title {
+    grid-column: 2;
+    grid-row: 1;
     display: block;
     max-width: 100%;
     overflow: hidden;
@@ -3559,6 +3599,8 @@ var STYLES = `
 }
 
 .rlb-run__meta {
+    grid-column: 2;
+    grid-row: 2;
     display: block;
     min-width: 0;
     font-size: var(--rlb-surface-meta-size, 10px);
@@ -3580,8 +3622,11 @@ var STYLES = `
 }
 
 .rlb-run__actions {
+    grid-column: 3;
+    grid-row: 1 / span 2;
     display: flex;
     align-items: center;
+    align-self: start;
     gap: 2px;
     flex: 0 0 auto;
 }
@@ -4344,6 +4389,69 @@ var STYLES = `
     opacity: 1;
 }
 
+/* ---- beta.6 quiet dashboard surface ----
+   Keep section boundaries as orientation cues, but let whitespace, alignment,
+   and hover carry the repeated structure. The chart owns one shared baseline;
+   individual tracks and zero-value bars stay visually silent. */
+.rlb-dashboard .rlb-header.bp3-dialog-header {
+    border-bottom: 0;
+}
+
+.rlb-dashboard .rlb-summary {
+    border-bottom: 0;
+    background: var(--rlb-surface);
+}
+
+.rlb-dashboard .rlb-stat {
+    border-right: 0;
+}
+
+.rlb-dashboard .rlb-table th,
+.rlb-dashboard .rlb-table td {
+    border-bottom: 0;
+}
+
+.rlb-dashboard .rlb-table tbody tr:hover td {
+    background: rgba(167, 182, 194, 0.12);
+}
+
+.rlb-dashboard .rlb-bars {
+    --rlb-bars-label-space: 14px;
+    position: relative;
+    border-bottom: 0;
+}
+
+.rlb-dashboard .rlb-bars::after {
+    position: absolute;
+    right: 0;
+    bottom: var(--rlb-bars-label-space);
+    left: 0;
+    height: 1px;
+    content: '';
+    background: var(--rlb-border-light);
+    pointer-events: none;
+}
+
+.rlb-dashboard .rlb-bar__track {
+    position: relative;
+    z-index: 1;
+    border-top: 0;
+    border-bottom: 0;
+}
+
+.rlb-dashboard .rlb-bar--empty .rlb-bar__fill {
+    width: 0;
+    height: 0 !important;
+    background: transparent;
+}
+
+.rlb-dashboard .rlb-tree__note {
+    margin-top: 6px;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    opacity: 0.72;
+}
+
 @media (max-width: 600px) {
     .rlb-root {
         padding: 0;
@@ -4660,6 +4768,7 @@ function createTopbar({
   let container = null;
   let timeNode = null;
   let iconNode = null;
+  let pauseBadgeNode = null;
   let parallelNode = null;
   let separatorNode = null;
   let buttonNode = null;
@@ -4945,6 +5054,8 @@ function createTopbar({
       return;
     if (mode === "idle")
       buttonNode.replaceChildren(iconNode);
+    else if (mode === "paused")
+      buttonNode.replaceChildren(iconNode, pauseBadgeNode);
     else if (mode === "parallel")
       buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     else
@@ -4961,17 +5072,20 @@ function createTopbar({
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
       buttonNode.classList.remove("rlb-topbar__button--parallel");
+      buttonNode.classList.toggle("rlb-topbar__button--paused", pausedItems.length > 0);
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       parallelNode.textContent = "";
       separatorNode.textContent = "";
-      syncButtonLayout("idle");
+      pauseBadgeNode.textContent = pausedItems.length > 0 ? "\u2161" : "";
+      syncButtonLayout(pausedItems.length > 0 ? "paused" : "idle");
       buttonNode.title = pausedItems.length ? `${sessionCount2(pausedItems.length)} Paused \u2014 click to resume or review.` : "Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
+    buttonNode.classList.remove("rlb-topbar__button--paused");
     const [first] = entries;
     const elapsed = now - first.start.getTime();
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
@@ -5016,6 +5130,8 @@ Pomodoro ${pomodoroLabel(target)} \u2014 ${overrun ? `over by ${formatElapsed(ov
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
     iconNode = el("span", "bp3-icon bp3-icon-history rlb-topbar__icon");
+    pauseBadgeNode = el("span", "rlb-topbar__pause-badge", "\u2161");
+    pauseBadgeNode.setAttribute("aria-hidden", "true");
     parallelNode = el("span", "rlb-topbar__parallel");
     separatorNode = el("span", "rlb-topbar__separator");
     separatorNode.setAttribute("aria-hidden", "true");
