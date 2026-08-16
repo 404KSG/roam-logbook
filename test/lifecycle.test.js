@@ -135,13 +135,12 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-topbar__separator\s*{[^}]*width: 3px[^}]*height: 3px[^}]*border-radius: 50%[^}]*background: currentColor[^}]*justify-self: center/s);
     assert.match(css, /\.rlb-topbar__time--neutral[^}]*#5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__time--neutral[^}]*#a7b6c2/s);
-    assert.match(css, /\.rlb-topbar\s*\{[^}]*--rlb-topbar-load-green:\s*#7eb794[^}]*--rlb-topbar-load-yellow:\s*#b38600[^}]*--rlb-topbar-load-red:\s*#c23030/s);
-    assert.match(css, /\.bp3-dark \.rlb-topbar\s*\{[^}]*--rlb-topbar-load-green:\s*#8ed0aa[^}]*--rlb-topbar-load-yellow:\s*#e6c35c[^}]*--rlb-topbar-load-red:\s*#ff7373/s);
+    assert.match(css, /\.rlb-topbar\s*\{[^}]*--rlb-topbar-load-yellow:\s*#b38600[^}]*--rlb-topbar-load-red:\s*#c23030/s);
+    assert.match(css, /\.bp3-dark \.rlb-topbar\s*\{[^}]*--rlb-topbar-load-yellow:\s*#e6c35c[^}]*--rlb-topbar-load-red:\s*#ff7373/s);
     assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__icon[^}]*color: #a7b6c2/s);
     assert.match(css, /\.rlb-topbar__button--paused\s*{[^}]*background: transparent/s);
     assert.match(css, /\.rlb-topbar__button--paused > \.rlb-topbar__icon\s*{[^}]*color: var\(--rlb-topbar-load-yellow\)/s);
-    assert.match(css, /\.rlb-topbar__parallel--load-green\s*{[^}]*color: var\(--rlb-topbar-load-green\)/s);
     assert.match(css, /\.rlb-topbar__parallel--load-yellow\s*{[^}]*color: var\(--rlb-topbar-load-yellow\)/s);
     assert.match(css, /\.rlb-topbar__parallel--load-red\s*{[^}]*color: var\(--rlb-topbar-load-red\)/s);
     assert.match(css, /\.rlb-topbar__parallel\s*{[^}]*color: #5c7080/s);

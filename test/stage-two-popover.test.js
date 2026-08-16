@@ -129,12 +129,12 @@ test('single running Session keeps Dashboard, Pause, and Refresh on one row', as
     assert.equal(popover.querySelectorAll('[data-session-state="paused"]').length, 1);
 });
 
-test('Session count tones use exact neutral, green, yellow, and red boundaries', () => {
+test('Session count tones keep 0–3 neutral and color only higher-load boundaries', () => {
     const cases = [
         [0, 'neutral', '0 Sessions'],
-        [1, 'green', '1 Session'],
-        [2, 'green', '2 Sessions'],
-        [3, 'green', '3 Sessions'],
+        [1, 'neutral', '1 Session'],
+        [2, 'neutral', '2 Sessions'],
+        [3, 'neutral', '3 Sessions'],
         [4, 'yellow', '4 Sessions'],
         [5, 'yellow', '5 Sessions'],
         [6, 'yellow', '6 Sessions'],
@@ -169,7 +169,10 @@ test('live Session count reclassifies only the count node without duplicate DOM'
     const countNode = () => button.querySelector('.rlb-topbar__parallel');
     const timeNode = () => button.querySelector('.rlb-topbar__time');
     assert.equal(countNode().textContent, '3 Sessions');
-    assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-green'));
+    assert.equal(
+        [...countNode().classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
+        false
+    );
     assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
 
     await clock.clockIn('popover-load-4', { now: new Date('2026-08-15T09:00:00') });
@@ -211,7 +214,10 @@ test('Pomodoro overrun stays on the timer and remains independent of Session cou
     const time = button.querySelector('.rlb-topbar__time');
     const count = button.querySelector('.rlb-topbar__parallel');
     assert.ok(time.classList.contains('rlb-topbar__time--overrun'));
-    assert.ok(count.classList.contains('rlb-topbar__parallel--load-green'));
+    assert.equal(
+        [...count.classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
+        false
+    );
     assert.equal(count.classList.contains('rlb-topbar__parallel--load-red'), false);
     assert.equal(button.querySelector('.rlb-topbar__separator').className, 'rlb-topbar__separator');
 

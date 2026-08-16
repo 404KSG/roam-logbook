@@ -39,7 +39,6 @@ export const sessionLoadTone = count => {
         : 0;
     if (normalized >= 7) return 'red';
     if (normalized >= 4) return 'yellow';
-    if (normalized >= 1) return 'green';
     return 'neutral';
 };
 
@@ -430,9 +429,11 @@ export function createTopbar({
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
         const overrun = pomodoro.isCycleOverrun(now);
         const stale = findStaleClocks(entries, now, staleHours()).length > 0;
-        parallelNode.className = `rlb-topbar__parallel rlb-topbar__parallel--load-${sessionLoadTone(
-            running ? entries.length : 0
-        )}`;
+        const loadTone = sessionLoadTone(running ? entries.length : 0);
+        parallelNode.className =
+            loadTone === 'neutral'
+                ? 'rlb-topbar__parallel'
+                : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
 
         if (!running) {
             buttonNode.classList.add('rlb-topbar__button--icon-only');

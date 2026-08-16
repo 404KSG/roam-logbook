@@ -131,19 +131,19 @@ test('topbar visible glyphs keep equal space around the separator', async t => {
     assert.equal(geometry.separator.width, 3, JSON.stringify(geometry));
 });
 
-test('Session load tones and paused clock use distinct light and dark theme colors', async t => {
+test('Session count keeps 0–3 neutral while higher load and paused clock retain their colors', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const theme of ['', 'bp3-dark']) {
         const geometry = await withChromium(
             htmlWithLateHost(
-                `<div class="${theme}"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel rlb-topbar__parallel--load-green">3 Sessions</span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><span class="rlb-topbar__parallel rlb-topbar__parallel--load-yellow">4 Sessions</span><span class="rlb-topbar__parallel rlb-topbar__parallel--load-red">7 Sessions</span></div></div>`
+                `<div class="${theme}"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><span class="rlb-topbar__parallel rlb-topbar__parallel--load-yellow">4 Sessions</span><span class="rlb-topbar__parallel rlb-topbar__parallel--load-red">7 Sessions</span></div></div>`
             ),
             `(() => {
                 const values = [...document.querySelectorAll('.rlb-topbar__parallel')];
                 const paused = document.querySelector('.rlb-topbar__button--paused .rlb-topbar__icon');
                 const separator = document.querySelector('.rlb-topbar__separator');
                 return {
-                    green: getComputedStyle(values[0]).color,
+                    neutral: getComputedStyle(values[0]).color,
                     yellow: getComputedStyle(values[1]).color,
                     red: getComputedStyle(values[2]).color,
                     paused: getComputedStyle(paused).color,
@@ -155,13 +155,11 @@ test('Session load tones and paused clock use distinct light and dark theme colo
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ theme, geometry }));
         const expected = theme === 'bp3-dark'
             ? {
-                  green: 'rgb(142, 208, 170)',
                   yellow: 'rgb(230, 195, 92)',
                   red: 'rgb(255, 115, 115)',
                   neutral: 'rgb(167, 182, 194)',
               }
             : {
-                  green: 'rgb(126, 183, 148)',
                   yellow: 'rgb(179, 134, 0)',
                   red: 'rgb(194, 48, 48)',
                   neutral: 'rgb(92, 112, 128)',
@@ -169,7 +167,7 @@ test('Session load tones and paused clock use distinct light and dark theme colo
         assert.deepEqual(
             geometry,
             {
-                green: expected.green,
+                neutral: expected.neutral,
                 yellow: expected.yellow,
                 red: expected.red,
                 paused: expected.yellow,

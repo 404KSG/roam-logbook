@@ -9,7 +9,6 @@ export const STYLE_ID = 'roam-logbook-styles';
 
 export const STYLES = `
 .rlb-topbar {
-    --rlb-topbar-load-green: #7eb794;
     --rlb-topbar-load-yellow: #b38600;
     --rlb-topbar-load-red: #c23030;
     display: flex;
@@ -92,7 +91,6 @@ export const STYLES = `
 }
 
 .bp3-dark .rlb-topbar {
-    --rlb-topbar-load-green: #8ed0aa;
     --rlb-topbar-load-yellow: #e6c35c;
     --rlb-topbar-load-red: #ff7373;
 }
@@ -197,10 +195,6 @@ export const STYLES = `
     white-space: nowrap;
 }
 
-.rlb-topbar__parallel--load-green {
-    color: var(--rlb-topbar-load-green);
-}
-
 .rlb-topbar__parallel--load-yellow {
     color: var(--rlb-topbar-load-yellow);
 }
@@ -225,10 +219,6 @@ export const STYLES = `
 .bp3-dark .rlb-topbar__parallel,
 .bp3-dark .rlb-topbar__separator {
     color: #a7b6c2;
-}
-
-.bp3-dark .rlb-topbar__parallel--load-green {
-    color: var(--rlb-topbar-load-green);
 }
 
 .bp3-dark .rlb-topbar__parallel--load-yellow {

@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.17**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.18**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -40,7 +40,7 @@ is reported as uncertain.
 12:34
 ```
 
-With parallel timing enabled, it follows the stable elapsed timer with only the active-session count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline. The visible count uses green for 1–3 Sessions, yellow for 4–6, and red for 7+; this is only a visual state and does not change Session behavior. When all Sessions are paused, the history-clock identity stays visible with a restrained yellow icon on the normal transparent surface and an explicit paused accessible name; there is no extra badge:
+With parallel timing enabled, it follows the stable elapsed timer with only the active-session count while preserving the same primary timer semantics — it does not sum the sessions. A centered CSS-drawn dot and uniform compact spacing keep the status on one visual baseline. The visible count keeps Roam's normal neutral color for 0–3 Sessions, uses yellow for 4–6, and red for 7+; this is only a visual state and does not change Session behavior. When all Sessions are paused, the history-clock identity stays visible with a restrained yellow icon on the normal transparent surface and an explicit paused accessible name; there is no extra badge:
 
 ```
 0:28 · 2 Sessions

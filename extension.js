@@ -664,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.17";
+var PLUGIN_VERSION = "0.9.0-beta.18";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -4041,7 +4041,6 @@ function presentMutationResult(result, notifyUser) {
 var STYLE_ID = "roam-logbook-styles";
 var STYLES = `
 .rlb-topbar {
-    --rlb-topbar-load-green: #7eb794;
     --rlb-topbar-load-yellow: #b38600;
     --rlb-topbar-load-red: #c23030;
     display: flex;
@@ -4124,7 +4123,6 @@ var STYLES = `
 }
 
 .bp3-dark .rlb-topbar {
-    --rlb-topbar-load-green: #8ed0aa;
     --rlb-topbar-load-yellow: #e6c35c;
     --rlb-topbar-load-red: #ff7373;
 }
@@ -4229,10 +4227,6 @@ var STYLES = `
     white-space: nowrap;
 }
 
-.rlb-topbar__parallel--load-green {
-    color: var(--rlb-topbar-load-green);
-}
-
 .rlb-topbar__parallel--load-yellow {
     color: var(--rlb-topbar-load-yellow);
 }
@@ -4257,10 +4251,6 @@ var STYLES = `
 .bp3-dark .rlb-topbar__parallel,
 .bp3-dark .rlb-topbar__separator {
     color: #a7b6c2;
-}
-
-.bp3-dark .rlb-topbar__parallel--load-green {
-    color: var(--rlb-topbar-load-green);
 }
 
 .bp3-dark .rlb-topbar__parallel--load-yellow {
@@ -6336,8 +6326,6 @@ var sessionLoadTone = (count) => {
     return "red";
   if (normalized2 >= 4)
     return "yellow";
-  if (normalized2 >= 1)
-    return "green";
   return "neutral";
 };
 var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
@@ -6692,9 +6680,8 @@ function createTopbar({
     const cycleElapsed = cycleElapsedMs(now);
     const overrun = isCycleOverrun(now);
     const stale = findStaleClocks(entries, now, staleHours()).length > 0;
-    parallelNode.className = `rlb-topbar__parallel rlb-topbar__parallel--load-${sessionLoadTone(
-      running2 ? entries.length : 0
-    )}`;
+    const loadTone = sessionLoadTone(running2 ? entries.length : 0);
+    parallelNode.className = loadTone === "neutral" ? "rlb-topbar__parallel" : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
       buttonNode.classList.remove("rlb-topbar__button--parallel");

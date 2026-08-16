@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0-beta.18 — 2026-08-16
+
+- Restored the topbar Session count to Roam's default neutral color for 0–3 Sessions; only 4–6 remains yellow and 7+ remains red.
+- Kept the change visual-only: no helper copy, limits, warnings, or Session behavior changed. Paused history clocks remain yellow and Pomodoro overrun remains independently red.
+
 ## 0.9.0-beta.17 — 2026-08-16
 
 - Added visual-only topbar Session load tones: 1–3 Sessions use the existing sync green, 4–6 use a restrained yellow, and 7+ use the existing overrun red; zero and all separators remain neutral, with singular/plural text unchanged.
