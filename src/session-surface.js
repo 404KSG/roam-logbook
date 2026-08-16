@@ -54,8 +54,6 @@ const renderRunningRow = (row, now, options) => {
     node.dataset.sessionState = 'running';
     node.dataset.clockUid = entry.clockUid;
 
-    const status = el('span', 'rlb-run__status rlb-run__status--running');
-    status.setAttribute('aria-hidden', 'true');
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     meta.dataset.clockUid = entry.clockUid;
@@ -102,7 +100,7 @@ const renderRunningRow = (row, now, options) => {
     );
     discard.dataset.action = 'discard';
     actions.append(checkout, discard);
-    node.append(status, body, actions);
+    node.append(body, actions);
     return node;
 };
 
@@ -112,8 +110,6 @@ const renderPausedRow = (row, now, options) => {
     node.dataset.sessionState = 'paused';
     node.dataset.taskUid = item.taskUid;
 
-    const status = el('span', 'rlb-run__status rlb-run__status--paused');
-    status.setAttribute('aria-label', 'Paused Task');
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
@@ -141,7 +137,7 @@ const renderPausedRow = (row, now, options) => {
     );
     resume.dataset.action = 'resume';
     actions.appendChild(resume);
-    node.append(status, body, actions);
+    node.append(body, actions);
     return node;
 };
 
@@ -152,8 +148,6 @@ const renderRecoveryRow = (row, options) => {
     node.dataset.recoveryState = item.recoveryState || 'conflict';
     node.dataset.taskUid = item.taskUid;
 
-    const status = el('span', 'rlb-run__status rlb-run__status--recovery');
-    status.setAttribute('aria-label', 'Recovery');
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     const reason = item.recoveryIssue === 'missing-clockUid'
@@ -177,7 +171,7 @@ const renderRecoveryRow = (row, options) => {
     );
     retry.dataset.action = 'recovery';
     actions.appendChild(retry);
-    node.append(status, body, actions);
+    node.append(body, actions);
     return node;
 };
 

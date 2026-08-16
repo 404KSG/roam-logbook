@@ -614,7 +614,7 @@ test('shared Session surfaces use one compact accessible list group for session 
     assert.ok(
         rows.every(
             row =>
-                row.querySelector('.rlb-run__status') &&
+                !row.querySelector('.rlb-run__status') &&
                 row.querySelector('.rlb-run__title') &&
                 row.querySelector('.rlb-run__meta') &&
                 row.querySelector('.rlb-run__actions')
@@ -676,11 +676,7 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
 
     const pausedRows = [...surface.querySelectorAll('[data-session-state="paused"]')];
     assert.equal(pausedRows.length, 2);
-    assert.ok(
-        pausedRows.every(
-            row => row.querySelector('.rlb-run__status').getAttribute('aria-label') === 'Paused Task'
-        )
-    );
+    assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__status')));
     assert.equal(surface.querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
     const resumeAll = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
     assert.ok(resumeAll);
@@ -772,7 +768,7 @@ test('pending Resume conflicts stay visible as retryable Recovery rows', async (
     assert.ok(recovery, 'a pending conflict is rendered instead of disappearing');
     assert.equal(recovery.dataset.recoveryState, 'conflict');
     assert.equal(recovery.classList.contains('rlb-run--inline-meta'), false);
-    assert.equal(recovery.querySelector('.rlb-run__status').getAttribute('aria-label'), 'Recovery');
+    assert.equal(recovery.querySelector('.rlb-run__status'), null);
     assert.deepEqual([...recovery.querySelector('.rlb-run__meta').children].map(node => node.className), [
         'rlb-run__meta-line rlb-run__meta-primary',
         'rlb-run__meta-line rlb-run__started',

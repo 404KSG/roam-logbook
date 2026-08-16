@@ -413,34 +413,33 @@ test('beta.14 compact overview becomes two-by-two on mobile without overflow', a
     assert.equal(geometry.noOverflow, true, JSON.stringify(geometry));
 });
 
-test('session status bullet aligns with the title row rather than the whole row', async t => {
+test('Session rows omit status bullets and align content in a two-column grid', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Task"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { top:r.top, bottom:r.bottom, left:r.left, right:r.right, width:r.width, height:r.height }; };
             const row = document.querySelector('.rlb-run');
-            const status = document.querySelector('.rlb-run__status');
             const title = document.querySelector('.rlb-run__title');
             const meta = document.querySelector('.rlb-run__meta');
             const actions = document.querySelector('.rlb-run__actions');
             const bodyStyle = getComputedStyle(document.querySelector('.rlb-run__body'));
-            const statusStyle = getComputedStyle(status);
             const titleRect = rect(title);
-            const statusRect = rect(status);
             const rowRect = rect(row);
             return {
-                status: statusRect,
+                statusCount: document.querySelectorAll('.rlb-run__status').length,
                 title: titleRect,
                 meta: rect(meta),
                 actions: rect(actions),
                 row: rowRect,
                 bodyDisplay: bodyStyle.display,
-                statusGridRow: statusStyle.gridRow,
-                statusAlign: statusStyle.alignSelf,
-                statusMarginTop: statusStyle.marginTop,
-                centeredOnTitle: Math.abs((statusRect.top + statusRect.height / 2) - (titleRect.top + titleRect.height / 2)) <= 2,
-                notCenteredOnWholeRow: Math.abs((statusRect.top + statusRect.height / 2) - (rowRect.top + rowRect.height / 2)) > 2,
+                titleGridColumn: getComputedStyle(title).gridColumn,
+                titleGridRow: getComputedStyle(title).gridRow,
+                metaGridColumn: getComputedStyle(meta).gridColumn,
+                metaGridRow: getComputedStyle(meta).gridRow,
+                actionsGridColumn: getComputedStyle(actions).gridColumn,
+                actionsGridRow: getComputedStyle(actions).gridRow,
+                titleStartsAtRowContent: Math.abs(titleRect.left - (rowRect.left + 6)) <= 1,
                 metadataBelowTitle: meta.getBoundingClientRect().top >= titleRect.bottom - .5,
                 titleBeforeActions: titleRect.right <= rect(actions).left + .5
             };
@@ -448,11 +447,14 @@ test('session status bullet aligns with the title row rather than the whole row'
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.equal(geometry.bodyDisplay, 'contents', JSON.stringify(geometry));
-    assert.equal(geometry.statusGridRow, '1', JSON.stringify(geometry));
-    assert.equal(geometry.statusAlign, 'center', JSON.stringify(geometry));
-    assert.equal(geometry.statusMarginTop, '0px', JSON.stringify(geometry));
-    assert.equal(geometry.centeredOnTitle, true, JSON.stringify(geometry));
-    assert.equal(geometry.notCenteredOnWholeRow, true, JSON.stringify(geometry));
+    assert.equal(geometry.statusCount, 0, JSON.stringify(geometry));
+    assert.equal(geometry.titleGridColumn, '1', JSON.stringify(geometry));
+    assert.equal(geometry.titleGridRow, '1', JSON.stringify(geometry));
+    assert.equal(geometry.metaGridColumn, '1', JSON.stringify(geometry));
+    assert.equal(geometry.metaGridRow, '2', JSON.stringify(geometry));
+    assert.equal(geometry.actionsGridColumn, '2', JSON.stringify(geometry));
+    assert.equal(geometry.actionsGridRow, '1 / span 2', JSON.stringify(geometry));
+    assert.equal(geometry.titleStartsAtRowContent, true, JSON.stringify(geometry));
     assert.equal(geometry.metadataBelowTitle, true, JSON.stringify(geometry));
     assert.equal(geometry.titleBeforeActions, true, JSON.stringify(geometry));
 });
@@ -462,30 +464,33 @@ test('Session task title is the restrained link target without a leading open ic
     const longTitle = 'A long Session title that remains accessible while truncating cleanly';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:320px"><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div></div>`
+            `<div class="rlb-popover" style="width:320px"><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
             const title = document.querySelector('.rlb-run__title');
-            const status = document.querySelector('.rlb-run__status');
             const actions = document.querySelector('.rlb-run__actions');
+            const row = document.querySelector('.rlb-run');
             const titleStyle = getComputedStyle(title);
             const beforeStyle = getComputedStyle(title, '::before');
             title.focus();
             const focusStyle = getComputedStyle(title);
             const titleRect = rect(title);
-            const statusRect = rect(status);
             const actionsRect = rect(actions);
+            const rowRect = rect(row);
             return {
                 hasOpenIconClass: title.classList.contains('bp3-icon-document-open'),
                 beforeContent: beforeStyle.content,
                 beforeDisplay: beforeStyle.display,
                 title: titleRect,
-                status: statusRect,
                 actions: actionsRect,
-                titleStartsAfterStatus: titleRect.left >= statusRect.right,
+                statusCount: document.querySelectorAll('.rlb-run__status').length,
+                titleGridColumn: getComputedStyle(title).gridColumn,
+                actionsGridColumn: getComputedStyle(actions).gridColumn,
+                titleStartsAtRowContent: Math.abs(titleRect.left - (rowRect.left + 6)) <= 1,
                 titleEndsBeforeActions: titleRect.right <= actionsRect.left + .5,
                 titleClips: title.scrollWidth > title.clientWidth,
+                rowInsidePopover: rowRect.left >= 0 && rowRect.right <= 320.5,
                 linkCue: titleStyle.textDecorationLine.includes('underline'),
                 focusRing: focusStyle.outlineStyle !== 'none' && parseFloat(focusStyle.outlineWidth) > 0,
                 accessibleName: title.getAttribute('aria-label'),
@@ -497,9 +502,13 @@ test('Session task title is the restrained link target without a leading open ic
     assert.equal(geometry.hasOpenIconClass, false, JSON.stringify(geometry));
     assert.equal(geometry.beforeContent, 'none', JSON.stringify(geometry));
     assert.equal(geometry.beforeDisplay, 'none', JSON.stringify(geometry));
-    assert.equal(geometry.titleStartsAfterStatus, true, JSON.stringify(geometry));
+    assert.equal(geometry.statusCount, 0, JSON.stringify(geometry));
+    assert.equal(geometry.titleGridColumn, '1', JSON.stringify(geometry));
+    assert.equal(geometry.actionsGridColumn, '2', JSON.stringify(geometry));
+    assert.equal(geometry.titleStartsAtRowContent, true, JSON.stringify(geometry));
     assert.equal(geometry.titleEndsBeforeActions, true, JSON.stringify(geometry));
     assert.equal(geometry.titleClips, true, JSON.stringify(geometry));
+    assert.equal(geometry.rowInsidePopover, true, JSON.stringify(geometry));
     assert.equal(geometry.linkCue, true, JSON.stringify(geometry));
     assert.equal(geometry.focusRing, true, JSON.stringify(geometry));
     assert.match(geometry.accessibleName, /^Open this block:/, JSON.stringify(geometry));
@@ -588,7 +597,7 @@ test('popover rows stay within 340px and 320px with two metadata nodes and a two
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
@@ -615,7 +624,6 @@ test('Session metadata stays on one inline row without crowding actions', async 
                 <div class="rlb-popover" style="width:${width}px">
                     <div class="rlb-surface__list" role="group" aria-label="Current Sessions">
                         <div class="rlb-run rlb-run--inline-meta" data-session-state="running">
-                            <span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span>
                             <div class="rlb-run__body">
                                 <button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: A long Session title" aria-label="Open this block: A long Session title">A long Session title</button>
                                 <div class="rlb-run__meta">
@@ -630,7 +638,6 @@ test('Session metadata stays on one inline row without crowding actions', async 
                             </div>
                         </div>
                         <div class="rlb-run rlb-run--paused" data-session-state="paused">
-                            <span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Task"></span>
                             <div class="rlb-run__body">
                                 <button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: Reading" aria-label="Open this block: Reading">Reading</button>
                                 <div class="rlb-run__meta">
@@ -664,8 +671,6 @@ test('Session metadata stays on one inline row without crowding actions', async 
                 const titleRect = rect(title);
                 const rowRect = rect(running);
                 const popoverRect = rect(document.querySelector('.rlb-popover'));
-                const status = running.querySelector('.rlb-run__status');
-                const statusRect = rect(status);
                 return {
                     width: ${width},
                     metaDisplay: getComputedStyle(meta).display,
@@ -673,11 +678,10 @@ test('Session metadata stays on one inline row without crowding actions', async 
                     runningInlineMeta: running.classList.contains('rlb-run--inline-meta'),
                     metaGridColumn: getComputedStyle(meta).gridColumn,
                     metaGridRow: getComputedStyle(meta).gridRow,
-                    statusGridRow: getComputedStyle(status).gridRow,
-                    statusTitleCenterDelta: Math.abs(
-                        (statusRect.top + statusRect.height / 2) - (titleRect.top + titleRect.height / 2)
-                    ),
+                    statusCount: document.querySelectorAll('.rlb-run__status').length,
+                    titleGridColumn: getComputedStyle(title).gridColumn,
                     titleGridRow: getComputedStyle(title).gridRow,
+                    actionsGridColumn: getComputedStyle(actions).gridColumn,
                     actionsGridRow: getComputedStyle(actions).gridRow,
                     childOrder: [...meta.children].map(node => node.className),
                     semanticNodeCount: meta.querySelectorAll('.rlb-run__meta-line').length,
@@ -695,6 +699,7 @@ test('Session metadata stays on one inline row without crowding actions', async 
                     titleInsideActions: titleRect.right <= actionRect.left + 0.5,
                     metaInsideRow: metaRect.left >= rowRect.left - 0.5 && metaRect.right <= rowRect.right + 0.5 && metaRect.top >= rowRect.top - 0.5 && metaRect.bottom <= rowRect.bottom + 0.5,
                     metaInsidePopover: metaRect.left >= popoverRect.left - 0.5 && metaRect.right <= popoverRect.right + 0.5 && metaRect.top >= popoverRect.top - 0.5 && metaRect.bottom <= popoverRect.bottom + 0.5,
+                    rowInsidePopover: rowRect.left >= popoverRect.left - 0.5 && rowRect.right <= popoverRect.right + 0.5,
                     metaNoScrollOverflow: meta.scrollWidth <= meta.clientWidth + 0.5,
                     primaryNoScrollOverflow: primary.scrollWidth <= primary.clientWidth + 0.5,
                     startedNoScrollOverflow: started.scrollWidth <= started.clientWidth + 0.5,
@@ -709,11 +714,12 @@ test('Session metadata stays on one inline row without crowding actions', async 
         assert.equal(geometry.metaDisplay, 'flex', JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaWrap, 'nowrap', JSON.stringify({ width, geometry }));
         assert.equal(geometry.runningInlineMeta, true, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.metaGridColumn, '2 / 4', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaGridColumn, '1 / 3', JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaGridRow, '2', JSON.stringify({ width, geometry }));
-        assert.equal(geometry.statusGridRow, '1', JSON.stringify({ width, geometry }));
-        assert.ok(geometry.statusTitleCenterDelta <= 1, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.statusCount, 0, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.titleGridColumn, '1', JSON.stringify({ width, geometry }));
         assert.equal(geometry.titleGridRow, '1', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.actionsGridColumn, '2', JSON.stringify({ width, geometry }));
         assert.equal(geometry.actionsGridRow, '1', JSON.stringify({ width, geometry }));
         assert.deepEqual(
             geometry.childOrder,
@@ -733,6 +739,7 @@ test('Session metadata stays on one inline row without crowding actions', async 
         assert.equal(geometry.metaBelowTitle, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaExtendsUnderActions, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.titleInsideActions, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.rowInsidePopover, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaInsideRow, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaInsidePopover, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaNoScrollOverflow, true, JSON.stringify({ width, geometry }));
@@ -968,7 +975,7 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
     const longTitle = 'A long Session title that remains accessible while ellipsizing visually';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`
+            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -979,8 +986,8 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
             const rowRects = rows.map(rect);
             const footerRects = [...footer.querySelectorAll('button')].map(rect);
             const first = rows[0];
-            const bullet = rect(first.querySelector('.rlb-run__status'));
             const title = rect(first.querySelector('.rlb-run__title'));
+            const firstRow = rect(first);
             const listStyle = getComputedStyle(list);
             const footerStyle = getComputedStyle(footer);
             return {
@@ -991,7 +998,8 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
                 rowCount: rows.length,
                 rowHeights: rowRects.map(item => item.height),
                 rowGap: parseFloat(listStyle.rowGap) || 0,
-                bulletTitleDelta: Math.abs((bullet.top + bullet.height / 2) - (title.top + title.height / 2)),
+                statusCount: list.querySelectorAll('.rlb-run__status').length,
+                titleStartsAtRowContent: Math.abs(title.left - (firstRow.left + 6)) <= 1,
                 footerListGap: rect(footer).top - rect(list).bottom,
                 footerHeights: footerRects.map(item => item.height),
                 footerHeightDelta: Math.max(...footerRects.map(item => item.height)) - Math.min(...footerRects.map(item => item.height)),
@@ -1007,7 +1015,8 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
     assert.equal(geometry.rowCount, 2, JSON.stringify(geometry));
     assert.ok(geometry.rowHeights.every(height => height >= 42 && height <= 76), JSON.stringify(geometry));
     assert.ok(geometry.rowGap <= 8, JSON.stringify(geometry));
-    assert.ok(geometry.bulletTitleDelta <= 2, JSON.stringify(geometry));
+    assert.equal(geometry.statusCount, 0, JSON.stringify(geometry));
+    assert.equal(geometry.titleStartsAtRowContent, true, JSON.stringify(geometry));
     assert.ok(geometry.footerListGap <= 14, JSON.stringify(geometry));
     assert.ok(geometry.footerHeightDelta <= 1, JSON.stringify(geometry));
     assert.match(geometry.footerRows, /32px/);

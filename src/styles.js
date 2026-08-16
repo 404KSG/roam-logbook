@@ -572,7 +572,7 @@ export const STYLES = `
 
 .rlb-run {
     display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) max-content;
     align-items: start;
     grid-auto-rows: minmax(0, auto);
     gap: 5px;
@@ -598,34 +598,8 @@ export const STYLES = `
     display: contents;
 }
 
-.rlb-run__status {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: center;
-    width: 8px;
-    height: 8px;
-    margin-top: 0;
-    border-radius: 50%;
-    background: var(--rlb-session-running, #7eb794);
-    opacity: 1;
-    border: 0;
-    box-shadow: none;
-}
-
-.rlb-run__status--paused {
-    background: #8a9ba8;
-}
-
-.rlb-run__status--recovery {
-    background: #d9822b;
-}
-
-.bp3-dark .rlb-run__status--recovery {
-    background: #f29d49;
-}
-
 .bp3-button.bp3-minimal.rlb-run__title {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 1;
     display: block;
     max-width: 100%;
@@ -662,7 +636,7 @@ export const STYLES = `
 }
 
 .rlb-run__meta {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 2;
     display: block;
     min-width: 0;
@@ -685,18 +659,13 @@ export const STYLES = `
 }
 
 .rlb-run--inline-meta .rlb-run__meta {
-    grid-column: 2 / 4;
+    grid-column: 1 / 3;
     display: flex;
     align-items: baseline;
     flex-wrap: nowrap;
     gap: 0;
     max-width: 100%;
     white-space: nowrap;
-}
-
-/* Keep the status dot visually centered on the title while actions stay in row 1. */
-.rlb-run--inline-meta .rlb-run__status {
-    transform: translateY(-6px);
 }
 
 .rlb-run--inline-meta .rlb-run__meta-line {
@@ -720,7 +689,7 @@ export const STYLES = `
 }
 
 .rlb-run__actions {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1 / span 2;
     display: flex;
     align-items: center;
