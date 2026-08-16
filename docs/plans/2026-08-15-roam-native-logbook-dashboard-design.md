@@ -3,6 +3,11 @@
 Date: 2026-08-15  
 Status: historical design baseline; beta.19 uses the final single-view simplification
 
+> Historical record. The Dashboard simplification remains useful background, but
+> the sections called out below contain decisions superseded by beta.10 and the
+> adopted [beta.21 hardening design](2026-08-16-beta-21-hardening-design.md).
+> They are retained as research history, not current authority.
+
 ## Beta.19 final simplification
 
 The Dashboard is intentionally one list-first surface. The Analytics/chart view,
@@ -15,6 +20,19 @@ date range, Refresh, and Close controls.
 This fork preserves Roam Logbook's existing data model and core time-tracking behavior while refining the presentation for Roam's native visual language. Existing `LOGBOOK::` drawers and `CLOCK::` entries remain the source of truth. Context-menu clocking, Command Palette actions, running-clock recovery, single/multiple-clock settings, stale detection, reference/embed source resolution, and dashboard date, hierarchy, and roll-up behavior remain compatible. Pomodoro becomes an automatic per-Session target rather than a manual mode. A durable bulk Pause/Resume layer is added through graph-scoped extension settings; it closes and reopens real CLOCK Sessions rather than changing their format.
 
 This release does not add inline TODO controls, global keyboard listeners, new graph queries, a secondary dashboard mode, network access, or code from Roam Focus Logbook.
+
+### Superseded historical decisions retained for traceability
+
+- The Scope sentence saying Pomodoro becomes an automatic per-Session target is
+  superseded by the shared-cycle decision recorded in beta.10 and reaffirmed in
+  beta.21. Legacy per-session target fields are compatibility-only.
+- The Scope sentence saying there are no new graph queries predates the bounded
+  completion Pull Watch adapter. Beta.21 uses the existing `roam.js` adapter and
+  bounded graph observation for DONE reconciliation; it does not add a feature
+  surface or a polling loop.
+- The old per-clock Pomodoro remainder/suppression behavior in the durable pause
+  and automatic Pomodoro sections below is historical and no longer governs
+  Pause/Resume.
 
 ## Beta.12 integration notes
 
@@ -64,16 +82,23 @@ The running topbar has no icon or status-dot DOM. Emoji, external icons, and cus
 - Responsive layouts keep every required action available.
 - Clock-in and clock-out commands remain registered through `extensionAPI.ui.commandPalette` without a default shortcut. Users configure shortcuts in Roam Settings → Hotkeys. No global `keydown` shortcut is introduced.
 
-## Durable bulk pause semantics
+## Durable bulk pause semantics (superseded historical design)
 
 - Pause All snapshots every running Task, closes its open CLOCK at the same current time, and stores a versioned paused batch in graph-scoped extension settings. Paused time therefore never accrues.
 - Resume All starts a fresh CLOCK Session for every valid paused Task. The extra Session is intentional and visible in the dashboard.
 - An unfinished automatic Pomodoro stores its exact remaining milliseconds and continues on the new Session; completed or overrun targets persist an explicit suppressed assignment and do not restart. Display labels format remainders as clean durations rather than decimal minutes.
+
+> Superseded by beta.10/beta.21: this per-clock remainder and suppression rule is
+> retained only to show the rejected historical design. The current contract is
+> one shared cycle for the resumed batch; the legacy map is compatibility-only.
 - Reload and crash recovery read the saved batch. A Task already running is consumed without duplication; missing Tasks are pruned with a warning; failed clock-in records alone remain for retry.
 - Resume All is explicit consent to restore the complete batch. When parallel clocks are required, it enables the graph-scoped multiple-clock setting before any clock write, resumes the batch, and shows a concise notice rather than disabling the action.
 - A later Pause All merges by canonical Task UID. Permanent Clock Out All clears the paused batch as well as closing current clocks.
 
-## Automatic Pomodoro semantics
+## Automatic Pomodoro semantics (superseded historical design)
+
+> Superseded by beta.10 and beta.21. The per-Session target model below is kept
+> as historical research and must not be used to define current behavior.
 
 - Every newly started or graph-discovered open CLOCK receives the current global duration, measured from that Session's original start. The default is 30 minutes and the native settings input accepts arbitrary positive minute values.
 - The captured target belongs to that Session. Editing the global duration affects future Sessions only; passing the target colors elapsed time red but never closes the CLOCK.

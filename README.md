@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.20**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.21**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -19,7 +19,7 @@ Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer und
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork is intentionally submitted as a **Draft preview** first. Until it is accepted, use the shorthand published on that Draft PR if you want to smoke-test it in a non-critical graph.
+- The Roam Depot entry for this fork remains a **Draft preview**. This beta.21 metadata pass does not publish or modify the external PR; until acceptance, use the shorthand published on that Draft PR only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -34,7 +34,7 @@ is reported as uncertain.
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
 
-**Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. With one running task, it becomes only that task's live elapsed time:
+**Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. With one running Session, it becomes only that Session's live elapsed time:
 
 ```
 12:34
@@ -50,11 +50,22 @@ Task names, banked totals, the shared Pomodoro cycle, and actions stay in the to
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
 
-Resume creates a fresh shared Pomodoro cycle from zero for each valid Task; it never restores an old per-clock remainder. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
+Resume starts one fresh shared Pomodoro cycle for the resumed batch; it never restores an old per-clock remainder or creates a separate cycle per Task. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
+
+**DONE completion** — changing a watched Task to `DONE` closes its confirmed
+running Sessions and the confirmed running Sessions of its descendants. A parent
+without its own Session still closes its running child tree; siblings and
+unrelated parallel work stay running. The action re-reads the graph inside the
+same mutation queue, uses one close timestamp, and reports partial or uncertain
+work as retryable. Reload reconciliation catches DONE Tasks changed while the
+extension was unloaded. Pull Watches are bounded to running Tasks and known
+ancestors; if Roam's watch API is unavailable, safe refresh/reload recovery
+remains available without speculative graph writes. Manual single-Session Check
+Out keeps its exact one-Session meaning.
 
 **Shared Pomodoro cycle** — when the first confirmed Session starts, the extension freezes the configured threshold (30 minutes by default) and starts one cycle from that action instant. The topbar shows that cycle's elapsed time, not a historical task total or the age of an arbitrary parallel Session. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. Adding or removing parallel Sessions does not reset the cycle, and changing the setting affects the next cycle. A reload restores a valid persisted cycle or conservatively uses the earliest open CLOCK; a confirmed empty graph clears it. The old `pomodoroTargets` setting is retained only as deprecated compatibility state and no longer controls the visible timer.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. It is a single list-first view: four compact metrics (Today with active-Session context, the current-range total, Sessions, and Tasks tracked), followed by Running when present and the By Task tree. The Sessions and Tasks tracked metrics show the active date-range name directly (`Last 7 days`, `Last 30 days`, or `All time`). The range total needs no repeated helper text because its label already names the range. The header contains only the date-range selector, Refresh, and Close controls. Normal and Shift+Click task links retain Roam navigation and native right-sidebar behavior. The overlay is fixed to the viewport, locks background document scroll while open, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. It is one chart-free, list-first view: exactly four compact metrics (Today with active-Session context, the current-range total, Sessions, and Tasks tracked), followed by Running when present and the By Task tree. There is no Analytics/chart view, By Day chart, category view, or secondary Dashboard mode. The Sessions and Tasks tracked metrics show the active date-range name directly (`Last 7 days`, `Last 30 days`, or `All time`). The range total needs no repeated helper text because its label already names the range. The header contains only the date-range selector, Refresh, and Close controls. Only task-title Shift+Click uses Roam's native right-sidebar block-window API; topbar Shift+Click is inert, while ordinary task clicks retain main-window navigation. The overlay is fixed to the viewport, locks background document scroll while open, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
 
 ### Custom hotkeys
 
@@ -155,6 +166,15 @@ alongside the source. The local `verify:workflow` command is a static contract
 check; GitHub Actions additionally runs the real pinned Docker image
 `rhysd/actionlint:1.7.7`. The local check does not download or execute Docker.
 
+`src/roam.js` is the adapter boundary for `window.roamAlphaAPI`: it validates
+graph reads and exposes graph writes, Pull Watch lifecycle, and native block
+navigation to the other modules. UI and mutation modules do not call Roam's
+global API directly. This beta.21 documentation/metadata pass intentionally
+does not rebuild the root `extension.js`; a separately authorized release build
+must regenerate and verify it before Depot publication. The existing esbuild
+advisory is dev-only build maintenance, not a runtime extension dependency
+exposure, and no dependency upgrade is included here.
+
 ### Release checklist
 
 - Source commit and generated `extension.js` are present and `npm run check` is green.
@@ -168,6 +188,9 @@ check; GitHub Actions additionally runs the real pinned Docker image
   configured graph after reading its guidelines. The verifier is read-only;
   automated tests use a fake adapter and must not be described as live Roam
   verification.
+- Keep Roam Depot status **Draft** until the clean bundle and live-smoke gates
+  pass; this task does not touch the external PR. Record the current suite result
+  from the clean run rather than maintaining a brittle exact test count here.
 
 The performance tests are synthetic query-count and complexity-regression stubs,
 not benchmarks of a real Roam graph. The final live verification reads the

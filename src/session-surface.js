@@ -12,6 +12,7 @@ import { findStaleClocks } from './stats.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'Roam Logbook';
 
 const rowFigures = (entry, now) => {
@@ -101,11 +102,11 @@ const renderPausedRow = (row, now, options) => {
     node.dataset.taskUid = item.taskUid;
 
     const status = el('span', 'rlb-run__status rlb-run__status--paused');
-    status.setAttribute('aria-label', 'Paused Session');
+    status.setAttribute('aria-label', 'Paused Task');
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
-    const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : 'Paused Session';
+    const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : 'Paused Task';
     const pausedNode = el(
         'time',
         'rlb-run__meta-line rlb-run__started',
@@ -133,8 +134,50 @@ const renderPausedRow = (row, now, options) => {
     return node;
 };
 
+const renderRecoveryRow = (row, options) => {
+    const item = row.item;
+    const node = el('div', 'rlb-run rlb-run--recovery');
+    node.dataset.sessionState = 'recovery';
+    node.dataset.recoveryState = item.recoveryState || 'conflict';
+    node.dataset.taskUid = item.taskUid;
+
+    const status = el('span', 'rlb-run__status rlb-run__status--recovery');
+    status.setAttribute('aria-label', 'Recovery');
+    const body = el('div', 'rlb-run__body');
+    const meta = el('div', 'rlb-run__meta');
+    const reason = item.recoveryIssue === 'missing-clockUid'
+        ? 'Exact Session association is missing.'
+        : 'Exact Session association needs review.';
+    meta.append(
+        el('div', 'rlb-run__meta-line rlb-run__meta-primary', 'Recovery required'),
+        el('div', 'rlb-run__meta-line rlb-run__started', reason)
+    );
+    body.append(renderTitle(row, options.onOpenTask), meta);
+
+    const actions = el('div', 'rlb-run__actions');
+    const retry = button(
+        'bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-run__recovery',
+        '',
+        event => {
+            event.stopPropagation();
+            void options.onRecovery?.(item, event);
+        },
+        { title: 'Retry Recovery' }
+    );
+    retry.dataset.action = 'recovery';
+    actions.appendChild(retry);
+    node.append(status, body, actions);
+    return node;
+};
+
 /** Build the small, shared model consumed by both the popover and sidebar. */
-export function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, staleHours = 8 }) {
+export function buildSessionSurfaceModel({
+    entries = [],
+    pausedItems = [],
+    pendingItems = [],
+    now,
+    staleHours = 8,
+}) {
     const currentNow = now instanceof Date ? now : new Date(now);
     const runningRows = entries.map(entry => ({
         kind: 'running',
@@ -150,13 +193,24 @@ export function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, 
         title: item.title,
         item,
     }));
+    const recoveryRows = pendingItems
+        .filter(item => item?.recoveryState === 'conflict')
+        .map(item => ({
+            kind: 'recovery',
+            key: `recovery:${item.taskUid}`,
+            taskUid: item.taskUid,
+            title: item.title,
+            item,
+        }));
     return {
         now: currentNow,
         entries: entries.slice(),
         pausedItems: pausedItems.slice(),
-        rows: [...runningRows, ...pausedRows],
+        pendingItems: pendingItems.slice(),
+        rows: [...runningRows, ...pausedRows, ...recoveryRows],
         runningCount: entries.length,
         pausedCount: pausedItems.length,
+        recoveryCount: recoveryRows.length,
         staleEntries: findStaleClocks(entries, currentNow, staleHours),
     };
 }
@@ -165,7 +219,9 @@ const surfaceTitle = model =>
     model.runningCount > 0
         ? `${sessionCount(model.runningCount)} Running`
         : model.pausedCount > 0
-          ? `${sessionCount(model.pausedCount)} Paused`
+          ? `${taskCount(model.pausedCount)} Paused`
+          : model.recoveryCount > 0
+            ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? 'y' : 'ies'} Required`
           : SURFACE_TITLE;
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
@@ -213,13 +269,22 @@ export function renderSessionSurface(root, model, options = {}) {
             sessionList.appendChild(
                 row.kind === 'running'
                     ? renderRunningRow(row, model.now, options)
-                    : renderPausedRow(row, model.now, options)
+                    : row.kind === 'paused'
+                      ? renderPausedRow(row, model.now, options)
+                      : renderRecoveryRow(row, options)
             );
         }
     }
 
     for (const notice of options.notices || []) {
-        if (notice) root.appendChild(el('div', 'rlb-popover__notice bp3-text-small', notice));
+        const message = typeof notice === 'string' ? notice : notice?.message;
+        if (!message) continue;
+        const role = notice?.role === 'alert' ? 'alert' : 'status';
+        const node = el('div', 'rlb-popover__notice bp3-text-small', message);
+        node.setAttribute('role', role);
+        node.setAttribute('aria-live', role === 'alert' ? 'assertive' : 'polite');
+        node.setAttribute('aria-atomic', 'true');
+        root.appendChild(node);
     }
 
     const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
@@ -243,8 +308,8 @@ export function renderSessionSurface(root, model, options = {}) {
         }
         if (model.pausedCount > 0) {
             footer.appendChild(
-                button('bp3-button bp3-small', 'Resume All', () => options.onResumeAll?.(), {
-                    title: 'Resume paused Sessions with fresh CLOCK entries',
+                button('bp3-button bp3-small', 'Resume paused Tasks', () => options.onResumeAll?.(), {
+                    title: 'Resume paused Tasks with fresh CLOCK entries',
                 })
             );
         }

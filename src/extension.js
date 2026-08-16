@@ -11,7 +11,7 @@ import { createConfirmationController } from './confirmation.js';
 import { createDashboard } from './dashboard.js';
 import { injectStyles, removeStyles } from './dom.js';
 import { getBlockString, getFocusedBlockUid } from './roam.js';
-import { isTaskBlock } from './org.js';
+import { isTaskBlock, taskStatus } from './org.js';
 import * as pomodoro from './pomodoro.js';
 import * as paused from './paused.js';
 import { mutationResultNotice, presentMutationResult } from './action-result.js';
@@ -65,7 +65,9 @@ function createController({ extensionAPI }) {
     const canClockIn = context => {
         const uid = context?.['block-uid'];
         if (!uid || clock.isBlockRunning(uid)) return false;
-        return todoBlocksOnly() ? isTaskBlock(targetString(context)) : true;
+        const string = targetString(context);
+        if (taskStatus(string) === 'DONE') return false;
+        return todoBlocksOnly() ? isTaskBlock(string) : true;
     };
 
     const notifyUser = message => {
@@ -228,7 +230,10 @@ function createController({ extensionAPI }) {
             pomodoro.load();
             paused.load();
             detachPomodoro = pomodoro.attach();
-            detachCompletion = attachCompletionHandling({ pauseApi: paused });
+            detachCompletion = attachCompletionHandling({
+                pauseApi: paused,
+                onResult: result => presentMutationResult(result, notifyUser),
+            });
             topbar.mount();
             // The graph is the source of truth, so a reload picks any clock left
             // running — including one abandoned days ago — straight back up.

@@ -35,7 +35,7 @@ async function withGraphGuard(action) {
 /** Subscribe to running-clock changes. Returns an unsubscribe function. */
 export function subscribe(listener) {
     listeners.add(listener);
-    listener(running);
+    listener(running, { reason: 'initial' });
     return () => listeners.delete(listener);
 }
 
@@ -67,24 +67,24 @@ export function getNotice() {
     return notice;
 }
 
-function notify() {
+function notify(meta = { reason: 'mutation' }) {
     for (const listener of listeners) {
         try {
-            listener(running);
+            listener(running, meta);
         } catch (error) {
             console.error('[roam-logbook] listener failed', error);
         }
     }
 }
 
-const uncertainCloseResult = error => {
-    const pendingClockUids = running.map(entry => entry.clockUid);
+const uncertainCloseResult = (error, entries = running, { preflight = false } = {}) => {
+    const pendingClockUids = entries.filter(entry => entry.running).map(entry => entry.clockUid);
     return {
         action: 'close-sessions',
         ok: false,
         item: 'Session',
         completedVerb: 'ended',
-        entries: running,
+        entries,
         results: [],
         closed: 0,
         count: 0,
@@ -96,6 +96,7 @@ const uncertainCloseResult = error => {
         partial: false,
         retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
         error,
+        preflight,
     };
 };
 
@@ -156,7 +157,7 @@ export function refresh({ entries, notify: shouldNotify = true } = {}) {
 
     lastRefreshStatus = { ok: true, error: null };
     notice = '';
-    if (shouldNotify) notify();
+    if (shouldNotify) notify({ reason: 'refresh', explicit: true });
     return running;
 }
 
@@ -444,12 +445,20 @@ export async function clockOut(clockUid, { now = new Date(), source = 'user' } =
 /** Close a selected set, or every currently running clock when omitted. */
 export async function clockOutEntries(
     clockUids = null,
-    { now = new Date(), source = 'user' } = {}
+    { now = new Date(), source = 'user', prepare = null } = {}
 ) {
     return enqueueMutation(async () => {
+        let entries = [];
+        let readCompleted = false;
+        let prepareStarted = false;
         try {
             return await withGraphGuard(async () => {
-                const entries = readAllEntries();
+                entries = readAllEntries();
+                readCompleted = true;
+                if (prepare) {
+                    prepareStarted = true;
+                    await prepare(entries.map(entry => ({ ...entry })));
+                }
                 const outcome = await closeEntriesNow(entries, clockUids, now);
                 const result = { ...outcome, entries };
                 if (!outcome.uncertain) {
@@ -472,7 +481,7 @@ export async function clockOutEntries(
             });
         } catch (error) {
             notice = GRAPH_UNCERTAIN;
-            return uncertainCloseResult(error);
+            return uncertainCloseResult(error, readCompleted ? entries : running, { preflight: prepareStarted });
         }
     });
 }
@@ -488,7 +497,9 @@ export async function pauseEntries({ now = new Date(), prepare, source = 'pause'
     return enqueueMutation(async () => {
         try {
             return await withGraphGuard(async () => {
-                const entries = readAllEntries().filter(entry => entry.running);
+                const allEntries = readAllEntries();
+                const entries = allEntries.filter(entry => entry.running);
+                if (entries.length === 0) refresh({ entries: allEntries, notify: false });
                 const records = prepare ? await prepare(entries.map(entry => ({ ...entry }))) : [];
                 const outcome = await closeEntriesNow(
                     entries,
@@ -508,6 +519,7 @@ export async function pauseEntries({ now = new Date(), prepare, source = 'pause'
                         });
                     }
                 }
+                notify();
                 return result;
             });
         } catch (error) {
@@ -602,6 +614,7 @@ export async function clockOutCompletedTask(
         source = 'auto-complete',
         getPauseTaskUids = null,
         pruneCompleted = null,
+        retryClockUids = null,
     } = {}
 ) {
     return enqueueMutation(async () => {
@@ -621,13 +634,18 @@ export async function clockOutCompletedTask(
                     ].filter(Boolean)),
                 ];
                 const hierarchy = readHierarchy(taskUids);
-                if (hierarchy.issues.length > 0) {
+                const relevantHierarchyIssues = hierarchy.issues.filter(issue =>
+                    hierarchyIssueAffectsTask(issue, taskUid, hierarchy.parentOf)
+                );
+                if (relevantHierarchyIssues.length > 0) {
                     throw new GraphReadError('Task hierarchy could not be confirmed for automatic Clock Out', {
                         issue: {
                             kind: 'hierarchy',
                             source: 'parent',
                             message: 'Task hierarchy could not be confirmed for automatic Clock Out',
-                            affectedUids: taskUids,
+                            affectedUids: relevantHierarchyIssues.flatMap(issue =>
+                                issue.affectedUids || [issue.taskUid, issue.parentUid]
+                            ),
                         },
                     });
                 }
@@ -665,15 +683,15 @@ export async function clockOutCompletedTask(
                         isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
                     ),
                 ];
-                const pauseResult = pruneCompleted
-                    ? pruneCompleted([...new Set(affectedTaskUids)])
-                    : null;
-                if (pauseResult && pauseResult.ok === false) {
-                    throw pauseResult.error || new GraphReadError('Pause Batch could not be reconciled');
-                }
+                const targetClockUids =
+                    retryClockUids === null
+                        ? targetEntries.map(entry => entry.clockUid)
+                        : targetEntries
+                              .filter(entry => retryClockUids.includes(entry.clockUid))
+                              .map(entry => entry.clockUid);
                 const outcome = await closeEntriesNow(
                     entries,
-                    targetEntries.map(entry => entry.clockUid),
+                    targetClockUids,
                     now,
                     { publish: false }
                 );
@@ -685,6 +703,31 @@ export async function clockOutCompletedTask(
                         clockUid: closed.clockUid,
                         taskUid: entry?.taskUid,
                     });
+                }
+                const pauseResult = outcome.ok && pruneCompleted
+                    ? pruneCompleted([...new Set(affectedTaskUids)])
+                    : null;
+                if (pauseResult && pauseResult.ok === false) {
+                    const result = {
+                        ...outcome,
+                        action: 'auto-clock-out',
+                        source,
+                        triggerUid: taskUid,
+                        taskUids: [...new Set(affectedTaskUids)],
+                        pause: pauseResult,
+                        ok: false,
+                        uncertain: true,
+                        partial: Boolean(outcome.partial || outcome.closed > 0),
+                        retry: {
+                            ...(outcome.retry || { action: 'auto-clock-out' }),
+                            action: 'auto-clock-out',
+                            taskUid,
+                            retryClockUids: outcome.pendingClockUids,
+                        },
+                        error: pauseResult.error,
+                    };
+                    notify();
+                    return result;
                 }
                 notify();
                 const retry = outcome.retry
@@ -742,6 +785,34 @@ function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
         current = parentOf[current];
     }
     return false;
+}
+
+function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
+    if (issue?.code === 'ancestor-depth-exceeded' && !parentOf[rootUid]) return true;
+    if (issue?.code === 'ambiguous-parent') {
+        if (issue.taskUid === rootUid) return true;
+        return (issue.parentUids || []).some(candidate => {
+            try {
+                return isTaskInConfirmedTree(candidate, rootUid, parentOf);
+            } catch {
+                return true;
+            }
+        });
+    }
+    const affected = [
+        issue?.taskUid,
+        issue?.parentUid,
+        ...(Array.isArray(issue?.parentUids) ? issue.parentUids : []),
+        ...(Array.isArray(issue?.affectedUids) ? issue.affectedUids : []),
+    ].filter(uid => typeof uid === 'string' && uid);
+    if (affected.length === 0) return true;
+    return affected.some(uid => {
+        try {
+            return isTaskInConfirmedTree(uid, rootUid, parentOf) || isTaskInConfirmedTree(rootUid, uid, parentOf);
+        } catch {
+            return true;
+        }
+    });
 }
 
 /**

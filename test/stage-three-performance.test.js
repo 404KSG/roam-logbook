@@ -72,6 +72,47 @@ test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
     topbar.unmount();
 });
 
+test('disabling the topbar stops its ticker and recovery observer before re-enabling once', async () => {
+    settings.set('showTopbarWidget', true);
+    const timers = [];
+    const cleared = [];
+    const topbar = createTopbar({
+        onOpenDashboard: () => {},
+        setIntervalFn: callback => {
+            const timer = { callback };
+            timers.push(timer);
+            return timer;
+        },
+        clearIntervalFn: timer => cleared.push(timer),
+    });
+
+    topbar.mount();
+    assert.equal(timers.length, 1, 'mount registers one ticker');
+    settings.set('showTopbarWidget', false);
+    topbar.refresh();
+    assert.equal(cleared.length, 1, 'disabling tears down the ticker');
+    assert.equal(document.querySelector('#roam-logbook-topbar'), null);
+    const disabledAttachCount = topbar.getPerformanceSnapshot().attachCount;
+
+    document.body.innerHTML = '<div class="rm-topbar"></div>';
+    await settleMutations();
+    assert.equal(
+        topbar.getPerformanceSnapshot().attachCount,
+        disabledAttachCount,
+        'the recovery observer is disconnected while disabled'
+    );
+
+    settings.set('showTopbarWidget', true);
+    topbar.refresh();
+    assert.equal(timers.length, 2, 're-enabling registers one ticker');
+    topbar.refresh();
+    assert.equal(timers.length, 2, 'repeated refresh does not duplicate the ticker');
+    assert.ok(document.querySelector('#roam-logbook-topbar'));
+
+    topbar.unmount();
+    assert.equal(cleared.length, 2, 'unmount clears the one re-enabled ticker');
+});
+
 test('outer navigation shell replacement is recovered with one debounced attach', async () => {
     document.body.innerHTML =
         '<div class="rlb-outer-shell"><div class="rlb-nav-shell"><div class="rm-topbar">' +

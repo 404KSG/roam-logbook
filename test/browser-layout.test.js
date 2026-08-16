@@ -416,7 +416,7 @@ test('beta.14 compact overview becomes two-by-two on mobile without overflow', a
 test('session status bullet aligns with the title row rather than the whole row', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Session"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Task"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { top:r.top, bottom:r.bottom, left:r.left, right:r.right, width:r.width, height:r.height }; };
             const row = document.querySelector('.rlb-run');
@@ -509,7 +509,7 @@ test('Session task title is the restrained link target without a leading open ic
 test('paused icon-only topbar keeps clock identity with only a quiet background state', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook — no Session running"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused" aria-label="2 Sessions Paused — click to resume or review."><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div>`),
+        htmlWithLateHost(`<div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook — no Session running"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused" aria-label="2 Tasks Paused — click to resume or review."><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div>`),
         `(() => {
             const buttons = [...document.querySelectorAll('.rlb-topbar__button')];
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -540,7 +540,7 @@ test('paused icon-only topbar keeps clock identity with only a quiet background 
     assert.equal(geometry.idleHasBadge, false, JSON.stringify(geometry));
     assert.equal(geometry.pausedHasBadge, false, JSON.stringify(geometry));
     assert.equal(geometry.pausedHasClock, true, JSON.stringify(geometry));
-    assert.match(geometry.pausedLabel, /2 Sessions Paused/i, JSON.stringify(geometry));
+    assert.match(geometry.pausedLabel, /2 Tasks Paused/i, JSON.stringify(geometry));
     assert.equal(geometry.pausedBackground, geometry.idleBackground, JSON.stringify(geometry));
     assert.notEqual(geometry.pausedIconColor, geometry.idleIconColor, JSON.stringify(geometry));
     assert.equal(geometry.pausedRing, 'none', JSON.stringify(geometry));

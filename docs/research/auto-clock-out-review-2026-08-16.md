@@ -1,5 +1,10 @@
 # Draft PR #2：TODO → DONE 自动 Clock Out 源码评审
 
+> 历史评审记录（已被 beta.21 实现取代）。文中的“当前 beta.20”与“建议
+> 方案”描述的是 2026-08-16 实施前的快照，保留用于研究溯源；当前行为与
+> 发布边界以 [beta.21 hardening design](../plans/2026-08-16-beta-21-hardening-design.md)
+> 和代码/测试为准，不应把本文建议当作新的功能扩展授权。
+
 日期：2026-08-16
 仓库：`forrestchang/roam-logbook`
 评审对象：[PR #2 — JIA-430: stop clocks when tasks are completed](https://github.com/forrestchang/roam-logbook/pull/2)
@@ -138,7 +143,7 @@ const activeTaskUids = new Set(entries.map(entry => entry.taskUid));
 4. **不要把父级 watch 限制为“有自身 clock 的父任务”。** 级联要求监听运行后代的所有可识别祖先。
 5. **不要把 pull watch 失败静默成 no-op。** 至少应在内部记录 watcher health，并在 dashboard/topbar 的已有 graph warning 通道中提示或允许重试。
 
-## 4. beta.20 的最终改造方案
+## 4. beta.20 的最终改造方案（历史建议；已由 beta.21 实现取代）
 
 ### 4.1 新增一个 completion reconciler，而不是简单复制 `attachTaskCompletion`
 

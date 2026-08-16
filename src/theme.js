@@ -21,6 +21,9 @@ const PAGE_REF_SELECTORS = [
     '.rm-page-ref-link-color',
     '.rm-page-ref',
 ];
+const PAGE_REF_SELECTOR = PAGE_REF_SELECTORS.join(', ');
+const TOPBAR_SELECTOR = '.rm-topbar';
+const THEME_ROOT_ATTRIBUTES = new Set(['class', 'style', 'data-theme']);
 const CUSTOM_LINK_PROPERTIES = [
     '--page-link-color',
     '--page-links',
@@ -295,15 +298,91 @@ const cancelScheduled = (documentRef, scheduled) => {
     else clearTimeout(scheduled.id);
 };
 
-const isRelevantMutation = record => {
-    if (record.target?.closest?.('[data-rlb-palette-probe]')) return false;
-    if (record.target?.closest?.(PLUGIN_ROOT_SELECTOR)) return false;
-    const allNodes = [...(record.addedNodes || []), ...(record.removedNodes || [])];
-    const nodes = allNodes.filter(
-        node => !node?.matches?.('[data-rlb-palette-probe]')
+const matchesOrContains = (node, selector) =>
+    Boolean(node?.matches?.(selector) || node?.querySelector?.(selector));
+
+const isTopbarRoot = node => Boolean(node?.matches?.(TOPBAR_SELECTOR));
+
+const isTopbarDescendant = node => Boolean(node?.closest?.(TOPBAR_SELECTOR));
+
+const isPageRefNode = node =>
+    Boolean(
+        node?.matches?.(PAGE_REF_SELECTOR) ||
+            node?.closest?.(PAGE_REF_SELECTOR) ||
+            node?.querySelector?.(PAGE_REF_SELECTOR)
     );
-    if (allNodes.length > 0 && nodes.length === 0) return false;
-    return nodes.length === 0 || nodes.some(node => !node?.closest?.(PLUGIN_ROOT_SELECTOR));
+
+const containsPluginRoot = node => Boolean(node?.querySelector?.(PLUGIN_ROOT_SELECTOR));
+
+const isSyncCandidate = (documentRef, node) =>
+    semanticSyncCandidate(node) ||
+    (smallGeometry(node) && candidateColors(documentRef, node).some(isStableGreen));
+
+const isPreviousSyncCandidate = record => {
+    const node = record?.target;
+    if (record?.type !== 'attributes' || !node) return false;
+    const values = [
+        record.attributeName === 'class' ? record.oldValue : node.className,
+        record.attributeName === 'aria-label' ? record.oldValue : node.getAttribute?.('aria-label'),
+        record.attributeName === 'title' ? record.oldValue : node.getAttribute?.('title'),
+        record.attributeName === 'data-state' ? record.oldValue : node.getAttribute?.('data-state'),
+        record.attributeName === 'data-status' ? record.oldValue : node.getAttribute?.('data-status'),
+    ];
+    return /saving|saved|sync|synced|synchroniz/i.test(values.filter(Boolean).join(' '));
+};
+
+const containsSyncCandidate = (documentRef, node) =>
+    isSyncCandidate(documentRef, node) ||
+    Boolean([...node?.querySelectorAll?.('*') || []].some(child => isSyncCandidate(documentRef, child)));
+
+const isDocumentThemeNode = node =>
+    Boolean(
+        node?.nodeType === 1 &&
+            (node === node.ownerDocument?.documentElement || node === node.ownerDocument?.body)
+    );
+
+/**
+ * Keep the document observer cheap: arbitrary page mutations cannot change the
+ * sampled palette, so only theme roots, page-ref-bearing nodes, and Roam's
+ * sync topbar are allowed to schedule a full palette read.
+ */
+const isRelevantMutation = (record, documentRef) => {
+    const target = record.target;
+    if (target?.closest?.('[data-rlb-palette-probe]')) return false;
+    if (target?.closest?.(PLUGIN_ROOT_SELECTOR)) return false;
+
+    if (record.type === 'attributes') {
+        const oldClass = record.attributeName === 'class' ? record.oldValue || '' : '';
+        const wasTopbar = /(^|\s)rm-topbar(?:\s|$)/.test(oldClass);
+        const wasPageRef = /(^|\s)rm-page-ref(?:[-_]|\s|$)/.test(oldClass);
+        if (
+            THEME_ROOT_ATTRIBUTES.has(record.attributeName) &&
+            containsPluginRoot(target)
+        ) {
+            return true;
+        }
+        if (isTopbarRoot(target) || wasTopbar) return true;
+        if (isTopbarDescendant(target)) {
+            return isSyncCandidate(documentRef, target) || isPreviousSyncCandidate(record);
+        }
+        if (isPageRefNode(target) || wasPageRef) return true;
+        return (
+            THEME_ROOT_ATTRIBUTES.has(record.attributeName) &&
+            (isDocumentThemeNode(target) || target?.matches?.(ROAM_HOST_SELECTOR))
+        );
+    }
+
+    const allNodes = [...(record.addedNodes || []), ...(record.removedNodes || [])];
+    const nodes = allNodes.filter(node => {
+        if (node?.matches?.('[data-rlb-palette-probe]')) return false;
+        if (node?.closest?.('[data-rlb-palette-probe]')) return false;
+        return !node?.closest?.(PLUGIN_ROOT_SELECTOR);
+    });
+    if (isTopbarRoot(target)) return true;
+    if (isTopbarDescendant(target)) {
+        return nodes.some(node => containsSyncCandidate(documentRef, node));
+    }
+    return nodes.some(node => matchesOrContains(node, TOPBAR_SELECTOR) || isPageRefNode(node));
 };
 
 const applyPalette = (root, palette) => {
@@ -370,12 +449,13 @@ export function acquireThemeRuntime({ documentRef = document, onChange = () => {
         const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
         if (MutationObserverCtor && target) {
             state.observer = new MutationObserverCtor(records => {
-                if (records.some(isRelevantMutation)) scheduleRefresh();
+                if (records.some(record => isRelevantMutation(record, documentRef))) scheduleRefresh();
             });
             state.observer.observe(target, {
                 subtree: true,
                 childList: true,
                 attributes: true,
+                attributeOldValue: true,
                 attributeFilter: [
                     'class',
                     'style',

@@ -376,13 +376,14 @@ function watchBlockString(uid, onChange) {
     detach: () => {
       if (detached)
         return { ok: true, detached: false };
-      detached = true;
-      if (!remove) {
+      const remover = remove || resolve(null, "removePullWatch");
+      if (!remover) {
         const error = new Error("roamAlphaAPI removePullWatch unavailable");
         return { ok: false, detached: false, error };
       }
       try {
-        remove(pattern, entity, handler);
+        remover(pattern, entity, handler);
+        detached = true;
         return { ok: true, detached: true };
       } catch (error) {
         detached = false;
@@ -639,7 +640,7 @@ var readBlockStrings = (uids) => {
     result[uid] = string;
   return result;
 };
-function readHierarchy(taskUids) {
+function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   const parentOf = {};
   const stringOf = {};
   const mirrorsOf = {};
@@ -647,6 +648,8 @@ function readHierarchy(taskUids) {
   const seeds = new Set(taskUids);
   if (seeds.size === 0)
     return { parentOf, stringOf, mirrorsOf, issues };
+  if (includeSeedStrings)
+    Object.assign(stringOf, readBlockStrings([...seeds]));
   let mirrorRows;
   try {
     mirrorRows = validateQueryRows(
@@ -689,6 +692,7 @@ function readHierarchy(taskUids) {
         issues.push({
           code: "ambiguous-parent",
           taskUid: uid,
+          parentUids: [...choices],
           title: `Ambiguous parent \xB7 ${uid}`,
           rawClock: "",
           message: `Task ${uid} has more than one confirmed parent; hierarchy roll-up was withheld.`
@@ -718,6 +722,32 @@ function readHierarchy(taskUids) {
     }
     frontier = next;
   }
+  if (frontier.length > 0) {
+    const frontierUids = new Set(frontier);
+    const affectedSeeds = [...seeds].filter((seed) => {
+      const seen = /* @__PURE__ */ new Set();
+      let current = seed;
+      while (current && !frontierUids.has(current)) {
+        if (seen.has(current))
+          return true;
+        seen.add(current);
+        current = parentOf[current];
+      }
+      return frontierUids.has(current);
+    });
+    const affectedUids = [.../* @__PURE__ */ new Set([...frontier, ...affectedSeeds])];
+    issues.push({
+      code: "ancestor-depth-exceeded",
+      kind: "hierarchy",
+      source: "ancestor-depth",
+      taskUid: affectedUids[0],
+      affectedUids,
+      seedUids: affectedSeeds,
+      title: `Hierarchy depth exceeded \xB7 ${affectedUids[0]}`,
+      rawClock: "",
+      message: `The ancestor chain exceeded the safety depth of ${MAX_ANCESTOR_DEPTH}; cascade scope was withheld.`
+    });
+  }
   for (const uid of Object.keys(parentOf)) {
     const seen = /* @__PURE__ */ new Set();
     let current = uid;
@@ -741,17 +771,30 @@ function readHierarchy(taskUids) {
 
 // src/mutations.js
 var tail = Promise.resolve();
+var generation = 0;
 function enqueueMutation(action) {
-  const result = tail.then(action, action);
+  const expectedGeneration = generation;
+  const run = () => {
+    if (expectedGeneration !== generation) {
+      return {
+        ok: false,
+        invalidated: true,
+        uncertain: false,
+        error: new Error("Mutation was invalidated by an extension reload.")
+      };
+    }
+    return action();
+  };
+  const result = tail.then(run, run);
   tail = result.catch(() => void 0);
   return result;
 }
 function resetMutationQueue() {
-  tail = Promise.resolve();
+  generation += 1;
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.20";
+var PLUGIN_VERSION = "0.9.0-beta.21";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -912,14 +955,14 @@ function notify() {
     }
   }
 }
-var uncertainCloseResult = (error) => {
-  const pendingClockUids = running.map((entry) => entry.clockUid);
+var uncertainCloseResult = (error, entries = running, { preflight = false } = {}) => {
+  const pendingClockUids = entries.filter((entry) => entry.running).map((entry) => entry.clockUid);
   return {
     action: "close-sessions",
     ok: false,
     item: "Session",
     completedVerb: "ended",
-    entries: running,
+    entries,
     results: [],
     closed: 0,
     count: 0,
@@ -930,7 +973,8 @@ var uncertainCloseResult = (error) => {
     uncertain: true,
     partial: false,
     retry: { action: "close", retryClockUids: pendingClockUids, writtenClockUids: [] },
-    error
+    error,
+    preflight
   };
 };
 var uncertainPauseResult = (error) => {
@@ -1224,11 +1268,19 @@ async function clockOut(clockUid, { now = /* @__PURE__ */ new Date(), source = "
     })
   );
 }
-async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
+async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Date(), source = "user", prepare = null } = {}) {
   return enqueueMutation(async () => {
+    let entries = [];
+    let readCompleted = false;
+    let prepareStarted = false;
     try {
       return await withGraphGuard(async () => {
-        const entries = readAllEntries();
+        entries = readAllEntries();
+        readCompleted = true;
+        if (prepare) {
+          prepareStarted = true;
+          await prepare(entries.map((entry) => ({ ...entry })));
+        }
         const outcome = await closeEntriesNow(entries, clockUids, now);
         const result = { ...outcome, entries };
         if (!outcome.uncertain) {
@@ -1247,7 +1299,7 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
       });
     } catch (error) {
       notice = GRAPH_UNCERTAIN;
-      return uncertainCloseResult(error);
+      return uncertainCloseResult(error, readCompleted ? entries : running, { preflight: prepareStarted });
     }
   });
 }
@@ -1255,7 +1307,10 @@ async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare, source 
   return enqueueMutation(async () => {
     try {
       return await withGraphGuard(async () => {
-        const entries = readAllEntries().filter((entry) => entry.running);
+        const allEntries = readAllEntries();
+        const entries = allEntries.filter((entry) => entry.running);
+        if (entries.length === 0)
+          refresh({ entries: allEntries, notify: false });
         const records = prepare ? await prepare(entries.map((entry) => ({ ...entry }))) : [];
         const outcome = await closeEntriesNow(
           entries,
@@ -1275,6 +1330,7 @@ async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare, source 
             });
           }
         }
+        notify();
         return result;
       });
     } catch (error) {
@@ -1320,7 +1376,8 @@ async function clockOutCompletedTask(taskUid, {
   now = /* @__PURE__ */ new Date(),
   source = "auto-complete",
   getPauseTaskUids = null,
-  pruneCompleted: pruneCompleted2 = null
+  pruneCompleted: pruneCompleted2 = null,
+  retryClockUids = null
 } = {}) {
   return enqueueMutation(async () => {
     try {
@@ -1339,13 +1396,18 @@ async function clockOutCompletedTask(taskUid, {
           ].filter(Boolean))
         ];
         const hierarchy = readHierarchy(taskUids);
-        if (hierarchy.issues.length > 0) {
+        const relevantHierarchyIssues = hierarchy.issues.filter(
+          (issue) => hierarchyIssueAffectsTask(issue, taskUid, hierarchy.parentOf)
+        );
+        if (relevantHierarchyIssues.length > 0) {
           throw new GraphReadError("Task hierarchy could not be confirmed for automatic Clock Out", {
             issue: {
               kind: "hierarchy",
               source: "parent",
               message: "Task hierarchy could not be confirmed for automatic Clock Out",
-              affectedUids: taskUids
+              affectedUids: relevantHierarchyIssues.flatMap(
+                (issue) => issue.affectedUids || [issue.taskUid, issue.parentUid]
+              )
             }
           });
         }
@@ -1380,13 +1442,10 @@ async function clockOutCompletedTask(taskUid, {
             (candidate) => isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
           )
         ];
-        const pauseResult = pruneCompleted2 ? pruneCompleted2([...new Set(affectedTaskUids)]) : null;
-        if (pauseResult && pauseResult.ok === false) {
-          throw pauseResult.error || new GraphReadError("Pause Batch could not be reconciled");
-        }
+        const targetClockUids = retryClockUids === null ? targetEntries.map((entry) => entry.clockUid) : targetEntries.filter((entry) => retryClockUids.includes(entry.clockUid)).map((entry) => entry.clockUid);
         const outcome = await closeEntriesNow(
           entries,
-          targetEntries.map((entry) => entry.clockUid),
+          targetClockUids,
           now,
           { publish: false }
         );
@@ -1398,6 +1457,29 @@ async function clockOutCompletedTask(taskUid, {
             clockUid: closed.clockUid,
             taskUid: entry?.taskUid
           });
+        }
+        const pauseResult = outcome.ok && pruneCompleted2 ? pruneCompleted2([...new Set(affectedTaskUids)]) : null;
+        if (pauseResult && pauseResult.ok === false) {
+          const result = {
+            ...outcome,
+            action: "auto-clock-out",
+            source,
+            triggerUid: taskUid,
+            taskUids: [...new Set(affectedTaskUids)],
+            pause: pauseResult,
+            ok: false,
+            uncertain: true,
+            partial: Boolean(outcome.partial || outcome.closed > 0),
+            retry: {
+              ...outcome.retry || { action: "auto-clock-out" },
+              action: "auto-clock-out",
+              taskUid,
+              retryClockUids: outcome.pendingClockUids
+            },
+            error: pauseResult.error
+          };
+          notify();
+          return result;
         }
         notify();
         const retry = outcome.retry ? {
@@ -1453,6 +1535,36 @@ function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
     current = parentOf[current];
   }
   return false;
+}
+function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
+  if (issue?.code === "ancestor-depth-exceeded" && !parentOf[rootUid])
+    return true;
+  if (issue?.code === "ambiguous-parent") {
+    if (issue.taskUid === rootUid)
+      return true;
+    return (issue.parentUids || []).some((candidate) => {
+      try {
+        return isTaskInConfirmedTree(candidate, rootUid, parentOf);
+      } catch {
+        return true;
+      }
+    });
+  }
+  const affected = [
+    issue?.taskUid,
+    issue?.parentUid,
+    ...Array.isArray(issue?.parentUids) ? issue.parentUids : [],
+    ...Array.isArray(issue?.affectedUids) ? issue.affectedUids : []
+  ].filter((uid) => typeof uid === "string" && uid);
+  if (affected.length === 0)
+    return true;
+  return affected.some((uid) => {
+    try {
+      return isTaskInConfirmedTree(uid, rootUid, parentOf) || isTaskInConfirmedTree(rootUid, uid, parentOf);
+    } catch {
+      return true;
+    }
+  });
 }
 async function discardClock(clockUid) {
   return enqueueMutation(
@@ -1781,6 +1893,9 @@ var PAGE_REF_SELECTORS = [
   ".rm-page-ref-link-color",
   ".rm-page-ref"
 ];
+var PAGE_REF_SELECTOR = PAGE_REF_SELECTORS.join(", ");
+var TOPBAR_SELECTOR = ".rm-topbar";
+var THEME_ROOT_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "style", "data-theme"]);
 var CUSTOM_LINK_PROPERTIES = [
   "--page-link-color",
   "--page-links",
@@ -2022,18 +2137,39 @@ var cancelScheduled = (documentRef, scheduled) => {
   else
     clearTimeout(scheduled.id);
 };
+var matchesOrContains = (node, selector) => Boolean(node?.matches?.(selector) || node?.querySelector?.(selector));
+var isTopbarNode = (node) => Boolean(node?.matches?.(TOPBAR_SELECTOR) || node?.closest?.(TOPBAR_SELECTOR));
+var isPageRefNode = (node) => Boolean(
+  node?.matches?.(PAGE_REF_SELECTOR) || node?.closest?.(PAGE_REF_SELECTOR) || node?.querySelector?.(PAGE_REF_SELECTOR)
+);
+var isDocumentThemeNode = (node) => Boolean(
+  node?.nodeType === 1 && (node === node.ownerDocument?.documentElement || node === node.ownerDocument?.body)
+);
 var isRelevantMutation = (record) => {
-  if (record.target?.closest?.("[data-rlb-palette-probe]"))
+  const target = record.target;
+  if (target?.closest?.("[data-rlb-palette-probe]"))
     return false;
-  if (record.target?.closest?.(PLUGIN_ROOT_SELECTOR))
+  if (target?.closest?.(PLUGIN_ROOT_SELECTOR))
     return false;
+  if (record.type === "attributes") {
+    const oldClass = record.attributeName === "class" ? record.oldValue || "" : "";
+    const wasTopbar = /(^|\s)rm-topbar(?:\s|$)/.test(oldClass);
+    const wasPageRef = /(^|\s)rm-page-ref(?:[-_]|\s|$)/.test(oldClass);
+    if (isTopbarNode(target) || wasTopbar || isPageRefNode(target) || wasPageRef)
+      return true;
+    return THEME_ROOT_ATTRIBUTES.has(record.attributeName) && (isDocumentThemeNode(target) || target?.matches?.(ROAM_HOST_SELECTOR));
+  }
   const allNodes = [...record.addedNodes || [], ...record.removedNodes || []];
-  const nodes = allNodes.filter(
-    (node) => !node?.matches?.("[data-rlb-palette-probe]")
-  );
-  if (allNodes.length > 0 && nodes.length === 0)
-    return false;
-  return nodes.length === 0 || nodes.some((node) => !node?.closest?.(PLUGIN_ROOT_SELECTOR));
+  const nodes = allNodes.filter((node) => {
+    if (node?.matches?.("[data-rlb-palette-probe]"))
+      return false;
+    if (node?.closest?.("[data-rlb-palette-probe]"))
+      return false;
+    return !node?.closest?.(PLUGIN_ROOT_SELECTOR);
+  });
+  if (isTopbarNode(target))
+    return true;
+  return nodes.some((node) => matchesOrContains(node, TOPBAR_SELECTOR) || isPageRefNode(node));
 };
 var applyPalette = (root, palette) => {
   if (!root?.style || !palette)
@@ -2099,6 +2235,7 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
         subtree: true,
         childList: true,
         attributes: true,
+        attributeOldValue: true,
         attributeFilter: [
           "class",
           "style",
@@ -2157,6 +2294,9 @@ function applyRoamThemePalette(root, palette) {
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Roam Logbook";
+var REFRESH_LOADING_MESSAGE = "Refreshing Dashboard from graph\u2026";
+var REFRESH_SUCCESS_MESSAGE = "Dashboard updated just now";
+var REFRESH_ERROR_MESSAGE = "Dashboard refresh failed; last valid snapshot kept. Retry.";
 var documentScrollLocks = /* @__PURE__ */ new WeakMap();
 var restoreInlineStyle = (node, value) => {
   if (!node)
@@ -2239,9 +2379,12 @@ function createDashboard({
   let liveTicker = null;
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
+  let refreshInFlight = null;
+  let refreshButton = null;
+  let refreshStatusNode = null;
+  let refreshState = { state: "idle", message: "" };
   let lastSnapshot = null;
   let lastModel = null;
-  let lastHierarchy = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
   let themeRuntime = null;
@@ -2251,6 +2394,32 @@ function createDashboard({
     if (liveTicker !== null)
       clearIntervalFn(liveTicker);
     liveTicker = null;
+  };
+  const syncRefreshUi = () => {
+    if (refreshButton) {
+      refreshButton.dataset.refreshState = refreshState.state;
+      refreshButton.disabled = refreshState.state === "loading";
+      if (refreshState.state === "loading")
+        refreshButton.setAttribute("aria-busy", "true");
+      else
+        refreshButton.removeAttribute("aria-busy");
+    }
+    if (refreshStatusNode) {
+      refreshStatusNode.textContent = refreshState.message;
+      refreshStatusNode.setAttribute(
+        "role",
+        refreshState.state === "error" ? "alert" : "status"
+      );
+      refreshStatusNode.setAttribute(
+        "aria-live",
+        refreshState.state === "error" ? "assertive" : "polite"
+      );
+      refreshStatusNode.setAttribute("aria-atomic", "true");
+    }
+  };
+  const setRefreshState = (state, message) => {
+    refreshState = { state, message };
+    syncRefreshUi();
   };
   const resetDiscardConfirmation = () => {
     discardConfirmUid = null;
@@ -2307,7 +2476,7 @@ function createDashboard({
       return;
     clearLiveTicker();
     const model = lastModel;
-    const hierarchy = lastHierarchy || {};
+    const hierarchy = lastSnapshot?.hierarchy || {};
     const transientIssues = lastTransientIssues;
     const refreshNotice = lastRefreshNotice;
     summaryNode.replaceChildren();
@@ -2316,6 +2485,8 @@ function createDashboard({
     if (refreshNotice) {
       const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
       notice4.setAttribute("role", "status");
+      notice4.setAttribute("aria-live", "polite");
+      notice4.setAttribute("aria-atomic", "true");
       bodyNode.appendChild(notice4);
     }
     const issues = [
@@ -2337,49 +2508,85 @@ function createDashboard({
       bodyNode.appendChild(dataIssuesSection(issues));
     startLiveTicker();
   };
-  const render = () => {
+  const render = ({ readGraph = true } = {}) => {
     if (!bodyNode)
-      return;
+      return { ok: false, reason: "not-mounted" };
     clearLiveTicker();
     const now = nowFn();
-    let snapshot;
+    let snapshot = readGraph ? null : lastSnapshot;
     let refreshNotice = "";
     let transientIssues = [];
-    try {
-      const candidate = readDashboardSnapshot();
-      lastSnapshot = candidate;
-      snapshot = candidate;
-    } catch (error) {
-      transientIssues = error.issue ? [error.issue] : error.issues || [];
-      if (!lastSnapshot) {
-        summaryNode.hidden = false;
-        summaryNode.setAttribute("aria-hidden", "false");
-        summaryNode.replaceChildren();
-        const notice4 = el(
-          "div",
-          "rlb-dashboard__notice",
-          "Graph data could not be refreshed; no successful snapshot is available yet."
-        );
-        notice4.setAttribute("role", "alert");
-        const issueRows = transientIssues.map(issueRow);
-        bodyNode.replaceChildren(
-          notice4,
-          ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
-        );
-        lastModel = null;
-        return;
+    let refreshFailed = false;
+    if (readGraph) {
+      try {
+        const candidate = readDashboardSnapshot();
+        lastSnapshot = candidate;
+        snapshot = candidate;
+      } catch (error) {
+        refreshFailed = true;
+        transientIssues = error.issue ? [error.issue] : error.issues || [];
+        if (!lastSnapshot) {
+          summaryNode.hidden = false;
+          summaryNode.setAttribute("aria-hidden", "false");
+          summaryNode.replaceChildren();
+          const notice4 = el(
+            "div",
+            "rlb-dashboard__notice",
+            "Graph data could not be refreshed; no successful snapshot is available yet."
+          );
+          notice4.setAttribute("role", "alert");
+          notice4.setAttribute("aria-live", "assertive");
+          notice4.setAttribute("aria-atomic", "true");
+          const issueRows = transientIssues.map(issueRow);
+          bodyNode.replaceChildren(
+            notice4,
+            ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
+          );
+          lastModel = null;
+          lastTransientIssues = transientIssues;
+          lastRefreshNotice = "";
+          return { ok: false, reason: "no-snapshot" };
+        }
+        snapshot = lastSnapshot;
+        refreshNotice = "Graph data could not be refreshed; showing last successful snapshot.";
       }
-      snapshot = lastSnapshot;
-      refreshNotice = "Graph data could not be refreshed; showing last successful snapshot.";
     }
+    if (!snapshot)
+      return { ok: false, reason: "no-snapshot" };
+    summaryNode.hidden = false;
+    summaryNode.setAttribute("aria-hidden", "false");
     const entries = snapshot.entries;
-    const hierarchy = snapshot.hierarchy;
-    refresh({ entries });
+    const hierarchy = snapshot.hierarchy || {};
+    refresh({ entries, notify: false });
     lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
-    lastHierarchy = hierarchy;
     lastTransientIssues = transientIssues;
     lastRefreshNotice = refreshNotice;
     paint(now);
+    return { ok: true, refreshFailed };
+  };
+  const refreshDashboard = () => {
+    if (refreshInFlight)
+      return refreshInFlight;
+    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
+    const request = Promise.resolve().then(() => render()).then(
+      (result) => {
+        if (result?.ok && !result.refreshFailed) {
+          setRefreshState("success", REFRESH_SUCCESS_MESSAGE);
+        } else {
+          setRefreshState("error", REFRESH_ERROR_MESSAGE);
+        }
+        return result;
+      },
+      (error) => {
+        console.error("[roam-logbook] could not refresh Dashboard", error);
+        setRefreshState("error", REFRESH_ERROR_MESSAGE);
+        return { ok: false, error };
+      }
+    );
+    refreshInFlight = request.finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
   };
   const issueRow = (issue) => ({
     title: issue.title || issue.parentUid || issue.affectedUid || "Unresolved graph data",
@@ -2471,7 +2678,12 @@ function createDashboard({
     section.appendChild(heading);
     const table = el("table", "rlb-table");
     table.appendChild(
-      headerRow(["Task", "Started", { label: "Elapsed", numeric: true }, ""])
+      headerRow([
+        "Task",
+        "Started",
+        { label: "Elapsed", numeric: true },
+        { label: "Actions", visuallyHidden: true }
+      ])
     );
     const tbody = el("tbody");
     for (const entry of running2) {
@@ -2677,7 +2889,11 @@ function createDashboard({
     const row = el("tr");
     for (const column of columns) {
       const numeric = typeof column === "object" && column.numeric;
-      row.appendChild(el("th", numeric ? "rlb-table__num" : "", column.label ?? column));
+      const visuallyHidden = typeof column === "object" && column.visuallyHidden;
+      const classes = [numeric ? "rlb-table__num" : "", visuallyHidden ? "rlb-visually-hidden" : ""].filter(Boolean).join(" ");
+      const header = el("th", classes, column.label ?? column);
+      header.setAttribute("scope", "col");
+      row.appendChild(header);
     }
     thead.appendChild(row);
     return thead;
@@ -2798,20 +3014,27 @@ function createDashboard({
     }
     select.addEventListener("change", (event) => {
       rangeId = event.target.value;
-      render();
+      render({ readGraph: false });
     });
     selectWrapper.appendChild(select);
+    refreshButton = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button",
+      "",
+      () => void refreshDashboard(),
+      { title: "Reload from the graph" }
+    );
+    refreshButton.dataset.action = "refresh";
+    refreshStatusNode = el("span", "rlb-dashboard__refresh-status rlb-visually-hidden");
     header.append(
       selectWrapper,
-      button("bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button", "", () => {
-        render();
-      }, { title: "Reload from the graph" }),
+      refreshButton,
       button(
         "bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross rlb-icon-button",
         "",
         close,
         { title: "Close" }
-      )
+      ),
+      refreshStatusNode
     );
     summaryNode = el("div", "rlb-summary");
     bodyNode = el("div", "rlb-body rlb-body__scroll");
@@ -2823,6 +3046,7 @@ function createDashboard({
       onChange: (palette) => applyRoamThemePalette(overlay, palette)
     });
     themeRuntime.apply(overlay);
+    syncRefreshUi();
     return overlay;
   };
   function close({ restoreFocus = true } = {}) {
@@ -2848,8 +3072,10 @@ function createDashboard({
   return {
     open({ returnFocusTo: requestedFocus } = {}) {
       const alreadyOpen = root?.classList.contains("rlb-root--open");
-      const active = document.activeElement;
-      returnFocusTo = requestedFocus?.isConnected ? requestedFocus : active && active !== document.body && active.isConnected ? active : null;
+      if (!alreadyOpen) {
+        const active = document.activeElement;
+        returnFocusTo = requestedFocus?.isConnected ? requestedFocus : active && active !== document.body && active.isConnected ? active : null;
+      }
       try {
         if (!root)
           root = build();
@@ -2882,6 +3108,9 @@ function createDashboard({
       summaryNode = null;
       bodyNode = null;
       lastModel = null;
+      refreshInFlight = null;
+      refreshButton = null;
+      refreshStatusNode = null;
     }
   };
 }
@@ -3150,6 +3379,7 @@ var VERSION2 = STATE_FORMATS.pauseBatch;
 var LEGACY_VERSION = 1;
 var items = [];
 var pendingResume = [];
+var finalizing = null;
 var notice3 = "";
 var unsupportedRaw2 = null;
 var listeners2 = /* @__PURE__ */ new Set();
@@ -3193,18 +3423,43 @@ var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
   };
 };
 var hasLegacyPomodoroFields = (value) => Boolean(value && ("pomodoroRemainingMs" in value || "pomodoroSuppressed" in value));
+var cleanFinalizing = (value) => {
+  if (!value || typeof value !== "object" || value.action !== "clock-out-all")
+    return null;
+  if (!Array.isArray(value.targets))
+    return null;
+  const targets2 = [];
+  for (const target of value.targets) {
+    if (!target || typeof target.taskUid !== "string" || !target.taskUid)
+      return null;
+    if (typeof target.clockUid !== "string" || !target.clockUid)
+      return null;
+    const key = `${target.taskUid}\0${target.clockUid}`;
+    if (targets2.some((item) => `${item.taskUid}\0${item.clockUid}` === key))
+      continue;
+    targets2.push({ taskUid: target.taskUid, clockUid: target.clockUid });
+  }
+  return { action: "clock-out-all", targets: targets2 };
+};
 var serialized2 = () => JSON.stringify({
   version: VERSION2,
   data: {
     items,
-    pendingResume
+    pendingResume,
+    ...finalizing ? { finalizing } : {}
   }
 });
 function persist() {
   if (unsupportedRaw2 !== null)
     return false;
-  writeSetting(SETTING_PAUSED_BATCH, serialized2());
-  return true;
+  try {
+    writeSetting(SETTING_PAUSED_BATCH, serialized2());
+    return true;
+  } catch (error) {
+    notice3 || (notice3 = "Pause Batch could not be saved yet; its recovery state was retained.");
+    console.warn("[roam-logbook] could not persist Pause Batch", error);
+    return false;
+  }
 }
 function notify2() {
   for (const listener of listeners2) {
@@ -3268,15 +3523,30 @@ function pruneCompleted(taskUids = []) {
     };
   }
   const scope = new Set(completedTaskUids);
-  const previousItems = items.length;
-  const previousPending = pendingResume.length;
+  const previousItems = items;
+  const previousPending = pendingResume;
   items = items.filter((item) => !scope.has(item.taskUid));
   pendingResume = pendingResume.filter((item) => !scope.has(item.taskUid));
-  const removedPaused = previousItems - items.length;
-  const removedPending = previousPending - pendingResume.length;
+  const removedPaused = previousItems.length - items.length;
+  const removedPending = previousPending.length - pendingResume.length;
   if (removedPaused > 0 || removedPending > 0) {
     notice3 = "";
-    persist();
+    if (!persist()) {
+      items = previousItems;
+      pendingResume = previousPending;
+      notice3 = "Completed Tasks could not be removed from the saved Pause Batch; recovery state was kept.";
+      notify2();
+      return {
+        action: "prune-completed-paused",
+        ok: false,
+        completedTaskUids,
+        removed: 0,
+        removedPaused: 0,
+        removedPending: 0,
+        uncertain: true,
+        error: new Error(notice3)
+      };
+    }
     notify2();
   }
   return {
@@ -3296,25 +3566,40 @@ function getNotice2() {
 function load2() {
   items = [];
   pendingResume = [];
+  finalizing = null;
   notice3 = "";
   unsupportedRaw2 = null;
   ensureClockActionSubscription();
   const raw = readSetting(SETTING_PAUSED_BATCH);
   if (!raw)
     return getPaused();
+  let recoverableItems = [];
+  let recoverablePending = [];
+  let recoverableFinalizing = null;
   try {
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (parsed?.version === VERSION2 && parsed.data && Array.isArray(parsed.data.items)) {
+      recoverableItems = parsed.data.items.map(cleanRecord).filter(Boolean);
+      if ("pendingResume" in parsed.data && !Array.isArray(parsed.data.pendingResume)) {
+        throw new Error("invalid pendingResume shape");
+      }
       const needsMigration = parsed.data.items.some(hasLegacyPomodoroFields) || Array.isArray(parsed.data.pendingResume) && parsed.data.pendingResume.some(hasLegacyPomodoroFields);
       const loadedItems = parsed.data.items.map(cleanRecord);
       const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map((value) => cleanPending(value, { version: VERSION2 })) : [];
+      recoverablePending = loadedPending.filter(Boolean);
       if (loadedItems.some((item) => !item) || loadedPending.some((item) => !item)) {
         throw new Error("invalid paused-task record");
+      }
+      if ("finalizing" in parsed.data && parsed.data.finalizing !== null) {
+        recoverableFinalizing = cleanFinalizing(parsed.data.finalizing);
+        if (!recoverableFinalizing)
+          throw new Error("invalid finalizing Pause Batch marker");
       }
       const byTask = new Map(loadedItems.map((item) => [item.taskUid, item]));
       const pendingByTask = new Map(loadedPending.map((item) => [item.taskUid, item]));
       items = [...byTask.values()];
       pendingResume = [...pendingByTask.values()];
+      finalizing = recoverableFinalizing;
       if (pendingResume.some((item) => item.recoveryState === "conflict")) {
         const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
         notice3 = firstWarning ? "A current pending Resume has no exact Session association; it was retained as a conflict." : "";
@@ -3324,10 +3609,12 @@ function load2() {
       return getPaused();
     }
     if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
+      recoverableItems = parsed.items.map(cleanRecord).filter(Boolean);
       const loaded = parsed.items.map(cleanRecord);
       const loadedPending = Array.isArray(parsed.pendingResume) ? parsed.pendingResume.map(
         (value) => cleanPending(value, { version: LEGACY_VERSION, legacy: true })
       ) : [];
+      recoverablePending = loadedPending.filter(Boolean);
       if (loaded.some((item) => !item) || loadedPending.some((item) => !item)) {
         throw new Error("invalid legacy paused-task record");
       }
@@ -3338,6 +3625,9 @@ function load2() {
     }
     throw new Error("unsupported paused-batch version");
   } catch (error) {
+    items = [...new Map(recoverableItems.map((item) => [item.taskUid, item])).values()];
+    pendingResume = [...new Map(recoverablePending.map((item) => [item.taskUid, item])).values()];
+    finalizing = recoverableFinalizing;
     unsupportedRaw2 = raw;
     const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
     notice3 = firstWarning ? "Saved paused-task state uses an unsupported or invalid version and was kept." : "";
@@ -3433,7 +3723,11 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
           merged.set(record.taskUid, record);
         }
         items = [...merged.values()];
-        persist();
+        if (!persist()) {
+          const error = new Error(notice3 || "Pause Batch could not be saved before closing Sessions.");
+          error.uncertain = true;
+          throw error;
+        }
         return snapshots;
       }
     });
@@ -3449,6 +3743,18 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
       pendingTaskUids: pendingTaskUids2,
       uncertain: true,
       error: new Error(notice3)
+    });
+  }
+  if (outcome.preflight) {
+    items = originalItems;
+    notice3 = "Pause Batch could not be saved before closing Sessions; no Session was changed.";
+    notify2();
+    return pauseBatchResult({
+      failed: outcome.pendingClockUids?.length || 0,
+      pendingClockUids: outcome.pendingClockUids || [],
+      pendingTaskUids: outcome.entries?.filter((entry) => entry.running).map((entry) => entry.taskUid) || [],
+      uncertain: true,
+      error: outcome.error || new Error(notice3)
     });
   }
   let failed = 0;
@@ -3470,7 +3776,9 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
   } else if (failed > 0) {
     notice3 = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
   }
-  persist();
+  const persisted = persist();
+  if (!persisted)
+    notice3 || (notice3 = "Pause Batch could not be saved yet; its recovery state was retained.");
   notify2();
   const pendingSnapshots = outcome.records.filter((snapshot) => {
     const result = byClockUid.get(snapshot.clockUid);
@@ -3484,7 +3792,7 @@ async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
     failed,
     pendingClockUids,
     pendingTaskUids,
-    uncertain: Boolean(outcome.uncertain),
+    uncertain: Boolean(outcome.uncertain || !persisted),
     retry: incomplete ? {
       ...outcome.retry || { action: "pause" },
       action: "pause",
@@ -3558,6 +3866,40 @@ async function recoverPending({ running: running2 = [] } = {}) {
   return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
 }
 var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
+function reconcileFinalizing({ running: running2 = [] } = {}) {
+  if (!finalizing)
+    return { ok: true, uncertain: false, activeTaskUids: [] };
+  const runningByClock = new Map(running2.map((entry) => [entry.clockUid, entry]));
+  const activeTargets = finalizing.targets.filter((target) => {
+    const entry = runningByClock.get(target.clockUid);
+    return entry?.taskUid === target.taskUid;
+  });
+  const activeTaskUids = new Set(activeTargets.map((target) => target.taskUid));
+  const previousItems = items;
+  const previousPending = pendingResume;
+  const previousFinalizing = finalizing;
+  items = items.filter((item) => activeTaskUids.has(item.taskUid));
+  pendingResume = pendingResume.filter((item) => activeTaskUids.has(item.taskUid));
+  finalizing = activeTargets.length > 0 ? { action: "clock-out-all", targets: activeTargets } : null;
+  const changed = previousItems.length !== items.length || previousPending.length !== pendingResume.length || JSON.stringify(previousFinalizing) !== JSON.stringify(finalizing);
+  if (!changed)
+    return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+  if (!persist()) {
+    items = previousItems;
+    pendingResume = previousPending;
+    finalizing = previousFinalizing;
+    notice3 = "Clock Out All was confirmed in the graph, but its recovery state could not be committed yet.";
+    notify2();
+    return {
+      ok: false,
+      uncertain: true,
+      activeTaskUids: [...activeTaskUids],
+      error: new Error(notice3)
+    };
+  }
+  notify2();
+  return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+}
 var resumeBatchResult = ({
   completed = 0,
   failed = 0,
@@ -3819,6 +4161,30 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       error: initial.error
     });
   }
+  const finalized = reconcileFinalizing({ running: initial.running });
+  if (!finalized.ok) {
+    return resumeBatchResult({
+      failed: finalized.activeTaskUids.length,
+      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
+      blocked: true,
+      uncertain: true,
+      error: finalized.error,
+      pruned: 0,
+      satisfied: 0
+    });
+  }
+  if (finalized.activeTaskUids.length > 0) {
+    notice3 = "Clock Out All still has running Sessions; they were kept for an explicit retry.";
+    notify2();
+    return resumeBatchResult({
+      failed: finalized.activeTaskUids.length,
+      pendingTaskUids: finalized.activeTaskUids,
+      blocked: true,
+      error: new Error(notice3),
+      pruned: 0,
+      satisfied: 0
+    });
+  }
   const recovered = await recoverPending({ running: initial.running });
   const runningEntries = getRunning();
   const runningTasks = new Set(runningEntries.map((entry) => entry.taskUid));
@@ -3987,7 +4353,24 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
 async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let outcome;
   try {
-    outcome = await clockOutEntries(null, { now });
+    outcome = await clockOutEntries(null, {
+      now,
+      prepare: (entries) => {
+        const previousFinalizing = finalizing;
+        finalizing = {
+          action: "clock-out-all",
+          targets: entries.filter((entry) => entry.running).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid }))
+        };
+        if (!persist()) {
+          finalizing = previousFinalizing;
+          const error = new Error(
+            notice3 || "Pause Batch could not be saved before closing Sessions."
+          );
+          error.uncertain = true;
+          throw error;
+        }
+      }
+    });
   } catch {
     notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
     notify2();
@@ -4008,6 +4391,39 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
       completedVerb: "ended"
     };
   }
+  if (outcome?.preflight) {
+    notice3 = "Pause Batch could not be saved before closing Sessions; no Session was changed.";
+    notify2();
+    return {
+      ...outcome,
+      action: "clock-out-all",
+      ok: false,
+      item: "Session",
+      completedVerb: "ended",
+      count: 0,
+      completed: 0,
+      partial: false
+    };
+  }
+  if (!Array.isArray(outcome?.results)) {
+    notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
+    notify2();
+    return {
+      action: "clock-out-all",
+      ok: false,
+      count: 0,
+      completed: 0,
+      failed: getRunning().length,
+      pending: getRunning().length,
+      pendingClockUids: getRunning().map((entry) => entry.clockUid),
+      partial: false,
+      uncertain: true,
+      error: new Error(notice3),
+      retry: { action: "close", retryClockUids: getRunning().map((entry) => entry.clockUid) },
+      item: "Session",
+      completedVerb: "ended"
+    };
+  }
   const closedUids = new Set(
     outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
   );
@@ -4015,10 +4431,42 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
     (entry) => entry.running && !closedUids.has(entry.clockUid)
   );
   if (!outcome.uncertain && outcome.failed === 0 && stillRunning.length === 0) {
+    const previousFinalizing = finalizing;
     items = [];
     pendingResume = [];
+    finalizing = null;
     notice3 = "";
-    persist();
+    const persisted2 = persist();
+    if (!persisted2) {
+      finalizing = previousFinalizing || {
+        action: "clock-out-all",
+        targets: (outcome.entries || []).map((entry) => ({
+          taskUid: entry.taskUid,
+          clockUid: entry.clockUid
+        }))
+      };
+      notice3 = "Sessions were closed, but clearing the saved Pause Batch could not be committed yet.";
+      notify2();
+      return {
+        ...outcome,
+        action: "clock-out-all",
+        ok: false,
+        item: "Session",
+        completedVerb: "ended",
+        count: outcome.closed,
+        completed: outcome.closed,
+        pending: 0,
+        pendingClockUids: [],
+        uncertain: true,
+        partial: false,
+        retry: {
+          action: "commit-pause-batch",
+          retryClockUids: [],
+          writtenClockUids: outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
+        },
+        error: new Error(notice3)
+      };
+    }
     notify2();
     return {
       ...outcome,
@@ -4044,8 +4492,15 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   items = [...retained.values()];
   pendingResume = pendingResume.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid));
+  finalizing = {
+    action: "clock-out-all",
+    targets: (outcome.entries || []).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid }))
+  };
   notice3 = outcome.uncertain ? GRAPH_UNCERTAIN : `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
-  persist();
+  const persisted = persist();
+  if (!persisted) {
+    notice3 = "Sessions were partly closed, but their durable recovery state could not be committed yet.";
+  }
   notify2();
   const pendingClockUids = stillRunning.map((entry) => entry.clockUid);
   return {
@@ -4056,6 +4511,7 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
     completedVerb: "ended",
     count: outcome.closed,
     completed: outcome.closed,
+    uncertain: Boolean(outcome.uncertain || !persisted),
     pending: pendingClockUids.length,
     pendingClockUids,
     partial: Boolean(outcome.partial || outcome.closed > 0 && pendingClockUids.length > 0),
@@ -4074,6 +4530,7 @@ function clear() {
   }
   items = [];
   pendingResume = [];
+  finalizing = null;
   notice3 = "";
   persist();
   notify2();
@@ -4082,6 +4539,7 @@ function clear() {
 function reset3() {
   items = [];
   pendingResume = [];
+  finalizing = null;
   notice3 = "";
   unsupportedRaw2 = null;
   listeners2.clear();
@@ -4478,24 +4936,6 @@ var STYLES = `
     padding: 6px 5px 8px;
 }
 
-.rlb-popover__subheading {
-    padding: 10px 6px 4px;
-    color: #5c7080;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.rlb-paused-list {
-    padding: 0 6px 4px;
-}
-
-.rlb-paused-row {
-    padding: 4px 0;
-    overflow-wrap: anywhere;
-}
-
 .rlb-popover__notice {
     margin: 6px;
     padding: 6px 8px;
@@ -4754,6 +5194,14 @@ var STYLES = `
     background: #8a9ba8;
 }
 
+.rlb-run__status--recovery {
+    background: #d9822b;
+}
+
+.bp3-dark .rlb-run__status--recovery {
+    background: #f29d49;
+}
+
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 2;
     grid-row: 1;
@@ -4842,7 +5290,8 @@ var STYLES = `
     color: #c23030;
 }
 
-.rlb-run__actions .rlb-run__resume {
+.rlb-run__actions .rlb-run__resume,
+.rlb-run__actions .rlb-run__recovery {
     width: 32px;
     min-width: 32px;
     max-width: 32px;
@@ -4856,7 +5305,9 @@ var STYLES = `
 }
 
 .rlb-run__actions .rlb-run__resume:hover,
-.rlb-run__actions .rlb-run__resume:focus-visible {
+.rlb-run__actions .rlb-run__resume:focus-visible,
+.rlb-run__actions .rlb-run__recovery:hover,
+.rlb-run__actions .rlb-run__recovery:focus-visible {
     color: #3f596b;
     background: rgba(167, 182, 194, 0.24);
 }
@@ -4865,6 +5316,15 @@ var STYLES = `
 .rlb-run__state {
     color: #5c7080;
     opacity: 0.75;
+}
+
+.rlb-run--recovery .rlb-run__meta {
+    color: #8a4b08;
+    opacity: 1;
+}
+
+.bp3-dark .rlb-run--recovery .rlb-run__meta {
+    color: #f29d49;
 }
 
 .rlb-run__actions .bp3-icon-trash {
@@ -5791,6 +6251,7 @@ var STYLES = `
 
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
 var SURFACE_TITLE = "Roam Logbook";
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
@@ -5868,11 +6329,11 @@ var renderPausedRow = (row, now, options) => {
   node.dataset.sessionState = "paused";
   node.dataset.taskUid = item.taskUid;
   const status = el("span", "rlb-run__status rlb-run__status--paused");
-  status.setAttribute("aria-label", "Paused Session");
+  status.setAttribute("aria-label", "Paused Task");
   const body = el("div", "rlb-run__body");
   const meta = el("div", "rlb-run__meta");
   const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
-  const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : "Paused Session";
+  const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : "Paused Task";
   const pausedNode = el(
     "time",
     "rlb-run__meta-line rlb-run__started",
@@ -5899,7 +6360,44 @@ var renderPausedRow = (row, now, options) => {
   node.append(status, body, actions);
   return node;
 };
-function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, staleHours: staleHours2 = 8 }) {
+var renderRecoveryRow = (row, options) => {
+  const item = row.item;
+  const node = el("div", "rlb-run rlb-run--recovery");
+  node.dataset.sessionState = "recovery";
+  node.dataset.recoveryState = item.recoveryState || "conflict";
+  node.dataset.taskUid = item.taskUid;
+  const status = el("span", "rlb-run__status rlb-run__status--recovery");
+  status.setAttribute("aria-label", "Recovery");
+  const body = el("div", "rlb-run__body");
+  const meta = el("div", "rlb-run__meta");
+  const reason = item.recoveryIssue === "missing-clockUid" ? "Exact Session association is missing." : "Exact Session association needs review.";
+  meta.append(
+    el("div", "rlb-run__meta-line rlb-run__meta-primary", "Recovery required"),
+    el("div", "rlb-run__meta-line rlb-run__started", reason)
+  );
+  body.append(renderTitle(row, options.onOpenTask), meta);
+  const actions = el("div", "rlb-run__actions");
+  const retry = button(
+    "bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-run__recovery",
+    "",
+    (event) => {
+      event.stopPropagation();
+      void options.onRecovery?.(item, event);
+    },
+    { title: "Retry Recovery" }
+  );
+  retry.dataset.action = "recovery";
+  actions.appendChild(retry);
+  node.append(status, body, actions);
+  return node;
+};
+function buildSessionSurfaceModel({
+  entries = [],
+  pausedItems = [],
+  pendingItems = [],
+  now,
+  staleHours: staleHours2 = 8
+}) {
   const currentNow = now instanceof Date ? now : new Date(now);
   const runningRows = entries.map((entry) => ({
     kind: "running",
@@ -5915,17 +6413,26 @@ function buildSessionSurfaceModel({ entries = [], pausedItems = [], now, staleHo
     title: item.title,
     item
   }));
+  const recoveryRows = pendingItems.filter((item) => item?.recoveryState === "conflict").map((item) => ({
+    kind: "recovery",
+    key: `recovery:${item.taskUid}`,
+    taskUid: item.taskUid,
+    title: item.title,
+    item
+  }));
   return {
     now: currentNow,
     entries: entries.slice(),
     pausedItems: pausedItems.slice(),
-    rows: [...runningRows, ...pausedRows],
+    pendingItems: pendingItems.slice(),
+    rows: [...runningRows, ...pausedRows, ...recoveryRows],
     runningCount: entries.length,
     pausedCount: pausedItems.length,
+    recoveryCount: recoveryRows.length,
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${sessionCount(model.pausedCount)} Paused` : SURFACE_TITLE;
+var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${taskCount(model.pausedCount)} Paused` : model.recoveryCount > 0 ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? "y" : "ies"} Required` : SURFACE_TITLE;
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
   if (options.titleId)
@@ -5964,13 +6471,20 @@ function renderSessionSurface(root, model, options = {}) {
     }
     for (const row of model.rows) {
       sessionList.appendChild(
-        row.kind === "running" ? renderRunningRow(row, model.now, options) : renderPausedRow(row, model.now, options)
+        row.kind === "running" ? renderRunningRow(row, model.now, options) : row.kind === "paused" ? renderPausedRow(row, model.now, options) : renderRecoveryRow(row, options)
       );
     }
   }
   for (const notice4 of options.notices || []) {
-    if (notice4)
-      root.appendChild(el("div", "rlb-popover__notice bp3-text-small", notice4));
+    const message = typeof notice4 === "string" ? notice4 : notice4?.message;
+    if (!message)
+      continue;
+    const role = notice4?.role === "alert" ? "alert" : "status";
+    const node = el("div", "rlb-popover__notice bp3-text-small", message);
+    node.setAttribute("role", role);
+    node.setAttribute("aria-live", role === "alert" ? "assertive" : "polite");
+    node.setAttribute("aria-atomic", "true");
+    root.appendChild(node);
   }
   const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
   const footerModifiers = [
@@ -5993,8 +6507,8 @@ function renderSessionSurface(root, model, options = {}) {
     }
     if (model.pausedCount > 0) {
       footer.appendChild(
-        button("bp3-button bp3-small", "Resume All", () => options.onResumeAll?.(), {
-          title: "Resume paused Sessions with fresh CLOCK entries"
+        button("bp3-button bp3-small", "Resume paused Tasks", () => options.onResumeAll?.(), {
+          title: "Resume paused Tasks with fresh CLOCK entries"
         })
       );
     }
@@ -6064,12 +6578,13 @@ function updateSessionSurfaceElapsed(root, entries, now) {
 var WIDGET_ID = "roam-logbook-topbar";
 var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
-var TOPBAR_SELECTOR = ".rm-topbar";
+var TOPBAR_SELECTOR2 = ".rm-topbar";
 var REFRESH_SUCCESS_DURATION = 1800;
-var REFRESH_LOADING_MESSAGE = "Refreshing Sessions from graph\u2026";
-var REFRESH_SUCCESS_MESSAGE = "Updated just now";
-var REFRESH_ERROR_MESSAGE = "Refresh failed; last valid snapshot kept. Retry.";
+var REFRESH_LOADING_MESSAGE2 = "Refreshing Sessions from graph\u2026";
+var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
+var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
 var sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var taskCount2 = (count) => `${count} Task${count === 1 ? "" : "s"}`;
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   if (normalized2 >= 7)
@@ -6203,10 +6718,11 @@ function createTopbar({
   const sessionModel = () => buildSessionSurfaceModel({
     entries: getRunning(),
     pausedItems: getPaused(),
+    pendingItems: getPendingResume(),
     now: nowDate(),
     staleHours: staleHours()
   });
-  const surfaceNotices = () => actionNotice ? [actionNotice] : [getNotice(), getNotice2()].filter(Boolean);
+  const surfaceNotices = () => actionNotice ? [{ message: actionNotice, role: "alert" }] : [getNotice(), getNotice2()].filter(Boolean).map((message) => ({ message, role: "status" }));
   const renderSurfaces = () => {
     if (popover)
       renderPopover();
@@ -6252,17 +6768,17 @@ function createTopbar({
       (result) => {
         if (result?.ok) {
           actionNotice = "";
-          setRefreshState("success", REFRESH_SUCCESS_MESSAGE, { clearAfter: true });
+          setRefreshState("success", REFRESH_SUCCESS_MESSAGE2, { clearAfter: true });
         } else {
           actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-          setRefreshState("error", REFRESH_ERROR_MESSAGE);
+          setRefreshState("error", REFRESH_ERROR_MESSAGE2);
         }
         return result;
       },
       (error) => {
         console.error("[roam-logbook] could not refresh Session surface", error);
         actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-        setRefreshState("error", REFRESH_ERROR_MESSAGE);
+        setRefreshState("error", REFRESH_ERROR_MESSAGE2);
         return {
           ok: false,
           uncertain: true,
@@ -6275,7 +6791,7 @@ function createTopbar({
       refreshInFlight = null;
     });
     actionNotice = "";
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
+    setRefreshState("loading", REFRESH_LOADING_MESSAGE2);
     return refreshInFlight;
   };
   const run = async (action) => {
@@ -6323,6 +6839,7 @@ function createTopbar({
       },
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
       onResume: (item) => void run(() => resumeOne(item.taskUid)),
+      onRecovery: () => void run(() => resumeAll()),
       onDiscard: (entry) => {
         if (discardConfirmUid !== entry.clockUid) {
           discardConfirmUid = entry.clockUid;
@@ -6424,6 +6941,7 @@ function createTopbar({
     if (!buttonNode)
       return;
     const pausedItems = getPaused();
+    const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
     const running2 = entries.length > 0;
     if (running2 && reconcile2)
       reconcileCycle(entries, { now });
@@ -6435,14 +6953,18 @@ function createTopbar({
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
       buttonNode.classList.remove("rlb-topbar__button--parallel");
-      buttonNode.classList.toggle("rlb-topbar__button--paused", pausedItems.length > 0);
+      buttonNode.classList.toggle(
+        "rlb-topbar__button--paused",
+        pausedItems.length > 0 || recoveryItems.length > 0
+      );
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       parallelNode.textContent = "";
       separatorNode.textContent = "";
-      syncButtonLayout(pausedItems.length > 0 ? "paused" : "idle");
-      buttonNode.title = pausedItems.length ? `${sessionCount2(pausedItems.length)} Paused \u2014 click to resume or review.` : "Roam Logbook \u2014 no Session running. Click for details.";
+      syncButtonLayout(pausedItems.length > 0 || recoveryItems.length > 0 ? "paused" : "idle");
+      buttonNode.title = pausedItems.length ? `${taskCount2(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
+${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryItems.length > 0 ? `${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review \u2014 click to retry.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -6486,6 +7008,29 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     renderButton(entries, now);
     updateSessionSurfaceElapsed(popover, entries, now);
   };
+  const stopTicker = () => {
+    if (ticker !== null)
+      clearIntervalFn(ticker);
+    ticker = null;
+  };
+  const startTicker = () => {
+    if (destroyed || ticker !== null)
+      return;
+    ticker = setIntervalFn(tick, 1e3);
+  };
+  const stopAttachmentObservers = () => {
+    observer?.disconnect();
+    observer = null;
+    recoveryObserver?.disconnect();
+    recoveryObserver = null;
+    outerRecoveryObserver?.disconnect();
+    outerRecoveryObserver = null;
+    hostObserver?.disconnect();
+    hostObserver = null;
+    recoveryTarget = null;
+    outerRecoveryTarget = null;
+    observedTopbar = null;
+  };
   const build = () => {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
@@ -6507,14 +7052,18 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       return;
     attachCount += 1;
     if (!showTopbarWidget()) {
-      observeRecoveryTarget(null);
+      stopTicker();
+      stopAttachmentObservers();
       remove();
       return;
     }
-    const topbar = document.querySelector(TOPBAR_SELECTOR);
+    const topbar = document.querySelector(TOPBAR_SELECTOR2);
     observeRecoveryTarget(topbar);
-    if (!topbar)
+    if (!topbar) {
+      stopTicker();
       return;
+    }
+    startTicker();
     if (topbar !== observedTopbar)
       observeTopbar(topbar);
     if (!container)
@@ -6540,10 +7089,10 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     const nodes = [...record.addedNodes, ...record.removedNodes];
     if (nodes.length > 0 && nodes.every(isPluginNode2))
       return false;
-    if (record.target?.closest?.(TOPBAR_SELECTOR))
+    if (record.target?.closest?.(TOPBAR_SELECTOR2))
       return true;
     return nodes.some(
-      (node) => node?.matches?.(TOPBAR_SELECTOR) || node?.querySelector?.(TOPBAR_SELECTOR)
+      (node) => node?.matches?.(TOPBAR_SELECTOR2) || node?.querySelector?.(TOPBAR_SELECTOR2)
     );
   };
   const scheduleAttach = () => {
@@ -6687,7 +7236,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
         renderButton();
         renderSurfaces();
       });
-      ticker = setIntervalFn(tick, 1e3);
       attach2();
     },
     refresh: attach2,
@@ -6704,20 +7252,8 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       unsubscribe = null;
       unsubscribePaused?.();
       unsubscribePaused = null;
-      if (ticker)
-        clearIntervalFn(ticker);
-      ticker = null;
-      observer?.disconnect();
-      observer = null;
-      hostObserver?.disconnect();
-      hostObserver = null;
-      recoveryObserver?.disconnect();
-      recoveryObserver = null;
-      outerRecoveryObserver?.disconnect();
-      outerRecoveryObserver = null;
-      recoveryTarget = null;
-      outerRecoveryTarget = null;
-      observedTopbar = null;
+      stopTicker();
+      stopAttachmentObservers();
       attachQueued = false;
       if (attachTimer)
         clearTimeout(attachTimer);
@@ -6731,20 +7267,86 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
 }
 
 // src/completion.js
-function attachCompletionHandling({ pauseApi = null } = {}) {
+var retryableDetachers = /* @__PURE__ */ new Set();
+var retryOrphanedDetachers = () => {
+  for (const detach of [...retryableDetachers]) {
+    try {
+      const result = detach();
+      if (result?.ok)
+        retryableDetachers.delete(detach);
+    } catch (error) {
+      console.warn("[roam-logbook] deferred completion watch cleanup failed", error);
+    }
+  }
+};
+var issueUids = (issue) => new Set([
+  issue?.taskUid,
+  issue?.parentUid,
+  ...Array.isArray(issue?.affectedUids) ? issue.affectedUids : []
+].filter((uid) => typeof uid === "string" && uid));
+var seedHasIssue = (seed, parentOf, issues) => {
+  const affected = issues.flatMap((issue) => [...issueUids(issue)]);
+  const blocked = new Set(affected);
+  const seen = /* @__PURE__ */ new Set();
+  let current = seed;
+  while (current) {
+    if (blocked.has(current))
+      return true;
+    if (seen.has(current))
+      return true;
+    seen.add(current);
+    current = parentOf[current];
+  }
+  return false;
+};
+var ancestorsOf = (seed, parentOf) => {
+  const result = [];
+  const seen = /* @__PURE__ */ new Set();
+  let current = seed;
+  while (current) {
+    if (seen.has(current))
+      return null;
+    seen.add(current);
+    result.push(current);
+    current = parentOf[current];
+  }
+  return result;
+};
+function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIssue = null } = {}) {
+  retryOrphanedDetachers();
   let disposed = false;
   const watches = /* @__PURE__ */ new Map();
   const active = /* @__PURE__ */ new Set();
+  const retryClockUids = /* @__PURE__ */ new Map();
+  const retryAttempts = /* @__PURE__ */ new Map();
+  const lastStatus = /* @__PURE__ */ new Map();
   let pending = /* @__PURE__ */ new Set();
   let scheduled = false;
-  const detachAll = () => {
-    for (const watch of watches.values())
-      watch.detach();
-    watches.clear();
+  const reportWatchIssue = (issue) => {
+    try {
+      onWatchIssue?.(issue);
+    } catch (error) {
+      console.error("[roam-logbook] completion watcher issue listener failed", error);
+    }
   };
-  const schedule = (uid) => {
-    if (disposed || active.has(uid))
+  const reportResult = (result) => {
+    try {
+      onResult?.(result);
+    } catch (error) {
+      console.error("[roam-logbook] completion result listener failed", error);
+    }
+  };
+  const schedule = (uid, explicitRetryClockUids = null) => {
+    if (disposed || !uid || active.has(uid))
       return;
+    if (Array.isArray(explicitRetryClockUids) && explicitRetryClockUids.length > 0) {
+      const retry = retryClockUids.get(uid) || /* @__PURE__ */ new Set();
+      for (const clockUid of explicitRetryClockUids) {
+        if (typeof clockUid === "string" && clockUid)
+          retry.add(clockUid);
+      }
+      retryClockUids.set(uid, retry);
+    }
     pending.add(uid);
     if (scheduled)
       return;
@@ -6757,16 +7359,55 @@ function attachCompletionHandling({ pauseApi = null } = {}) {
           if (active.has(taskUid))
             continue;
           active.add(taskUid);
+          const retry = retryClockUids.get(taskUid);
+          retryClockUids.delete(taskUid);
           try {
-            await clockOutCompletedTask(taskUid, {
+            const result = await clockOutCompletedTask(taskUid, {
               source: "auto-complete",
+              retryClockUids: retry ? [...retry] : null,
               getPauseTaskUids: () => [
                 ...pauseApi?.getPaused?.() || [],
                 ...pauseApi?.getPendingResume?.() || []
               ].map((item) => item.taskUid),
               pruneCompleted: (taskUids) => pauseApi?.pruneCompleted?.(taskUids)
             });
+            reportResult(result);
+            const remaining = [
+              ...Array.isArray(result?.retry?.retryClockUids) ? result.retry.retryClockUids : [],
+              ...Array.isArray(result?.pendingClockUids) ? result.pendingClockUids : []
+            ].filter((clockUid, index, all) => typeof clockUid === "string" && all.indexOf(clockUid) === index);
+            if (!result?.ok && remaining.length > 0) {
+              retryClockUids.set(taskUid, new Set(remaining));
+              const attempts = retryAttempts.get(taskUid) || 0;
+              if (attempts < 1 && !disposed) {
+                retryAttempts.set(taskUid, attempts + 1);
+                pending.add(taskUid);
+              }
+            } else if (result?.ok) {
+              retryAttempts.delete(taskUid);
+              retryClockUids.delete(taskUid);
+            }
           } catch (error) {
+            const result = {
+              action: "auto-clock-out",
+              source: "auto-complete",
+              ok: false,
+              triggerUid: taskUid,
+              failed: 1,
+              pending: 1,
+              pendingClockUids: retry ? [...retry] : [],
+              uncertain: true,
+              partial: false,
+              retry: {
+                action: "auto-clock-out",
+                taskUid,
+                retryClockUids: retry ? [...retry] : []
+              },
+              error
+            };
+            reportResult(result);
+            if (retry)
+              retryClockUids.set(taskUid, retry);
             console.error("[roam-logbook] automatic completion action failed", error);
           } finally {
             active.delete(taskUid);
@@ -6774,6 +7415,8 @@ function attachCompletionHandling({ pauseApi = null } = {}) {
         }
       }
       scheduled = false;
+      if (!disposed && pending.size > 0)
+        schedule([...pending][0]);
     }).catch((error) => {
       scheduled = false;
       console.error("[roam-logbook] automatic completion reconciliation failed", error);
@@ -6791,64 +7434,104 @@ function attachCompletionHandling({ pauseApi = null } = {}) {
     ];
     let hierarchy;
     try {
-      hierarchy = readHierarchy(seeds);
+      hierarchy = readHierarchy(seeds, { includeSeedStrings: true });
     } catch (error) {
+      reportWatchIssue({ type: "hierarchy-read", error, affectedUids: seeds });
       console.warn("[roam-logbook] completion hierarchy could not be confirmed", error);
       return;
     }
-    if (hierarchy.issues.length > 0) {
-      console.warn("[roam-logbook] completion hierarchy is ambiguous; watches were retained");
-      return;
-    }
-    const desired = new Set(seeds);
+    const desired = /* @__PURE__ */ new Set();
     for (const seed of seeds) {
-      const seen = /* @__PURE__ */ new Set();
-      let current = seed;
-      while (current && hierarchy.parentOf[current]) {
-        if (seen.has(current)) {
-          console.warn("[roam-logbook] completion hierarchy contains a cycle", seed);
-          return;
-        }
-        seen.add(current);
-        current = hierarchy.parentOf[current];
-        desired.add(current);
-      }
+      if (seedHasIssue(seed, hierarchy.parentOf, hierarchy.issues))
+        continue;
+      const component = ancestorsOf(seed, hierarchy.parentOf);
+      if (!component)
+        continue;
+      for (const uid of component)
+        desired.add(uid);
     }
     for (const uid of desired) {
       if (watches.has(uid))
         continue;
       const result = watchBlockString(uid, () => schedule(uid));
-      if (result.ok)
+      if (result.ok) {
         watches.set(uid, result);
-      else
+      } else {
+        reportWatchIssue({ type: "install", uid, error: result.error, result });
         console.warn("[roam-logbook] completion watch unavailable", uid, result.error);
-    }
-    for (const [uid, watch] of watches) {
-      if (!desired.has(uid)) {
-        watch.detach();
-        watches.delete(uid);
       }
+    }
+    if (hierarchy.issues.length === 0) {
+      for (const [uid, watch] of watches) {
+        if (!desired.has(uid)) {
+          const result = watch.detach();
+          if (result?.ok)
+            watches.delete(uid);
+          else {
+            reportWatchIssue({ type: "remove", uid, error: result?.error, result });
+            console.warn("[roam-logbook] completion watch could not be removed", uid, result?.error);
+          }
+        }
+      }
+    } else {
+      for (const issue of hierarchy.issues) {
+        reportWatchIssue({ type: "hierarchy", issue });
+      }
+      console.warn("[roam-logbook] completion hierarchy is ambiguous; affected watches were retained");
     }
     const statusOf = new Map([
       ...entries.map((entry) => [entry.taskUid, entry.status]),
-      ...Object.entries(hierarchy.stringOf).map(([uid, string]) => [
-        uid,
-        taskStatus(string)
-      ])
+      ...Object.entries(hierarchy.stringOf).map(([uid, string]) => [uid, taskStatus(string)])
     ]);
+    for (const uid of [...lastStatus.keys()]) {
+      if (!desired.has(uid)) {
+        lastStatus.delete(uid);
+        retryAttempts.delete(uid);
+        retryClockUids.delete(uid);
+      }
+    }
     for (const uid of desired) {
-      if (statusOf.get(uid) === "DONE")
+      const status = statusOf.get(uid);
+      const previous = lastStatus.get(uid);
+      lastStatus.set(uid, status);
+      if (status !== "DONE") {
+        retryAttempts.delete(uid);
+        retryClockUids.delete(uid);
+      } else if (previous !== "DONE") {
+        retryAttempts.delete(uid);
         schedule(uid);
+      }
     }
   };
   const unsubscribe = subscribe(sync);
+  const detachAll = () => {
+    const failedUids = [];
+    for (const [uid, watch] of watches) {
+      const result2 = watch.detach();
+      if (result2?.ok)
+        watches.delete(uid);
+      else {
+        failedUids.push(uid);
+        reportWatchIssue({ type: "remove", uid, error: result2?.error, result: result2 });
+      }
+    }
+    const result = { ok: failedUids.length === 0, failedUids };
+    if (result.ok)
+      retryableDetachers.delete(detachAll);
+    else
+      retryableDetachers.add(detachAll);
+    return result;
+  };
   return () => {
-    if (disposed)
-      return;
-    disposed = true;
-    pending.clear();
-    unsubscribe();
-    detachAll();
+    if (!disposed) {
+      disposed = true;
+      pending.clear();
+      retryClockUids.clear();
+      retryAttempts.clear();
+      lastStatus.clear();
+      unsubscribe();
+    }
+    return detachAll();
   };
 }
 
@@ -6882,7 +7565,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
     const uid = context?.["block-uid"];
     if (!uid || isBlockRunning(uid))
       return false;
-    return todoBlocksOnly() ? isTaskBlock(targetString(context)) : true;
+    const string = targetString(context);
+    if (taskStatus(string) === "DONE")
+      return false;
+    return todoBlocksOnly() ? isTaskBlock(string) : true;
   };
   const notifyUser = (message) => {
     try {
@@ -7031,7 +7717,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
       load();
       load2();
       detachPomodoro = attach();
-      detachCompletion = attachCompletionHandling({ pauseApi: paused_exports });
+      detachCompletion = attachCompletionHandling({
+        pauseApi: paused_exports,
+        onResult: (result) => presentMutationResult(result, notifyUser)
+      });
       topbar.mount();
       refresh();
     },

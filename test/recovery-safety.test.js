@@ -6,6 +6,22 @@ import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 const TASK = { uid: 'recovery1', string: '{{[[TODO]]}} recovery task', parent: null };
 const OTHER = { uid: 'recovery2', string: '{{[[TODO]]}} another recovery task', parent: null };
 const UNRELATED = { uid: 'recovery3', string: '{{[[TODO]]}} unrelated running task', parent: null };
+const PARENT = { uid: 'recovery-parent', string: '{{[[TODO]]}} recovery parent', parent: null };
+const PAUSED_CHILD = {
+    uid: 'recovery-paused',
+    string: '{{[[TODO]]}} paused recovery child',
+    parent: 'recovery-parent',
+};
+const RUNNING_CHILD = {
+    uid: 'recovery-running',
+    string: '{{[[TODO]]}} running recovery child',
+    parent: 'recovery-parent',
+};
+const RUNNING_SIBLING = {
+    uid: 'recovery-sibling',
+    string: '{{[[TODO]]}} running recovery sibling',
+    parent: 'recovery-parent',
+};
 const T0 = new Date('2026-08-15T09:00:00');
 
 let graph;
@@ -19,8 +35,8 @@ const extensionAPI = {
     },
 };
 
-const install = async () => {
-    graph = installGraph([TASK, OTHER, UNRELATED]);
+const install = async (blocks = [TASK, OTHER, UNRELATED]) => {
+    graph = installGraph(blocks);
     allowMultiple = true;
     store.clear();
     const { setExtensionAPI } = await import('../src/settings.js');
@@ -93,6 +109,106 @@ test('Clock Out All retains only the still-running Pause Batch records after a p
     );
     assert.match(paused.getNotice(), /could not be closed|could not be finished/i);
     assert.equal(pomodoro.getNotice(), '');
+});
+
+test('automatic completion keeps Pause Batch recovery until every tree Session is confirmed closed', async () => {
+    const { clock, paused } = await install([PARENT, PAUSED_CHILD, RUNNING_CHILD, RUNNING_SIBLING]);
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(PAUSED_CHILD.uid, { now: T0 });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 60_000) });
+    await clock.clockIn(RUNNING_CHILD.uid, { now: new Date(T0.getTime() + 2 * 60_000) });
+    await clock.clockIn(RUNNING_SIBLING.uid, { now: new Date(T0.getTime() + 3 * 60_000) });
+
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === RUNNING_SIBLING.uid).clockUid;
+    await graph.api.data.block.update({
+        block: { uid: PARENT.uid, string: '{{[[DONE]]}} recovery parent' },
+    });
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async args => {
+        if (args.block.uid === failedUid) throw new Error('one automatic close failed');
+        return originalUpdate(args);
+    };
+
+    let result;
+    try {
+        result = await clock.clockOutCompletedTask(PARENT.uid, {
+            getPauseTaskUids: () => paused.getPaused().map(item => item.taskUid),
+            pruneCompleted: taskUids => paused.pruneCompleted(taskUids),
+            now: new Date(T0.getTime() + 4 * 60_000),
+        });
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.pendingClockUids, [failedUid]);
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [PAUSED_CHILD.uid]);
+    assert.equal(clock.getRunning().length, 1);
+});
+
+test('Clock Out All keeps a durable finalizing marker when clearing the batch cannot be committed', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+    await clock.clockIn(TASK.uid, { now: new Date(T0.getTime() + 6 * 60_000) });
+
+    const originalSet = extensionWithMultiple.settings.set;
+    let pausedBatchWrites = 0;
+    extensionWithMultiple.settings.set = (key, value) => {
+        if (key === 'pausedBatch') {
+            pausedBatchWrites += 1;
+            if (pausedBatchWrites === 2) throw new Error('Pause Batch commit failed');
+        }
+        return originalSet(key, value);
+    };
+
+    let result;
+    try {
+        result = await paused.clockOutAll({ now: new Date(T0.getTime() + 7 * 60_000) });
+    } finally {
+        extensionWithMultiple.settings.set = originalSet;
+    }
+
+    assert.equal(result.uncertain, true);
+    assert.equal(result.ok, false);
+    assert.equal(clock.getRunning().length, 0, 'the graph close remains committed');
+    const durable = JSON.parse(store.get('pausedBatch'));
+    assert.ok(durable.data.finalizing, 'the durable recovery marker survives the failed clear');
+
+    paused.reset();
+    clock.reset();
+    paused.load();
+    clock.refresh();
+    const recovered = await paused.resumeAll({ now: new Date(T0.getTime() + 8 * 60_000) });
+
+    assert.equal(recovered.resumed, 0, 'reload reconciliation must not resurrect a closed Session');
+    assert.equal(clock.getRunning().length, 0);
+    assert.deepEqual(paused.getPaused(), []);
+    assert.deepEqual(paused.getPendingResume(), []);
+    assert.equal(JSON.parse(store.get('pausedBatch')).data.finalizing, undefined);
+});
+
+test('malformed pendingResume is backed up and surfaced without discarding valid Pause Batch records', async () => {
+    const { paused } = await install();
+    const raw = JSON.stringify({
+        version: 2,
+        data: {
+            items: [{ taskUid: TASK.uid, title: 'kept task', pausedAtMs: T0.getTime() }],
+            pendingResume: { taskUid: OTHER.uid },
+        },
+    });
+    store.set('pausedBatch', raw);
+
+    paused.load();
+
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [TASK.uid]);
+    assert.deepEqual(paused.getPendingResume(), []);
+    assert.match(paused.getNotice(), /invalid|kept/i);
+    assert.equal(store.get('pausedBatch'), raw, 'the malformed source remains untouched');
+    assert.equal(JSON.parse(store.get('stateBackups')).data.pausedBatch.raw, raw);
 });
 
 test('Pause All returns a structured partial result and retries only the remaining Session', async () => {

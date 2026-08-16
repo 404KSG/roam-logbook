@@ -217,7 +217,7 @@ const readBlockStrings = uids => {
  * flip side is that a *parent* task's own mirrors are not followed — a
  * second-order case left for a later pass.
  */
-export function readHierarchy(taskUids) {
+export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     const parentOf = {};
     const stringOf = {};
     const mirrorsOf = {};
@@ -225,6 +225,11 @@ export function readHierarchy(taskUids) {
     const seeds = new Set(taskUids);
 
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf, issues };
+
+    // Seed Tasks may be paused-only and therefore absent from readAllEntries.
+    // Their own status still belongs in the confirmed hierarchy snapshot used
+    // by completion reconciliation.
+    if (includeSeedStrings) Object.assign(stringOf, readBlockStrings([...seeds]));
 
     let mirrorRows;
     try {
@@ -272,6 +277,7 @@ export function readHierarchy(taskUids) {
                 issues.push({
                     code: 'ambiguous-parent',
                     taskUid: uid,
+                    parentUids: [...choices],
                     title: `Ambiguous parent · ${uid}`,
                     rawClock: '',
                     message: `Task ${uid} has more than one confirmed parent; hierarchy roll-up was withheld.`,
@@ -304,6 +310,32 @@ export function readHierarchy(taskUids) {
             next.push(parentUid);
         }
         frontier = next;
+    }
+
+    if (frontier.length > 0) {
+        const frontierUids = new Set(frontier);
+        const affectedSeeds = [...seeds].filter(seed => {
+            const seen = new Set();
+            let current = seed;
+            while (current && !frontierUids.has(current)) {
+                if (seen.has(current)) return true;
+                seen.add(current);
+                current = parentOf[current];
+            }
+            return frontierUids.has(current);
+        });
+        const affectedUids = [...new Set([...frontier, ...affectedSeeds])];
+        issues.push({
+            code: 'ancestor-depth-exceeded',
+            kind: 'hierarchy',
+            source: 'ancestor-depth',
+            taskUid: affectedUids[0],
+            affectedUids,
+            seedUids: affectedSeeds,
+            title: `Hierarchy depth exceeded · ${affectedUids[0]}`,
+            rawClock: '',
+            message: `The ancestor chain exceeded the safety depth of ${MAX_ANCESTOR_DEPTH}; cascade scope was withheld.`,
+        });
     }
 
     // A malformed graph can point an ancestor back into the same chain. Keep the

@@ -97,7 +97,7 @@ test.afterEach(t => {
 
 test.after(() => uninstallGraph());
 
-test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cycle', async t => {
+test('Pause All survives reload and Resume paused Tasks starts a fresh shared Pomodoro cycle', async t => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pausetwo2' });
     assert.equal(clock.getRunning().length, 2);
@@ -111,8 +111,8 @@ test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cy
     assert.equal(clock.getRunning().length, 0);
     assert.ok(clockLines('pauseone1')[0].includes('--'));
     assert.ok(clockLines('pausetwo2')[0].includes('--'));
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
-    assert.ok(action('Resume All'));
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.ok(action('Resume paused Tasks'));
     const footer = [...popover().querySelectorAll('.rlb-popover__footer button')];
     assert.equal(footer.filter(button => /\bbp3-icon-/.test(button.className)).length, 1);
     assert.ok(footer.filter(button => !/\bbp3-icon-/.test(button.className)).every(button => button.textContent));
@@ -135,10 +135,10 @@ test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cy
     extension.onunload();
     extension.onload({ extensionAPI });
     click(topbarButton());
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
 
     t.mock.timers.tick(10 * 60_000);
-    click(action('Resume All'));
+    click(action('Resume paused Tasks'));
     await settle();
 
     assert.equal(clock.getRunning().length, 2);
@@ -158,7 +158,27 @@ test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cy
     assert.equal(resumedRow.querySelector('.bp3-icon-stopwatch'), null);
 });
 
-test('Resume All reconciles a paused Task explicitly clocked in and out during the pause', async () => {
+test('confirmed Pause All empty state resets the shared Pomodoro cycle', async () => {
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
+    assert.ok(pomodoro.getCycle());
+
+    const drawer = graph.childrenOf('pauseone1').find(block => block.string === 'LOGBOOK::');
+    const clockBlock = graph.childrenOf(drawer.uid).find(block => block.string.startsWith('CLOCK::'));
+    await graph.api.data.block.update({
+        block: {
+            uid: clockBlock.uid,
+            string: 'CLOCK:: [2026-08-15 Sat 01:00]--[2026-08-15 Sat 01:01] => 1:00',
+        },
+    });
+
+    const result = await (await import('../src/paused.js')).pauseAll({ now: T0 });
+
+    assert.equal(result.ok, true);
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(pomodoro.getCycle(), null);
+});
+
+test('Resume paused Tasks reconciles a paused Task explicitly clocked in and out during the pause', async () => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     click(topbarButton());
     click(action('Pause'));
@@ -168,7 +188,7 @@ test('Resume All reconciles a paused Task explicitly clocked in and out during t
     await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'pauseone1' });
     assert.equal(clock.getRunning().length, 0);
 
-    click(action('Resume All'));
+    click(action('Resume paused Tasks'));
     await settle();
 
     assert.equal(clock.getRunning().length, 0, 'explicitly finished work is not resumed again');
@@ -186,7 +206,7 @@ test('a persisted string true setting permits an all-or-nothing multi-task resum
     extension.onload({ extensionAPI });
 
     click(topbarButton());
-    const resume = action('Resume All');
+    const resume = action('Resume paused Tasks');
     assert.equal(resume.disabled, false);
     click(resume);
     await settle();
@@ -195,7 +215,7 @@ test('a persisted string true setting permits an all-or-nothing multi-task resum
     assert.equal(JSON.parse(settingsStore.get('pausedBatch')).data.items.length, 0);
 });
 
-test('Resume All explicitly enables multiple clocks and never leaves a partial one-clock result', async () => {
+test('Resume paused Tasks explicitly enables multiple clocks and never leaves a partial one-clock result', async () => {
     extension.onunload();
     settingsStore.set('allowMultipleClocks', false);
     savePaused([
@@ -205,8 +225,8 @@ test('Resume All explicitly enables multiple clocks and never leaves a partial o
     extension.onload({ extensionAPI });
 
     click(topbarButton());
-    const resume = action('Resume All');
-    assert.equal(resume.disabled, false, 'explicit Resume All consent is always actionable');
+    const resume = action('Resume paused Tasks');
+    assert.equal(resume.disabled, false, 'explicit Resume paused Tasks consent is always actionable');
     click(resume);
     await settle();
 
@@ -223,12 +243,12 @@ test('malformed paused state is retained with a visible warning', t => {
     extension.onload({ extensionAPI });
 
     click(topbarButton());
-    assert.equal(action('Resume All'), undefined);
+    assert.equal(action('Resume paused Tasks'), undefined);
     assert.match(popover().textContent, /unsupported or invalid version and was kept/);
     assert.equal(settingsStore.get('pausedBatch'), '{not json');
 });
 
-test('Resume All prunes missing Tasks and consumes a Task that is already running', async () => {
+test('Resume paused Tasks prunes missing Tasks and consumes a Task that is already running', async () => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     savePaused([
         savedRecord('pauseone1', 'first paused task'),
@@ -237,7 +257,7 @@ test('Resume All prunes missing Tasks and consumes a Task that is already runnin
     reload();
 
     click(topbarButton());
-    click(action('Resume All'));
+    click(action('Resume paused Tasks'));
     await settle();
 
     assert.equal(clock.getRunning().length, 1, 'the already-running Task is not duplicated');
@@ -246,7 +266,7 @@ test('Resume All prunes missing Tasks and consumes a Task that is already runnin
     assert.match(popover().textContent, /1 missing Task was removed/);
 });
 
-test('a failed resume retains only the failed Task for retry', async t => {
+test('a failed Resume paused Tasks action retains only the failed Task for retry', async t => {
     t.mock.method(console, 'error', () => {});
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pausetwo2' });
@@ -261,7 +281,7 @@ test('a failed resume retains only the failed Task for retry', async t => {
         return originalCreate(args);
     };
     try {
-        click(action('Resume All'));
+        click(action('Resume paused Tasks'));
         await settle();
     } finally {
         graph.api.data.block.create = originalCreate;
@@ -287,7 +307,7 @@ test('an overrun shared cycle is reset after pause and resume', async t => {
     extension.onunload();
     extension.onload({ extensionAPI });
     click(topbarButton());
-    click(action('Resume All'));
+    click(action('Resume paused Tasks'));
     await settle();
     assert.equal(clock.getRunning().length, 1);
     assert.ok(pomodoro.getCycle());
@@ -331,5 +351,5 @@ test('a later Pause All merges newly running Tasks into the older batch', async 
         JSON.parse(settingsStore.get('pausedBatch')).data.items.map(item => item.taskUid).sort(),
         ['pauseone1', 'pausetwo2']
     );
-    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Sessions Paused');
+    assert.equal(popover().querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
 });

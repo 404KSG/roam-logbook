@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
+import { attachCompletionHandling } from '../src/completion.js';
 
 const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
 globalThis.window = dom.window;
@@ -20,6 +21,7 @@ const RUNNING_CHILD = { uid: 'done-running', string: '{{[[TODO]]}} running child
 const contextCommands = new Map();
 const paletteCommands = new Map();
 const settingsStore = new Map([['allowMultipleClocks', true]]);
+const toasts = [];
 
 const extensionAPI = {
     settings: {
@@ -28,6 +30,7 @@ const extensionAPI = {
         panel: { create: () => {} },
     },
     ui: {
+        showToast: payload => toasts.push(typeof payload === 'string' ? payload : payload?.content),
         commandPalette: {
             addCommand: spec => paletteCommands.set(spec.label, spec.callback),
             removeCommand: ({ label }) => paletteCommands.delete(label),
@@ -60,6 +63,7 @@ test.beforeEach(() => {
     document.body.innerHTML = '<div class="rm-topbar"></div>';
     contextCommands.clear();
     paletteCommands.clear();
+    toasts.length = 0;
     settingsStore.clear();
     settingsStore.set('allowMultipleClocks', true);
     install([TASK]);
@@ -92,6 +96,31 @@ test('unloading the extension removes completion pull watches', async () => {
 
     extension.onunload();
 
+    assert.equal(graph.pullWatchCount(), 0);
+});
+
+test('completion retains a failed detach handle so lifecycle cleanup can be retried', async () => {
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    extension.onunload();
+
+    const originalRemove = graph.api.data.removePullWatch;
+    let failRemove = true;
+    graph.api.data.removePullWatch = (...args) => {
+        if (failRemove) throw new Error('Pull Watch removal unavailable during unload');
+        return originalRemove(...args);
+    };
+    const detach = attachCompletionHandling();
+    clock.refresh();
+    assert.equal(graph.pullWatchCount(), 1);
+
+    const first = detach();
+    failRemove = false;
+    graph.api.data.removePullWatch = originalRemove;
+
+    assert.equal(first.ok, false);
+    assert.equal(graph.pullWatchCount(), 1);
+    const second = detach();
+    assert.equal(second.ok, true);
     assert.equal(graph.pullWatchCount(), 0);
 });
 
@@ -149,6 +178,119 @@ test('DONE on a child does not clock out its parent or sibling Sessions', async 
     );
 });
 
+test('completion retries only failed auto-close Sessions and surfaces the partial result', async () => {
+    install([PARENT, CHILD, SIBLING]);
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
+    const updateCounts = new Map();
+    let failOnce = true;
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async payload => {
+        const uid = payload.block.uid;
+        updateCounts.set(uid, (updateCounts.get(uid) || 0) + 1);
+        if (uid === failedUid && failOnce) {
+            failOnce = false;
+            throw new Error('transient automatic close failure');
+        }
+        return originalUpdate(payload);
+    };
+
+    try {
+        await graph.api.data.block.update({
+            block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
+        });
+        await settle();
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(updateCounts.get(failedUid), 2, 'only the failed Session is retried');
+    const successfulUid = clock.getRunning().find(entry => entry.taskUid === CHILD.uid)?.clockUid;
+    assert.equal(successfulUid, undefined);
+    assert.equal(updateCounts.size, 3, 'the parent event and two Session writes are accounted for');
+    assert.equal(
+        [...updateCounts.entries()].find(([uid]) => uid !== failedUid && uid !== PARENT.uid)?.[1],
+        1,
+        'the successful Session is not retried'
+    );
+    assert.ok(toasts.some(message => /could not be updated/.test(message)));
+});
+
+test('completion retains a persistent auto-close failure without spinning or retrying closed Sessions', async () => {
+    install([PARENT, CHILD, SIBLING]);
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
+    const updateCounts = new Map();
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async payload => {
+        const uid = payload.block.uid;
+        updateCounts.set(uid, (updateCounts.get(uid) || 0) + 1);
+        if (uid === failedUid) throw new Error('persistent automatic close failure');
+        return originalUpdate(payload);
+    };
+    try {
+        await graph.api.data.block.update({
+            block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
+        });
+        await settle();
+        const afterRetry = updateCounts.get(failedUid);
+        await settle();
+        assert.equal(updateCounts.get(failedUid), afterRetry, 'a persistent failure does not spin');
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(updateCounts.get(failedUid), 2, 'only the failed Session receives the bounded retry');
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, SIBLING.uid);
+});
+
+test('an explicit refresh retries the remaining DONE Session after bounded automatic retries stop', async () => {
+    install([PARENT, CHILD, SIBLING]);
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+
+    const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
+    const updateCounts = new Map();
+    let fail = true;
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async payload => {
+        const uid = payload.block.uid;
+        updateCounts.set(uid, (updateCounts.get(uid) || 0) + 1);
+        if (uid === failedUid && fail) throw new Error('persistent automatic close failure');
+        return originalUpdate(payload);
+    };
+
+    try {
+        await graph.api.data.block.update({
+            block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
+        });
+        await settle();
+        assert.equal(updateCounts.get(failedUid), 2, 'the automatic retry remains bounded');
+        assert.equal(clock.getRunning().length, 1);
+
+        fail = false;
+        clock.refresh();
+        await settle();
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+
+    assert.equal(updateCounts.get(failedUid), 3, 'refresh retries only the remaining clock UID');
+    assert.equal(clock.getRunning().length, 0);
+});
+
 test('parent DONE prunes paused descendants before Resume can reopen them', async () => {
     install([PARENT, PAUSED_CHILD, RUNNING_CHILD]);
     extension.onunload();
@@ -182,6 +324,85 @@ test('reload reconciliation closes an open child whose parent is already DONE', 
 
     assert.equal(clock.getRunning().length, 0);
     assert.match(graph.childrenOf('reload-drawer')[0].string, /--/);
+});
+
+test('reload reconciliation prunes a paused-only Task whose parent is already DONE', async () => {
+    install([
+        PARENT,
+        { ...PAUSED_CHILD, string: '{{[[DONE]]}} paused child' },
+    ]);
+    extension.onunload();
+    settingsStore.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [{ taskUid: PAUSED_CHILD.uid, title: 'paused child', pausedAtMs: 1 }],
+                pendingResume: [],
+            },
+        })
+    );
+    extension.onload({ extensionAPI });
+    await settle();
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.deepEqual(paused.getPaused(), []);
+    assert.deepEqual(JSON.parse(settingsStore.get('pausedBatch')).data.items, []);
+});
+
+test('a malformed hierarchy component does not disable healthy completion watches', async () => {
+    install([PARENT, CHILD, SIBLING]);
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        const rows = originalQuery(datalog, ...args);
+        if (String(datalog).includes('?parent-uid')) {
+            return [...rows, [CHILD.uid, 'ambiguous-parent', '{{[[TODO]]}} ambiguous parent']];
+        }
+        return rows;
+    };
+    try {
+        await graph.api.data.block.update({
+            block: { uid: SIBLING.uid, string: '{{[[DONE]]}} sibling task' },
+        });
+        await settle();
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, CHILD.uid);
+    assert.ok(graph.pullWatchUids().includes(SIBLING.uid));
+});
+
+test('an unrelated cyclic hierarchy component does not block a healthy DONE root', async () => {
+    const cycleA = { uid: 'done-cycle-a', string: '{{[[TODO]]}} cycle A', parent: 'done-cycle-b' };
+    const cycleB = { uid: 'done-cycle-b', string: '{{[[TODO]]}} cycle B', parent: cycleA.uid };
+    install([
+        TASK,
+        cycleA,
+        cycleB,
+        { uid: 'done-root-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'done-root-clock', string: 'CLOCK:: [2026-08-16 Sun 09:00]', parent: 'done-root-drawer' },
+        { uid: 'done-cycle-drawer', string: 'LOGBOOK::', parent: cycleA.uid },
+        { uid: 'done-cycle-clock', string: 'CLOCK:: [2026-08-16 Sun 09:01]', parent: 'done-cycle-drawer' },
+    ]);
+    extension.onunload();
+    extension.onload({ extensionAPI });
+    await settle();
+
+    await graph.api.data.block.update({
+        block: { uid: TASK.uid, string: '{{[[DONE]]}} finish this task' },
+    });
+    await settle();
+
+    assert.deepEqual(clock.getRunning().map(entry => entry.taskUid), [cycleA.uid]);
+    assert.match(graph.childrenOf('done-root-drawer')[0].string, /--/);
+    assert.match(graph.childrenOf('done-cycle-drawer')[0].string, /^CLOCK:: \[/);
 });
 
 test('rapid DONE then TODO is re-read before automatic Clock Out writes', async () => {
@@ -343,6 +564,77 @@ test('Pull Watch removal retries after an error and succeeds on the second attem
     assert.deepEqual(watch.detach(), { ok: true, detached: true });
     assert.equal(attempts, 2);
     assert.equal(graph.pullWatchCount(), 0);
+});
+
+test('Pull Watch removal without an API remains retryable', () => {
+    const originalRemove = graph.api.data.removePullWatch;
+    graph.api.data.removePullWatch = undefined;
+    const watch = roam.watchBlockString(TASK.uid, () => {});
+    assert.equal(watch.ok, true);
+
+    const first = watch.detach();
+    graph.api.data.removePullWatch = originalRemove;
+
+    assert.equal(first.ok, false);
+    assert.equal(graph.pullWatchCount(), 1);
+    assert.deepEqual(watch.detach(), { ok: true, detached: true });
+    assert.equal(graph.pullWatchCount(), 0);
+});
+
+test('completion retries a failed Pull Watch installation on the next graph sync', async () => {
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    extension.onunload();
+
+    const originalAdd = graph.api.data.addPullWatch;
+    let failInstall = true;
+    graph.api.data.addPullWatch = (...args) => {
+        if (failInstall) throw new Error('Pull Watch installation temporarily unavailable');
+        return originalAdd(...args);
+    };
+    const detach = attachCompletionHandling();
+    try {
+        clock.refresh();
+        assert.equal(graph.pullWatchCount(), 0);
+        failInstall = false;
+        clock.refresh();
+        assert.equal(graph.pullWatchCount(), 1);
+    } finally {
+        graph.api.data.addPullWatch = originalAdd;
+        detach();
+    }
+});
+
+test('completion performs a second confirmed read after watch installation', async () => {
+    install([
+        TASK,
+        { uid: 'gap-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'gap-clock', string: 'CLOCK:: [2026-08-16 Sun 09:00]', parent: 'gap-drawer' },
+    ]);
+    extension.onunload();
+
+    const originalAdd = graph.api.data.addPullWatch;
+    let installed = false;
+    graph.api.data.addPullWatch = (...args) => {
+        const result = originalAdd(...args);
+        if (!installed) {
+            installed = true;
+            // Change the graph after the first snapshot and before the watch can
+            // observe it. The post-install read is the only signal in this probe.
+            graph.store.get(TASK.uid).string = '{{[[DONE]]}} finish this task';
+        }
+        return result;
+    };
+
+    try {
+        extension.onload({ extensionAPI });
+        await settle();
+    } finally {
+        graph.api.data.addPullWatch = originalAdd;
+    }
+
+    assert.equal(installed, true);
+    assert.equal(clock.getRunning().length, 0, 'the DONE transition in the install gap is reconciled');
+    assert.match(graph.childrenOf('gap-drawer')[0].string, /--/);
 });
 
 test('completion remains idle until a public Pull Watch update arrives', async () => {

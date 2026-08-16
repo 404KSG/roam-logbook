@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.0-beta.21 — 2026-08-16
+
+- Hardened the graph-backed completion and Pause/Resume boundaries: DONE tree
+  closure and pause actions re-read their scope inside the mutation queue, use
+  retryable structured outcomes, and retain exact pending work after partial or
+  uncertain writes.
+- Added the beta.21 Pull Watch lifecycle contract: bounded watches cover Running
+  Tasks and confirmed ancestors, reload reconciliation closes the attach gap,
+  missing or failing watch APIs degrade safely, and unload cleanup is idempotent.
+- Kept the current-session recovery UI actionable and conservative: graph-read
+  failures are not shown as empty state, last valid snapshots are retained, and
+  Dashboard Refresh remains read-only.
+- Reaffirmed the chart-free Dashboard with exactly four metrics, inert topbar
+  Shift+Click, native right-sidebar navigation only from task titles, one shared
+  Pomodoro cycle, and Task-based paused batches versus Session-based running
+  units. Legacy per-session Pomodoro target fields remain compatibility-only.
+- This release metadata pass keeps Roam Depot **Draft** and does not touch the
+  external PR or rebuild the root bundle. No dependency upgrade is included; the
+  existing esbuild advisory is dev-only non-runtime maintenance. Release evidence
+  should report the current suite result from a clean run rather than pinning a
+  brittle exact test count; the read-only live smoke remains a publication gate.
+
 ## 0.9.0-beta.20 — 2026-08-16
 
 - Replaced the Dashboard overview's abstract `selected range` helper copy with the active date-range name on Sessions and Tasks tracked (`Last 7 days`, `Last 30 days`, or `All time`).

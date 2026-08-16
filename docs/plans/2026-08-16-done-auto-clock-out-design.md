@@ -1,7 +1,14 @@
 # DONE Auto Clock Out and Task-Tree Cascade
 
 Date: 2026-08-16
-Status: approved for implementation
+Status: superseded implementation design; implemented in beta.21 and retained
+as historical evidence
+
+> The design below records the approved DONE behavior before implementation. The
+> current release-wide authority is [beta.21 hardening design](2026-08-16-beta-21-hardening-design.md),
+> which adds the shared mutation/recovery, bounded-observer, Dashboard, and
+> release-gate constraints. Do not treat this plan's pre-release wording as a
+> separate feature-expansion request.
 
 ## Outcome
 

@@ -23,6 +23,10 @@ const clock = await import('../src/clock.js');
 const { openBlockInRightSidebar } = await import('../src/roam.js');
 
 let graph;
+const settle = async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+};
 
 test.beforeEach(() => {
     graph = installGraph([
@@ -97,6 +101,12 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
     const timers = [];
     const cleared = [];
     await clock.clockIn('live-child', { now: new Date(nowMs) });
+    let graphReads = 0;
+    const query = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return query(...args);
+    };
     const dashboard = createDashboard({
         now: () => new Date(nowMs),
         setIntervalFn: callback => {
@@ -109,10 +119,24 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
 
     dashboard.open();
     assert.equal(timers.length, 1);
+    const readsAfterOpen = graphReads;
     const firstCell = document.querySelector('[data-running-elapsed="true"]');
-    document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    const refresh = document.querySelector('.rlb-icon-button.bp3-icon-refresh');
+    const refreshStatus = document.querySelector('.rlb-dashboard__refresh-status');
+    refresh.click();
+    refresh.click();
+    assert.equal(refresh.disabled, true);
+    assert.equal(refresh.getAttribute('aria-busy'), 'true');
+    assert.equal(refreshStatus.getAttribute('role'), 'status');
+    assert.equal(refreshStatus.getAttribute('aria-live'), 'polite');
+    assert.match(refreshStatus.textContent, /Refreshing Dashboard/i);
+    await settle();
+    assert.equal(graphReads, readsAfterOpen + 1, 'fast Dashboard Refresh clicks coalesce');
     assert.equal(cleared.length, 1);
     assert.equal(timers.length, 2);
+    assert.equal(refresh.disabled, false);
+    assert.equal(refresh.dataset.refreshState, 'success');
+    assert.match(refreshStatus.textContent, /Dashboard updated just now/);
     const refreshedCell = document.querySelector('[data-running-elapsed="true"]');
     assert.notEqual(refreshedCell, firstCell, 'a full refresh creates a fresh DOM handle');
 
@@ -121,13 +145,63 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
     assert.equal(refreshedCell.textContent, '0:02');
 
     const range = document.querySelector('.rlb-header select');
+    const readsBeforeRange = graphReads;
     range.value = 'month';
     range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(graphReads, readsBeforeRange, 'range changes reuse the open hierarchy snapshot');
     assert.equal(cleared.length, 2);
     assert.equal(timers.length, 3);
 
     dashboard.destroy();
     assert.equal(cleared.length, 3, 'destroy clears the current live handle');
+});
+
+test('Dashboard Refresh announces a retryable error while retaining the last snapshot', async () => {
+    const nowMs = new Date('2026-08-15T09:00:00').getTime();
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+    dashboard.open();
+    const beforeUid = document.querySelector('[data-running-elapsed="true"]').dataset.clockUid;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('temporary Dashboard graph failure');
+    };
+
+    try {
+        const refresh = document.querySelector('[data-action="refresh"]');
+        refresh.click();
+        await settle();
+        const status = document.querySelector('.rlb-dashboard__refresh-status');
+        assert.equal(refresh.dataset.refreshState, 'error');
+        assert.equal(status.getAttribute('role'), 'alert');
+        assert.equal(status.getAttribute('aria-live'), 'assertive');
+        assert.match(status.textContent, /last valid snapshot|Retry/i);
+        assert.equal(
+            document.querySelector('[data-running-elapsed="true"]').dataset.clockUid,
+            beforeUid
+        );
+    } finally {
+        graph.api.data.q = originalQuery;
+        dashboard.destroy();
+    }
+});
+
+test('repeated Dashboard open preserves the original outside focus target', () => {
+    const originalTrigger = document.createElement('button');
+    originalTrigger.textContent = 'Original trigger';
+    const laterTrigger = document.createElement('button');
+    laterTrigger.textContent = 'Later trigger';
+    document.body.append(originalTrigger, laterTrigger);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
+
+    originalTrigger.focus();
+    dashboard.open({ returnFocusTo: originalTrigger });
+    laterTrigger.focus();
+    dashboard.open({ returnFocusTo: laterTrigger });
+    dashboard.close();
+
+    assert.equal(document.activeElement, originalTrigger);
+    dashboard.destroy();
 });
 
 test('Dashboard running actions use neutral stop semantics and confirm CLOCK discard', async () => {

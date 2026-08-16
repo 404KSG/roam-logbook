@@ -25,6 +25,7 @@ const VERSION = STATE_FORMATS.pauseBatch;
 const LEGACY_VERSION = 1;
 let items = [];
 let pendingResume = [];
+let finalizing = null;
 let notice = '';
 let unsupportedRaw = null;
 const listeners = new Set();
@@ -84,19 +85,40 @@ const cleanPending = (value, { version = VERSION, legacy = false } = {}) => {
 const hasLegacyPomodoroFields = value =>
     Boolean(value && ('pomodoroRemainingMs' in value || 'pomodoroSuppressed' in value));
 
+const cleanFinalizing = value => {
+    if (!value || typeof value !== 'object' || value.action !== 'clock-out-all') return null;
+    if (!Array.isArray(value.targets)) return null;
+    const targets = [];
+    for (const target of value.targets) {
+        if (!target || typeof target.taskUid !== 'string' || !target.taskUid) return null;
+        if (typeof target.clockUid !== 'string' || !target.clockUid) return null;
+        const key = `${target.taskUid}\u0000${target.clockUid}`;
+        if (targets.some(item => `${item.taskUid}\u0000${item.clockUid}` === key)) continue;
+        targets.push({ taskUid: target.taskUid, clockUid: target.clockUid });
+    }
+    return { action: 'clock-out-all', targets };
+};
+
 const serialized = () =>
     JSON.stringify({
         version: VERSION,
         data: {
             items,
             pendingResume,
+            ...(finalizing ? { finalizing } : {}),
         },
     });
 
 function persist() {
     if (unsupportedRaw !== null) return false;
-    writeSetting(SETTING_PAUSED_BATCH, serialized());
-    return true;
+    try {
+        writeSetting(SETTING_PAUSED_BATCH, serialized());
+        return true;
+    } catch (error) {
+        notice ||= 'Pause Batch could not be saved yet; its recovery state was retained.';
+        console.warn('[roam-logbook] could not persist Pause Batch', error);
+        return false;
+    }
 }
 
 function notify() {
@@ -174,15 +196,30 @@ export function pruneCompleted(taskUids = []) {
     }
 
     const scope = new Set(completedTaskUids);
-    const previousItems = items.length;
-    const previousPending = pendingResume.length;
+    const previousItems = items;
+    const previousPending = pendingResume;
     items = items.filter(item => !scope.has(item.taskUid));
     pendingResume = pendingResume.filter(item => !scope.has(item.taskUid));
-    const removedPaused = previousItems - items.length;
-    const removedPending = previousPending - pendingResume.length;
+    const removedPaused = previousItems.length - items.length;
+    const removedPending = previousPending.length - pendingResume.length;
     if (removedPaused > 0 || removedPending > 0) {
         notice = '';
-        persist();
+        if (!persist()) {
+            items = previousItems;
+            pendingResume = previousPending;
+            notice = 'Completed Tasks could not be removed from the saved Pause Batch; recovery state was kept.';
+            notify();
+            return {
+                action: 'prune-completed-paused',
+                ok: false,
+                completedTaskUids,
+                removed: 0,
+                removedPaused: 0,
+                removedPending: 0,
+                uncertain: true,
+                error: new Error(notice),
+            };
+        }
         notify();
     }
     return {
@@ -205,15 +242,23 @@ export function getNotice() {
 export function load() {
     items = [];
     pendingResume = [];
+    finalizing = null;
     notice = '';
     unsupportedRaw = null;
     ensureClockActionSubscription();
     const raw = readSetting(SETTING_PAUSED_BATCH);
     if (!raw) return getPaused();
 
+    let recoverableItems = [];
+    let recoverablePending = [];
+    let recoverableFinalizing = null;
     try {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (parsed?.version === VERSION && parsed.data && Array.isArray(parsed.data.items)) {
+            recoverableItems = parsed.data.items.map(cleanRecord).filter(Boolean);
+            if ('pendingResume' in parsed.data && !Array.isArray(parsed.data.pendingResume)) {
+                throw new Error('invalid pendingResume shape');
+            }
             const needsMigration =
                 parsed.data.items.some(hasLegacyPomodoroFields) ||
                 (Array.isArray(parsed.data.pendingResume) && parsed.data.pendingResume.some(hasLegacyPomodoroFields));
@@ -221,13 +266,19 @@ export function load() {
             const loadedPending = Array.isArray(parsed.data.pendingResume)
                 ? parsed.data.pendingResume.map(value => cleanPending(value, { version: VERSION }))
                 : [];
+            recoverablePending = loadedPending.filter(Boolean);
             if (loadedItems.some(item => !item) || loadedPending.some(item => !item)) {
                 throw new Error('invalid paused-task record');
+            }
+            if ('finalizing' in parsed.data && parsed.data.finalizing !== null) {
+                recoverableFinalizing = cleanFinalizing(parsed.data.finalizing);
+                if (!recoverableFinalizing) throw new Error('invalid finalizing Pause Batch marker');
             }
             const byTask = new Map(loadedItems.map(item => [item.taskUid, item]));
             const pendingByTask = new Map(loadedPending.map(item => [item.taskUid, item]));
             items = [...byTask.values()];
             pendingResume = [...pendingByTask.values()];
+            finalizing = recoverableFinalizing;
             if (pendingResume.some(item => item.recoveryState === 'conflict')) {
                 const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
                 notice = firstWarning
@@ -238,12 +289,14 @@ export function load() {
             return getPaused();
         }
         if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
+            recoverableItems = parsed.items.map(cleanRecord).filter(Boolean);
             const loaded = parsed.items.map(cleanRecord);
             const loadedPending = Array.isArray(parsed.pendingResume)
                 ? parsed.pendingResume.map(value =>
                       cleanPending(value, { version: LEGACY_VERSION, legacy: true })
                   )
                 : [];
+            recoverablePending = loadedPending.filter(Boolean);
             if (loaded.some(item => !item) || loadedPending.some(item => !item)) {
                 throw new Error('invalid legacy paused-task record');
             }
@@ -254,6 +307,9 @@ export function load() {
         }
         throw new Error('unsupported paused-batch version');
     } catch (error) {
+        items = [...new Map(recoverableItems.map(item => [item.taskUid, item])).values()];
+        pendingResume = [...new Map(recoverablePending.map(item => [item.taskUid, item])).values()];
+        finalizing = recoverableFinalizing;
         unsupportedRaw = raw;
         const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
         notice = firstWarning
@@ -361,7 +417,11 @@ export async function pauseAll({ now = new Date() } = {}) {
                     merged.set(record.taskUid, record);
                 }
                 items = [...merged.values()];
-                persist();
+                if (!persist()) {
+                    const error = new Error(notice || 'Pause Batch could not be saved before closing Sessions.');
+                    error.uncertain = true;
+                    throw error;
+                }
                 return snapshots;
             },
         });
@@ -377,6 +437,19 @@ export async function pauseAll({ now = new Date() } = {}) {
             pendingTaskUids,
             uncertain: true,
             error: new Error(notice),
+        });
+    }
+
+    if (outcome.preflight) {
+        items = originalItems;
+        notice = 'Pause Batch could not be saved before closing Sessions; no Session was changed.';
+        notify();
+        return pauseBatchResult({
+            failed: outcome.pendingClockUids?.length || 0,
+            pendingClockUids: outcome.pendingClockUids || [],
+            pendingTaskUids: outcome.entries?.filter(entry => entry.running).map(entry => entry.taskUid) || [],
+            uncertain: true,
+            error: outcome.error || new Error(notice),
         });
     }
 
@@ -397,7 +470,8 @@ export async function pauseAll({ now = new Date() } = {}) {
     } else if (failed > 0) {
         notice = `${failed} Task${failed === 1 ? '' : 's'} could not be paused.`;
     }
-    persist();
+    const persisted = persist();
+    if (!persisted) notice ||= 'Pause Batch could not be saved yet; its recovery state was retained.';
     notify();
     const pendingSnapshots = outcome.records.filter(snapshot => {
         const result = byClockUid.get(snapshot.clockUid);
@@ -411,7 +485,7 @@ export async function pauseAll({ now = new Date() } = {}) {
         failed,
         pendingClockUids,
         pendingTaskUids,
-        uncertain: Boolean(outcome.uncertain),
+        uncertain: Boolean(outcome.uncertain || !persisted),
         retry: incomplete
             ? {
                   ...(outcome.retry || { action: 'pause' }),
@@ -499,6 +573,50 @@ async function recoverPending({ running = [] } = {}) {
 }
 
 const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
+
+/**
+ * Finish the settings side of an interrupted Clock Out All commit from the
+ * graph's confirmed running snapshot. A target that is no longer running is
+ * permanently closed; only targets still open remain recoverable.
+ */
+function reconcileFinalizing({ running = [] } = {}) {
+    if (!finalizing) return { ok: true, uncertain: false, activeTaskUids: [] };
+
+    const runningByClock = new Map(running.map(entry => [entry.clockUid, entry]));
+    const activeTargets = finalizing.targets.filter(target => {
+        const entry = runningByClock.get(target.clockUid);
+        return entry?.taskUid === target.taskUid;
+    });
+    const activeTaskUids = new Set(activeTargets.map(target => target.taskUid));
+    const previousItems = items;
+    const previousPending = pendingResume;
+    const previousFinalizing = finalizing;
+    items = items.filter(item => activeTaskUids.has(item.taskUid));
+    pendingResume = pendingResume.filter(item => activeTaskUids.has(item.taskUid));
+    finalizing = activeTargets.length > 0 ? { action: 'clock-out-all', targets: activeTargets } : null;
+
+    const changed =
+        previousItems.length !== items.length ||
+        previousPending.length !== pendingResume.length ||
+        JSON.stringify(previousFinalizing) !== JSON.stringify(finalizing);
+    if (!changed) return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+
+    if (!persist()) {
+        items = previousItems;
+        pendingResume = previousPending;
+        finalizing = previousFinalizing;
+        notice = 'Clock Out All was confirmed in the graph, but its recovery state could not be committed yet.';
+        notify();
+        return {
+            ok: false,
+            uncertain: true,
+            activeTaskUids: [...activeTaskUids],
+            error: new Error(notice),
+        };
+    }
+    notify();
+    return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+}
 
 const resumeBatchResult = ({
     completed = 0,
@@ -795,6 +913,31 @@ export async function resumeAll({ now = new Date() } = {}) {
         });
     }
 
+    const finalized = reconcileFinalizing({ running: initial.running });
+    if (!finalized.ok) {
+        return resumeBatchResult({
+            failed: finalized.activeTaskUids.length,
+            pendingTaskUids: [...items, ...pendingResume].map(item => item.taskUid),
+            blocked: true,
+            uncertain: true,
+            error: finalized.error,
+            pruned: 0,
+            satisfied: 0,
+        });
+    }
+    if (finalized.activeTaskUids.length > 0) {
+        notice = 'Clock Out All still has running Sessions; they were kept for an explicit retry.';
+        notify();
+        return resumeBatchResult({
+            failed: finalized.activeTaskUids.length,
+            pendingTaskUids: finalized.activeTaskUids,
+            blocked: true,
+            error: new Error(notice),
+            pruned: 0,
+            satisfied: 0,
+        });
+    }
+
     const recovered = await recoverPending({ running: initial.running });
     const runningEntries = clock.getRunning();
     const runningTasks = new Set(runningEntries.map(entry => entry.taskUid));
@@ -971,7 +1114,26 @@ export async function resumeAll({ now = new Date() } = {}) {
 export async function clockOutAll({ now = new Date() } = {}) {
     let outcome;
     try {
-        outcome = await clock.clockOutEntries(null, { now });
+        outcome = await clock.clockOutEntries(null, {
+            now,
+            prepare: entries => {
+                const previousFinalizing = finalizing;
+                finalizing = {
+                    action: 'clock-out-all',
+                    targets: entries
+                        .filter(entry => entry.running)
+                        .map(entry => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
+                };
+                if (!persist()) {
+                    finalizing = previousFinalizing;
+                    const error = new Error(
+                        notice || 'Pause Batch could not be saved before closing Sessions.'
+                    );
+                    error.uncertain = true;
+                    throw error;
+                }
+            },
+        });
     } catch {
         notice = clock.getNotice() || 'Unable to finish Sessions because the graph is unavailable.';
         notify();
@@ -993,6 +1155,41 @@ export async function clockOutAll({ now = new Date() } = {}) {
         };
     }
 
+    if (outcome?.preflight) {
+        notice = 'Pause Batch could not be saved before closing Sessions; no Session was changed.';
+        notify();
+        return {
+            ...outcome,
+            action: 'clock-out-all',
+            ok: false,
+            item: 'Session',
+            completedVerb: 'ended',
+            count: 0,
+            completed: 0,
+            partial: false,
+        };
+    }
+
+    if (!Array.isArray(outcome?.results)) {
+        notice = clock.getNotice() || 'Unable to finish Sessions because the graph is unavailable.';
+        notify();
+        return {
+            action: 'clock-out-all',
+            ok: false,
+            count: 0,
+            completed: 0,
+            failed: clock.getRunning().length,
+            pending: clock.getRunning().length,
+            pendingClockUids: clock.getRunning().map(entry => entry.clockUid),
+            partial: false,
+            uncertain: true,
+            error: new Error(notice),
+            retry: { action: 'close', retryClockUids: clock.getRunning().map(entry => entry.clockUid) },
+            item: 'Session',
+            completedVerb: 'ended',
+        };
+    }
+
     const closedUids = new Set(
         outcome.results.filter(result => result.closed).map(result => result.clockUid)
     );
@@ -1000,10 +1197,42 @@ export async function clockOutAll({ now = new Date() } = {}) {
         entry => entry.running && !closedUids.has(entry.clockUid)
     );
     if (!outcome.uncertain && outcome.failed === 0 && stillRunning.length === 0) {
+        const previousFinalizing = finalizing;
         items = [];
         pendingResume = [];
+        finalizing = null;
         notice = '';
-        persist();
+        const persisted = persist();
+        if (!persisted) {
+            finalizing = previousFinalizing || {
+                action: 'clock-out-all',
+                targets: (outcome.entries || []).map(entry => ({
+                    taskUid: entry.taskUid,
+                    clockUid: entry.clockUid,
+                })),
+            };
+            notice = 'Sessions were closed, but clearing the saved Pause Batch could not be committed yet.';
+            notify();
+            return {
+                ...outcome,
+                action: 'clock-out-all',
+                ok: false,
+                item: 'Session',
+                completedVerb: 'ended',
+                count: outcome.closed,
+                completed: outcome.closed,
+                pending: 0,
+                pendingClockUids: [],
+                uncertain: true,
+                partial: false,
+                retry: {
+                    action: 'commit-pause-batch',
+                    retryClockUids: [],
+                    writtenClockUids: outcome.results.filter(result => result.closed).map(result => result.clockUid),
+                },
+                error: new Error(notice),
+            };
+        }
         notify();
         return {
             ...outcome,
@@ -1030,10 +1259,17 @@ export async function clockOutAll({ now = new Date() } = {}) {
     }
     items = [...retained.values()];
     pendingResume = pendingResume.filter(item => stillRunning.some(entry => entry.taskUid === item.taskUid));
+    finalizing = {
+        action: 'clock-out-all',
+        targets: (outcome.entries || []).map(entry => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
+    };
     notice = outcome.uncertain
         ? clock.GRAPH_UNCERTAIN
         : `${stillRunning.length} Session${stillRunning.length === 1 ? '' : 's'} could not be closed.`;
-    persist();
+    const persisted = persist();
+    if (!persisted) {
+        notice = 'Sessions were partly closed, but their durable recovery state could not be committed yet.';
+    }
     notify();
     const pendingClockUids = stillRunning.map(entry => entry.clockUid);
     return {
@@ -1044,6 +1280,7 @@ export async function clockOutAll({ now = new Date() } = {}) {
         completedVerb: 'ended',
         count: outcome.closed,
         completed: outcome.closed,
+        uncertain: Boolean(outcome.uncertain || !persisted),
         pending: pendingClockUids.length,
         pendingClockUids,
         partial: Boolean(outcome.partial || (outcome.closed > 0 && pendingClockUids.length > 0)),
@@ -1063,6 +1300,7 @@ export function clear() {
     }
     items = [];
     pendingResume = [];
+    finalizing = null;
     notice = '';
     persist();
     notify();
@@ -1073,6 +1311,7 @@ export function clear() {
 export function reset() {
     items = [];
     pendingResume = [];
+    finalizing = null;
     notice = '';
     unsupportedRaw = null;
     listeners.clear();

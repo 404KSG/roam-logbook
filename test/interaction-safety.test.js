@@ -113,6 +113,15 @@ test('Clock out current block with no focused block only notifies and performs z
     assert.match(toasts.join(' '), /focused block/i);
 });
 
+test('context menu does not offer Clock In on a direct DONE Task', async () => {
+    await graph.api.data.block.update({
+        block: { uid: TASK.uid, string: '{{[[DONE]]}} already finished' },
+    });
+
+    const command = contextCommands.get('Logbook: Clock in');
+    assert.equal(command['display-conditional']({ 'block-uid': TASK.uid }), false);
+});
+
 test('Clock Out All requires a second confirmation and resets when the popover closes', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
@@ -324,5 +333,5 @@ test('single-session Pause remains a one-click recoverable action', async () => 
 
     assert.equal(clock.getRunning().length, 0);
     assert.equal(paused.getPaused().length, 1);
-    assert.equal(footerAction('Resume All')?.textContent, 'Resume All');
+    assert.equal(footerAction('Resume paused Tasks')?.textContent, 'Resume paused Tasks');
 });

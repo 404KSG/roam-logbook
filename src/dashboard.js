@@ -26,6 +26,9 @@ import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Roam Logbook';
+const REFRESH_LOADING_MESSAGE = 'Refreshing Dashboard from graph…';
+const REFRESH_SUCCESS_MESSAGE = 'Dashboard updated just now';
+const REFRESH_ERROR_MESSAGE = 'Dashboard refresh failed; last valid snapshot kept. Retry.';
 
 // Dashboard overlays are allowed to outlive a single render, and hot reloads
 // can briefly create more than one controller. Keep the document lock shared
@@ -112,9 +115,12 @@ export function createDashboard({
     let liveTicker = null;
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
+    let refreshInFlight = null;
+    let refreshButton = null;
+    let refreshStatusNode = null;
+    let refreshState = { state: 'idle', message: '' };
     let lastSnapshot = null;
     let lastModel = null;
-    let lastHierarchy = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
     let themeRuntime = null;
@@ -126,6 +132,32 @@ export function createDashboard({
     const clearLiveTicker = () => {
         if (liveTicker !== null) clearIntervalFn(liveTicker);
         liveTicker = null;
+    };
+
+    const syncRefreshUi = () => {
+        if (refreshButton) {
+            refreshButton.dataset.refreshState = refreshState.state;
+            refreshButton.disabled = refreshState.state === 'loading';
+            if (refreshState.state === 'loading') refreshButton.setAttribute('aria-busy', 'true');
+            else refreshButton.removeAttribute('aria-busy');
+        }
+        if (refreshStatusNode) {
+            refreshStatusNode.textContent = refreshState.message;
+            refreshStatusNode.setAttribute(
+                'role',
+                refreshState.state === 'error' ? 'alert' : 'status'
+            );
+            refreshStatusNode.setAttribute(
+                'aria-live',
+                refreshState.state === 'error' ? 'assertive' : 'polite'
+            );
+            refreshStatusNode.setAttribute('aria-atomic', 'true');
+        }
+    };
+
+    const setRefreshState = (state, message) => {
+        refreshState = { state, message };
+        syncRefreshUi();
     };
 
     const resetDiscardConfirmation = () => {
@@ -180,7 +212,7 @@ export function createDashboard({
         if (!bodyNode || !lastModel) return;
         clearLiveTicker();
         const model = lastModel;
-        const hierarchy = lastHierarchy || {};
+        const hierarchy = lastSnapshot?.hierarchy || {};
         const transientIssues = lastTransientIssues;
         const refreshNotice = lastRefreshNotice;
         summaryNode.replaceChildren();
@@ -190,6 +222,8 @@ export function createDashboard({
         if (refreshNotice) {
             const notice = el('div', 'rlb-dashboard__notice', refreshNotice);
             notice.setAttribute('role', 'status');
+            notice.setAttribute('aria-live', 'polite');
+            notice.setAttribute('aria-atomic', 'true');
             bodyNode.appendChild(notice);
         }
 
@@ -212,51 +246,88 @@ export function createDashboard({
         startLiveTicker();
     };
 
-    const render = () => {
-        if (!bodyNode) return;
+    const render = ({ readGraph = true } = {}) => {
+        if (!bodyNode) return { ok: false, reason: 'not-mounted' };
         clearLiveTicker();
         const now = nowFn();
-        let snapshot;
+        let snapshot = readGraph ? null : lastSnapshot;
         let refreshNotice = '';
         let transientIssues = [];
-        try {
-            const candidate = readDashboardSnapshot();
-            lastSnapshot = candidate;
-            snapshot = candidate;
-        } catch (error) {
-            transientIssues = error.issue ? [error.issue] : error.issues || [];
-            if (!lastSnapshot) {
-                summaryNode.hidden = false;
-                summaryNode.setAttribute('aria-hidden', 'false');
-                summaryNode.replaceChildren();
-                const notice = el(
-                    'div',
-                    'rlb-dashboard__notice',
-                    'Graph data could not be refreshed; no successful snapshot is available yet.'
-                );
-                notice.setAttribute('role', 'alert');
-                const issueRows = transientIssues.map(issueRow);
-                bodyNode.replaceChildren(
-                    notice,
-                    ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
-                );
-                lastModel = null;
-                return;
+        let refreshFailed = false;
+        if (readGraph) {
+            try {
+                const candidate = readDashboardSnapshot();
+                lastSnapshot = candidate;
+                snapshot = candidate;
+            } catch (error) {
+                refreshFailed = true;
+                transientIssues = error.issue ? [error.issue] : error.issues || [];
+                if (!lastSnapshot) {
+                    summaryNode.hidden = false;
+                    summaryNode.setAttribute('aria-hidden', 'false');
+                    summaryNode.replaceChildren();
+                    const notice = el(
+                        'div',
+                        'rlb-dashboard__notice',
+                        'Graph data could not be refreshed; no successful snapshot is available yet.'
+                    );
+                    notice.setAttribute('role', 'alert');
+                    notice.setAttribute('aria-live', 'assertive');
+                    notice.setAttribute('aria-atomic', 'true');
+                    const issueRows = transientIssues.map(issueRow);
+                    bodyNode.replaceChildren(
+                        notice,
+                        ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
+                    );
+                    lastModel = null;
+                    lastTransientIssues = transientIssues;
+                    lastRefreshNotice = '';
+                    return { ok: false, reason: 'no-snapshot' };
+                }
+                snapshot = lastSnapshot;
+                refreshNotice =
+                    'Graph data could not be refreshed; showing last successful snapshot.';
             }
-            snapshot = lastSnapshot;
-            refreshNotice =
-                'Graph data could not be refreshed; showing last successful snapshot.';
         }
+        if (!snapshot) return { ok: false, reason: 'no-snapshot' };
+        summaryNode.hidden = false;
+        summaryNode.setAttribute('aria-hidden', 'false');
         const entries = snapshot.entries;
-        const hierarchy = snapshot.hierarchy;
+        const hierarchy = snapshot.hierarchy || {};
         // Publish the exact snapshot to the clock seam. This updates running
         // state without issuing the entries query a second time.
-        clock.refresh({ entries });
+        clock.refresh({ entries, notify: false });
         lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
-        lastHierarchy = hierarchy;
         lastTransientIssues = transientIssues;
         lastRefreshNotice = refreshNotice;
         paint(now);
+        return { ok: true, refreshFailed };
+    };
+
+    const refreshDashboard = () => {
+        if (refreshInFlight) return refreshInFlight;
+        setRefreshState('loading', REFRESH_LOADING_MESSAGE);
+        const request = Promise.resolve()
+            .then(() => render())
+            .then(
+                result => {
+                    if (result?.ok && !result.refreshFailed) {
+                        setRefreshState('success', REFRESH_SUCCESS_MESSAGE);
+                    } else {
+                        setRefreshState('error', REFRESH_ERROR_MESSAGE);
+                    }
+                    return result;
+                },
+                error => {
+                    console.error('[roam-logbook] could not refresh Dashboard', error);
+                    setRefreshState('error', REFRESH_ERROR_MESSAGE);
+                    return { ok: false, error };
+                }
+            );
+        refreshInFlight = request.finally(() => {
+            refreshInFlight = null;
+        });
+        return refreshInFlight;
     };
 
     const issueRow = issue => ({
@@ -363,7 +434,12 @@ export function createDashboard({
 
         const table = el('table', 'rlb-table');
         table.appendChild(
-            headerRow(['Task', 'Started', { label: 'Elapsed', numeric: true }, ''])
+            headerRow([
+                'Task',
+                'Started',
+                { label: 'Elapsed', numeric: true },
+                { label: 'Actions', visuallyHidden: true },
+            ])
         );
         const tbody = el('tbody');
         for (const entry of running) {
@@ -588,7 +664,13 @@ export function createDashboard({
         const row = el('tr');
         for (const column of columns) {
             const numeric = typeof column === 'object' && column.numeric;
-            row.appendChild(el('th', numeric ? 'rlb-table__num' : '', column.label ?? column));
+            const visuallyHidden = typeof column === 'object' && column.visuallyHidden;
+            const classes = [numeric ? 'rlb-table__num' : '', visuallyHidden ? 'rlb-visually-hidden' : '']
+                .filter(Boolean)
+                .join(' ');
+            const header = el('th', classes, column.label ?? column);
+            header.setAttribute('scope', 'col');
+            row.appendChild(header);
         }
         thead.appendChild(row);
         return thead;
@@ -714,21 +796,29 @@ export function createDashboard({
         }
         select.addEventListener('change', event => {
             rangeId = event.target.value;
-            render();
+            render({ readGraph: false });
         });
         selectWrapper.appendChild(select);
 
+        refreshButton = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button',
+            '',
+            () => void refreshDashboard(),
+            { title: 'Reload from the graph' }
+        );
+        refreshButton.dataset.action = 'refresh';
+        refreshStatusNode = el('span', 'rlb-dashboard__refresh-status rlb-visually-hidden');
+
         header.append(
             selectWrapper,
-            button('bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button', '', () => {
-                render();
-            }, { title: 'Reload from the graph' }),
+            refreshButton,
             button(
                 'bp3-dialog-close-button bp3-button bp3-minimal bp3-icon-cross rlb-icon-button',
                 '',
                 close,
                 { title: 'Close' }
-            )
+            ),
+            refreshStatusNode
         );
 
         summaryNode = el('div', 'rlb-summary');
@@ -741,6 +831,7 @@ export function createDashboard({
             onChange: palette => applyRoamThemePalette(overlay, palette),
         });
         themeRuntime.apply(overlay);
+        syncRefreshUi();
         return overlay;
     };
 
@@ -767,12 +858,14 @@ export function createDashboard({
     return {
         open({ returnFocusTo: requestedFocus } = {}) {
             const alreadyOpen = root?.classList.contains('rlb-root--open');
-            const active = document.activeElement;
-            returnFocusTo = requestedFocus?.isConnected
-                ? requestedFocus
-                : active && active !== document.body && active.isConnected
-                  ? active
-                  : null;
+            if (!alreadyOpen) {
+                const active = document.activeElement;
+                returnFocusTo = requestedFocus?.isConnected
+                    ? requestedFocus
+                    : active && active !== document.body && active.isConnected
+                      ? active
+                      : null;
+            }
             try {
                 if (!root) root = build();
                 if (!alreadyOpen) releaseScrollLock = acquireDocumentScrollLock();
@@ -803,6 +896,9 @@ export function createDashboard({
             summaryNode = null;
             bodyNode = null;
             lastModel = null;
+            refreshInFlight = null;
+            refreshButton = null;
+            refreshStatusNode = null;
         },
     };
 }

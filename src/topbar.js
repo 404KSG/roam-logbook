@@ -32,6 +32,7 @@ const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
 const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+export const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
 
 export const sessionLoadTone = count => {
     const normalized = Number.isFinite(Number(count))
@@ -189,12 +190,17 @@ export function createTopbar({
         buildSessionSurfaceModel({
             entries: clock.getRunning(),
             pausedItems: paused.getPaused(),
+            pendingItems: paused.getPendingResume(),
             now: nowDate(),
             staleHours: staleHours(),
         });
 
     const surfaceNotices = () =>
-        actionNotice ? [actionNotice] : [clock.getNotice(), paused.getNotice()].filter(Boolean);
+        actionNotice
+            ? [{ message: actionNotice, role: 'alert' }]
+            : [clock.getNotice(), paused.getNotice()]
+                  .filter(Boolean)
+                  .map(message => ({ message, role: 'status' }));
 
     const renderSurfaces = () => {
         if (popover) renderPopover();
@@ -236,7 +242,7 @@ export function createTopbar({
         if (refreshInFlight) return refreshInFlight;
 
         const request = Promise.resolve()
-            .then(() => clock.refreshResult({ notify: false }))
+            .then(() => clock.refreshResult())
             .then(
                 result => {
                     if (result?.ok) {
@@ -318,6 +324,7 @@ export function createTopbar({
             },
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
             onResume: item => void run(() => paused.resumeOne(item.taskUid)),
+            onRecovery: () => void run(() => paused.resumeAll()),
             onDiscard: entry => {
                 if (discardConfirmUid !== entry.clockUid) {
                     discardConfirmUid = entry.clockUid;
@@ -424,6 +431,9 @@ export function createTopbar({
     ) => {
         if (!buttonNode) return;
         const pausedItems = paused.getPaused();
+        const recoveryItems = paused
+            .getPendingResume()
+            .filter(item => item?.recoveryState === 'conflict');
         const running = entries.length > 0;
         if (running && reconcile) pomodoro.reconcileCycle(entries, { now });
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
@@ -438,16 +448,24 @@ export function createTopbar({
         if (!running) {
             buttonNode.classList.add('rlb-topbar__button--icon-only');
             buttonNode.classList.remove('rlb-topbar__button--parallel');
-            buttonNode.classList.toggle('rlb-topbar__button--paused', pausedItems.length > 0);
+            buttonNode.classList.toggle(
+                'rlb-topbar__button--paused',
+                pausedItems.length > 0 || recoveryItems.length > 0
+            );
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             parallelNode.textContent = '';
             separatorNode.textContent = '';
-            syncButtonLayout(pausedItems.length > 0 ? 'paused' : 'idle');
+            syncButtonLayout(pausedItems.length > 0 || recoveryItems.length > 0 ? 'paused' : 'idle');
             buttonNode.title = pausedItems.length
-                ? `${sessionCount(pausedItems.length)} Paused — click to resume or review.`
-                : 'Roam Logbook — no Session running. Click for details.';
+                ? `${taskCount(pausedItems.length)} Paused — click to resume or review.` +
+                  (recoveryItems.length > 0
+                      ? `\n${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? '' : 's'} require review.`
+                      : '')
+                : recoveryItems.length > 0
+                  ? `${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? '' : 's'} require review — click to retry.`
+                  : 'Roam Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;
         }
@@ -509,6 +527,30 @@ export function createTopbar({
         updateSessionSurfaceElapsed(popover, entries, now);
     };
 
+    const stopTicker = () => {
+        if (ticker !== null) clearIntervalFn(ticker);
+        ticker = null;
+    };
+
+    const startTicker = () => {
+        if (destroyed || ticker !== null) return;
+        ticker = setIntervalFn(tick, 1000);
+    };
+
+    const stopAttachmentObservers = () => {
+        observer?.disconnect();
+        observer = null;
+        recoveryObserver?.disconnect();
+        recoveryObserver = null;
+        outerRecoveryObserver?.disconnect();
+        outerRecoveryObserver = null;
+        hostObserver?.disconnect();
+        hostObserver = null;
+        recoveryTarget = null;
+        outerRecoveryTarget = null;
+        observedTopbar = null;
+    };
+
     const build = () => {
         container = el('div', 'rlb-topbar');
         container.id = WIDGET_ID;
@@ -532,13 +574,18 @@ export function createTopbar({
         if (destroyed) return;
         attachCount += 1;
         if (!showTopbarWidget()) {
-            observeRecoveryTarget(null);
+            stopTicker();
+            stopAttachmentObservers();
             remove();
             return;
         }
         const topbar = document.querySelector(TOPBAR_SELECTOR);
         observeRecoveryTarget(topbar);
-        if (!topbar) return;
+        if (!topbar) {
+            stopTicker();
+            return;
+        }
+        startTicker();
         if (topbar !== observedTopbar) observeTopbar(topbar);
         if (!container) build();
 
@@ -780,7 +827,6 @@ export function createTopbar({
                 renderButton();
                 renderSurfaces();
             });
-            ticker = setIntervalFn(tick, 1000);
             attach();
         },
         refresh: attach,
@@ -796,19 +842,8 @@ export function createTopbar({
             unsubscribe = null;
             unsubscribePaused?.();
             unsubscribePaused = null;
-            if (ticker) clearIntervalFn(ticker);
-            ticker = null;
-            observer?.disconnect();
-            observer = null;
-            hostObserver?.disconnect();
-            hostObserver = null;
-            recoveryObserver?.disconnect();
-            recoveryObserver = null;
-            outerRecoveryObserver?.disconnect();
-            outerRecoveryObserver = null;
-            recoveryTarget = null;
-            outerRecoveryTarget = null;
-            observedTopbar = null;
+            stopTicker();
+            stopAttachmentObservers();
             attachQueued = false;
             if (attachTimer) clearTimeout(attachTimer);
             attachTimer = null;

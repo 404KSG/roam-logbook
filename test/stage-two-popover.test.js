@@ -520,6 +520,8 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
     );
     assert.match(popover.querySelector('.rlb-surface__refresh-status').textContent, /last valid snapshot/i);
     assert.match(popover.querySelector('.rlb-popover__notice').textContent, /Retry after Roam finishes syncing/i);
+    assert.equal(popover.querySelector('.rlb-popover__notice').getAttribute('role'), 'alert');
+    assert.equal(popover.querySelector('.rlb-popover__notice').getAttribute('aria-live'), 'assertive');
 });
 
 test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause state', async t => {
@@ -647,6 +649,17 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
 
     const pausedRows = [...surface.querySelectorAll('[data-session-state="paused"]')];
     assert.equal(pausedRows.length, 2);
+    assert.ok(
+        pausedRows.every(
+            row => row.querySelector('.rlb-run__status').getAttribute('aria-label') === 'Paused Task'
+        )
+    );
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.ok(
+        [...surface.querySelectorAll('.rlb-popover__footer button')].some(
+            node => node.textContent === 'Resume paused Tasks'
+        )
+    );
     assert.ok(pausedRows.every(row => row.querySelector('[data-action="resume"]')));
     assert.ok(
         pausedRows.every(row => {
@@ -670,7 +683,12 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
     assert.equal(clock.getRunning().length, 2);
     assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
     assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause All'));
-    assert.equal([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Resume All'), false);
+    assert.equal(
+        [...surface.querySelectorAll('.rlb-popover__footer button')].some(
+            node => node.textContent === 'Resume paused Tasks'
+        ),
+        false
+    );
 });
 
 test('paused topbar keeps its clock identity while visibly distinguishing paused state from idle', async t => {
@@ -689,8 +707,53 @@ test('paused topbar keeps its clock identity while visibly distinguishing paused
     assert.ok(pausedButton.classList.contains('rlb-topbar__button--paused'));
     assert.ok(pausedButton.querySelector('.bp3-icon-history'), 'paused state keeps the clock identity');
     assert.equal(pausedButton.querySelector('.rlb-topbar__pause-badge'), null);
-    assert.match(pausedButton.getAttribute('aria-label'), /1 Session Paused/i);
+    assert.match(pausedButton.getAttribute('aria-label'), /1 Task Paused/i);
     assert.equal(pausedButton.textContent, '');
+});
+
+test('pending Resume conflicts stay visible as retryable Recovery rows', async () => {
+    settingsStore.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [],
+                pendingResume: [
+                    {
+                        taskUid: 'popover-task-01',
+                        title: 'Graph Engineering',
+                        pausedAtMs: Date.parse('2026-08-15T08:00:00Z'),
+                        clockUid: null,
+                    },
+                ],
+            },
+        })
+    );
+    extension.onunload();
+    extension.onload({ extensionAPI });
+
+    const surface = openPopover();
+    const recovery = surface.querySelector('[data-session-state="recovery"]');
+    assert.ok(recovery, 'a pending conflict is rendered instead of disappearing');
+    assert.equal(recovery.dataset.recoveryState, 'conflict');
+    assert.equal(recovery.querySelector('.rlb-run__status').getAttribute('aria-label'), 'Recovery');
+    assert.match(recovery.textContent, /Recovery required|Exact Session association/i);
+    const retry = recovery.querySelector('[data-action="recovery"]');
+    assert.equal(retry.title, 'Retry Recovery');
+    assert.equal(retry.getAttribute('aria-label'), 'Retry Recovery');
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, '1 Recovery Required');
+    assert.match(topbarButton().getAttribute('aria-label'), /Recovery item/i);
+
+    click(retry);
+    await settle();
+
+    assert.ok(surface.querySelector('[data-session-state="recovery"]'), 'retry keeps an unresolved conflict available');
+    const notice = surface.querySelector('.rlb-popover__notice');
+    assert.ok(notice);
+    assert.equal(notice.getAttribute('role'), 'alert');
+    assert.equal(notice.getAttribute('aria-live'), 'assertive');
+    assert.match(notice.textContent, /Retry after Roam finishes syncing/i);
+    assert.ok(surface.querySelector('[data-session-state="recovery"] [data-action="recovery"]'));
 });
 
 test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {

@@ -196,13 +196,14 @@ export function watchBlockString(uid, onChange) {
         uid,
         detach: () => {
             if (detached) return { ok: true, detached: false };
-            detached = true;
-            if (!remove) {
+            const remover = remove || resolve(null, 'removePullWatch');
+            if (!remover) {
                 const error = new Error('roamAlphaAPI removePullWatch unavailable');
                 return { ok: false, detached: false, error };
             }
             try {
-                remove(pattern, entity, handler);
+                remover(pattern, entity, handler);
+                detached = true;
                 return { ok: true, detached: true };
             } catch (error) {
                 detached = false;

@@ -455,6 +455,13 @@ test('the dashboard renders totals and the task breakdown', () => {
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
     const runningTable = dialog().querySelector('.rlb-table');
+    const runningHeaders = [...runningTable.querySelectorAll('thead th')];
+    assert.deepEqual(
+        runningHeaders.map(header => header.textContent),
+        ['Task', 'Started', 'Elapsed', 'Actions']
+    );
+    assert.ok(runningHeaders.every(header => header.getAttribute('scope') === 'col'));
+    assert.ok(runningHeaders.at(-1).classList.contains('rlb-visually-hidden'));
     const started = runningTable.querySelector('.rlb-started');
     assert.ok(started, 'Running exposes a semantic Started time');
     assert.equal(started.tagName, 'TIME');

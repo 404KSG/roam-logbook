@@ -139,6 +139,46 @@ test('a failed Clock in can be retried without duplicating a successful drawer',
     assert.equal(clock.getRunning().length, 1);
 });
 
+test('unload does not reset the mutation tail behind an in-flight Clock In', async () => {
+    allowMultiple = true;
+    const clock = await import('../src/clock.js');
+    const originalCreate = graph.api.data.block.create;
+    let release;
+    const gate = new Promise(resolve => {
+        release = resolve;
+    });
+    let started;
+    const startedPromise = new Promise(resolve => {
+        started = resolve;
+    });
+    let blocked = true;
+    graph.api.data.block.create = async args => {
+        if (blocked && args.block.string === 'LOGBOOK::') {
+            blocked = false;
+            started();
+            await gate;
+        }
+        return originalCreate(args);
+    };
+
+    const oldInstance = clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    await startedPromise;
+    clock.reset();
+    const newInstance = clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:01') });
+    release();
+
+    const results = await Promise.allSettled([oldInstance, newInstance]);
+    graph.api.data.block.create = originalCreate;
+
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(clockBlocksFor(TASK.uid).length, 1);
+    assert.equal(
+        [...graph.store.values()].filter(block => block.parent === TASK.uid && block.string === 'LOGBOOK::').length,
+        1,
+        'the new lifecycle must wait for the old graph mutation instead of creating a second drawer'
+    );
+});
+
 test('Clock in stops after a successful close whose refresh cannot confirm graph state', async () => {
     const clock = await import('../src/clock.js');
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });

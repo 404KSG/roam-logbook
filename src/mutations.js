@@ -8,14 +8,31 @@
  */
 
 let tail = Promise.resolve();
+let generation = 0;
 
 export function enqueueMutation(action) {
-    const result = tail.then(action, action);
+    const expectedGeneration = generation;
+    const run = () => {
+        if (expectedGeneration !== generation) {
+            return {
+                ok: false,
+                invalidated: true,
+                uncertain: false,
+                error: new Error('Mutation was invalidated by an extension reload.'),
+            };
+        }
+        return action();
+    };
+    const result = tail.then(run, run);
     // A failed action must not poison the queue for the next user action.
     tail = result.catch(() => undefined);
     return result;
 }
 
 export function resetMutationQueue() {
-    tail = Promise.resolve();
+    // Keep the old tail intact. An in-flight graph write must settle before a
+    // newly loaded extension instance is allowed to read and mutate the graph.
+    // Generation invalidation prevents queued work that has not started from
+    // writing after the lifecycle boundary without creating a second queue.
+    generation += 1;
 }

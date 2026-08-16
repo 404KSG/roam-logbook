@@ -26,6 +26,11 @@ const extensionAPI = {
     },
 };
 
+const settle = async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+};
+
 const VALID_TASK = { uid: 'health-task1', string: '{{[[TODO]]}} valid task', parent: null };
 const ORPHAN_TASK = { uid: 'health-orphan', string: null, page: null, parent: null };
 
@@ -177,7 +182,7 @@ test('Data issues is absent for a clean graph and exposes exact details only whe
     issueDashboard.destroy();
 });
 
-test('Dashboard keeps the last successful hierarchy when a refresh query fails, then recovers', () => {
+test('Dashboard keeps the last successful hierarchy when a refresh query fails, then recovers', async () => {
     const graph = seed(false);
     const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
     dashboard.open();
@@ -189,6 +194,7 @@ test('Dashboard keeps the last successful hierarchy when a refresh query fails, 
     };
 
     document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    await settle();
 
     assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /could not be refreshed/i);
     assert.equal(document.querySelector('.rlb-task-link__text').textContent, before);
@@ -197,6 +203,7 @@ test('Dashboard keeps the last successful hierarchy when a refresh query fails, 
 
     graph.api.data.q = originalQuery;
     document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    await settle();
     assert.equal(document.querySelector('.rlb-dashboard__notice'), null);
     assert.equal(document.querySelector('.rlb-data-issues'), null);
     dashboard.destroy();
@@ -248,7 +255,7 @@ test('block-string adapter failures identify the affected uid', () => {
     );
 });
 
-test('Dashboard treats a referenced parent string read failure as stale data, not a new root', () => {
+test('Dashboard treats a referenced parent string read failure as stale data, not a new root', async () => {
     const graph = installGraph([
         { uid: 'health-ref-parent', string: '{{[[TODO]]}} Referenced parent', parent: null },
         { uid: 'health-ref', string: '((health-ref-parent))', parent: 'health-ref-parent' },
@@ -270,6 +277,7 @@ test('Dashboard treats a referenced parent string read failure as stale data, no
         return originalQuery(datalog, ...args);
     };
     document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    await settle();
 
     assert.match(document.querySelector('.rlb-dashboard__notice').textContent, /last successful snapshot/i);
     assert.equal(document.querySelectorAll('.rlb-tree__cell').length > 0, true);
@@ -305,7 +313,7 @@ test('Dashboard exposes a structured issue when the first snapshot cannot be rea
     dashboard.destroy();
 });
 
-test('Dashboard labels a graph read failure separately and clears it after recovery', () => {
+test('Dashboard labels a graph read failure separately and clears it after recovery', async () => {
     const graph = seed(false);
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (datalog, ...args) => {
@@ -324,6 +332,7 @@ test('Dashboard labels a graph read failure separately and clears it after recov
 
     graph.api.data.q = originalQuery;
     document.querySelector('.rlb-icon-button.bp3-icon-refresh').click();
+    await settle();
     assert.equal(document.querySelector('.rlb-data-issues'), null);
     dashboard.destroy();
 });

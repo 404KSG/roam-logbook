@@ -137,6 +137,53 @@ test('tasks with no relationship stay as separate roots', async () => {
     ]);
 });
 
+test('an ancestor chain beyond the safety depth is reported and blocks cascade writes', async () => {
+    const blocks = [];
+    const depth = 26;
+    for (let index = 0; index <= depth; index += 1) {
+        blocks.push({
+            uid: `deep-${String(index).padStart(2, '0')}`,
+            string: TODO(`deep task ${index}`),
+            parent: index === 0 ? null : `deep-${String(index - 1).padStart(2, '0')}`,
+        });
+    }
+    blocks[0].string = '{{[[DONE]]}} completed root';
+    blocks.push(
+        { uid: 'deep-drawer', string: 'LOGBOOK::', parent: `deep-${String(depth).padStart(2, '0')}` },
+        {
+            uid: 'deep-clock',
+            string: 'CLOCK:: [2026-08-08 Sat 09:00]',
+            parent: 'deep-drawer',
+        }
+    );
+    installGraph(blocks);
+    clock.reset();
+    clock.refresh();
+
+    const hierarchy = readHierarchy([`deep-${String(depth).padStart(2, '0')}`]);
+    const issue = hierarchy.issues.find(item => item.code === 'ancestor-depth-exceeded');
+    assert.ok(issue);
+    assert.equal(issue.kind, 'hierarchy');
+    assert.equal(issue.source, 'ancestor-depth');
+    assert.ok(issue.affectedUids.includes(`deep-${String(depth).padStart(2, '0')}`));
+
+    let updates = 0;
+    const originalUpdate = globalThis.window.roamAlphaAPI.data.block.update;
+    globalThis.window.roamAlphaAPI.data.block.update = async payload => {
+        updates += 1;
+        return originalUpdate(payload);
+    };
+    try {
+        const result = await clock.clockOutCompletedTask('deep-00');
+        assert.equal(result.uncertain, true);
+        assert.equal(result.ok, false);
+        assert.equal(updates, 0);
+        assert.equal(clock.getRunning().length, 1);
+    } finally {
+        globalThis.window.roamAlphaAPI.data.block.update = originalUpdate;
+    }
+});
+
 /** Which block the freshly created LOGBOOK drawer ended up under. */
 function installedParentOfDrawer() {
     const [entry] = readAllEntries();

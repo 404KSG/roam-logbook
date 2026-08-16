@@ -358,24 +358,6 @@ export const STYLES = `
     padding: 6px 5px 8px;
 }
 
-.rlb-popover__subheading {
-    padding: 10px 6px 4px;
-    color: #5c7080;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.rlb-paused-list {
-    padding: 0 6px 4px;
-}
-
-.rlb-paused-row {
-    padding: 4px 0;
-    overflow-wrap: anywhere;
-}
-
 .rlb-popover__notice {
     margin: 6px;
     padding: 6px 8px;
@@ -634,6 +616,14 @@ export const STYLES = `
     background: #8a9ba8;
 }
 
+.rlb-run__status--recovery {
+    background: #d9822b;
+}
+
+.bp3-dark .rlb-run__status--recovery {
+    background: #f29d49;
+}
+
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 2;
     grid-row: 1;
@@ -722,7 +712,8 @@ export const STYLES = `
     color: #c23030;
 }
 
-.rlb-run__actions .rlb-run__resume {
+.rlb-run__actions .rlb-run__resume,
+.rlb-run__actions .rlb-run__recovery {
     width: 32px;
     min-width: 32px;
     max-width: 32px;
@@ -736,7 +727,9 @@ export const STYLES = `
 }
 
 .rlb-run__actions .rlb-run__resume:hover,
-.rlb-run__actions .rlb-run__resume:focus-visible {
+.rlb-run__actions .rlb-run__resume:focus-visible,
+.rlb-run__actions .rlb-run__recovery:hover,
+.rlb-run__actions .rlb-run__recovery:focus-visible {
     color: #3f596b;
     background: rgba(167, 182, 194, 0.24);
 }
@@ -745,6 +738,15 @@ export const STYLES = `
 .rlb-run__state {
     color: #5c7080;
     opacity: 0.75;
+}
+
+.rlb-run--recovery .rlb-run__meta {
+    color: #8a4b08;
+    opacity: 1;
+}
+
+.bp3-dark .rlb-run--recovery .rlb-run__meta {
+    color: #f29d49;
 }
 
 .rlb-run__actions .bp3-icon-trash {
