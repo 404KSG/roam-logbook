@@ -103,6 +103,31 @@ test('empty Session surface keeps Dashboard and Refresh on one row', () => {
     assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
 });
 
+test('single running Session keeps Dashboard, Pause, and Refresh on one row', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+
+    const popover = openPopover();
+    const footer = popover.querySelector('.rlb-popover__footer');
+    const actions = [...footer.querySelectorAll('button')];
+
+    assert.ok(footer.classList.contains('rlb-popover__footer--single-running'));
+    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', 'Pause', '']);
+    assert.equal(actions[1].title, 'Pause the running Session');
+    assert.equal(actions[1].getAttribute('aria-label'), 'Pause the running Session');
+    assert.equal(
+        [...footer.querySelectorAll('button')].some(action => /Clock Out All/i.test(action.textContent)),
+        false
+    );
+    assert.ok(popover.querySelector('[data-action="clock-out"]'), 'individual Check Out remains available');
+    assert.equal(actions.every(action => action.tabIndex === 0), true);
+
+    click(actions[1]);
+    await settle();
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(popover.querySelectorAll('[data-session-state="paused"]').length, 1);
+});
+
 test('running rows expose compact cycle metadata without misleading per-session targets', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
@@ -557,7 +582,7 @@ test('paused topbar keeps its clock identity while visibly distinguishing paused
 
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
     await settle();
 
     const pausedButton = topbarButton();
@@ -574,7 +599,7 @@ test('individual Resume is idempotent under double click and retains the paused 
     settingsStore.set('allowMultipleClocks', true);
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
     await settle();
 
     const row = surface.querySelector('[data-session-state="paused"]');
@@ -589,7 +614,7 @@ test('individual Resume is idempotent under double click and retains the paused 
     await settle();
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
     await settle();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
     await settle();
     const retryRow = surface.querySelector('[data-session-state="paused"]');
     const originalCreate = graph.api.data.block.create;
@@ -726,7 +751,7 @@ test('external clock activity during a pause is not duplicated by individual Res
     settingsStore.set('allowMultipleClocks', true);
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause All'));
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
     await settle();
 
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });

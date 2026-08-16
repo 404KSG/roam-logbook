@@ -157,6 +157,48 @@ test('Session title links inherit Roam theme colors and keep a current-color und
     assert.equal(geometry.outline, geometry.color, JSON.stringify(geometry));
 });
 
+test('icon-bearing Dashboard task buttons stay neutral and keyboard-visible in light and dark themes', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const theme of ['', 'bp3-dark']) {
+        const geometry = await withChromium(
+            htmlWithLateHost(
+                `<div class="${theme} rlb-root"><button class="bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon" data-navigation-cue="icon" title="Open this block: Long task" aria-label="Open this block: Long task"><span class="rlb-task-link__text">Long task</span></button></div>`
+            ),
+            `(() => {
+                const link = document.querySelector('.rlb-task-link');
+                const normal = getComputedStyle(link);
+                const icon = getComputedStyle(link, '::before');
+                link.focus();
+                const focused = getComputedStyle(link);
+                const focusRule = [...document.styleSheets]
+                    .flatMap(sheet => [...sheet.cssRules])
+                    .find(rule => rule.selectorText === '.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible');
+                return {
+                    cue: link.dataset.navigationCue,
+                    title: link.title,
+                    aria: link.getAttribute('aria-label'),
+                    text: link.querySelector('.rlb-task-link__text').textContent,
+                    color: normal.color,
+                    iconColor: icon.color,
+                    decoration: normal.textDecorationLine,
+                    focusedDecoration: focused.textDecorationLine,
+                    focusBackground: focused.backgroundColor,
+                    focusRule: focusRule?.cssText || '',
+                };
+            })()`
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.cue, 'icon', JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.aria, geometry.title, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.text, 'Long task', JSON.stringify({ theme, geometry }));
+        assert.notEqual(geometry.color, geometry.iconColor, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.decoration, 'none', JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.focusedDecoration, 'none', JSON.stringify({ theme, geometry }));
+        assert.match(geometry.focusRule, /outline: 2px solid var\(--rlb-muted\)/, JSON.stringify({ theme, geometry }));
+        assert.notEqual(geometry.focusBackground, 'rgba(0, 0, 0, 0)', JSON.stringify({ theme, geometry }));
+    }
+});
+
 test('topbar remains a stable unit while Roam search expands and at narrow widths', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [720, 480, 360]) {
@@ -718,6 +760,48 @@ test('beta.15 empty Session footer stays on one row at narrow widths across Refr
         assert.equal(geometry.inside, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.overflow, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.stable, true, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.refreshWidth >= 30 && geometry.refreshWidth <= 32, JSON.stringify({ width, geometry }));
+    }
+});
+
+test('beta.16 single-running footer keeps Pause and Refresh aligned at narrow widths', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const width of [320, 360]) {
+        const geometry = await withChromium(
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__footer rlb-popover__footer--single-running"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause</button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--idle" data-action="refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></div>`),
+            `(() => {
+                const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
+                const popover = document.querySelector('.rlb-popover');
+                const footer = popover.querySelector('.rlb-popover__footer');
+                const buttons = [...footer.querySelectorAll('button')];
+                const cell = footer.querySelector('.rlb-surface__refresh-cell');
+                const refresh = cell.querySelector('[data-action="refresh"]');
+                const style = getComputedStyle(footer);
+                const footerRect = rect(footer);
+                const rects = buttons.map(rect);
+                return {
+                    labels: buttons.map(button => button.textContent),
+                    rows: style.gridTemplateRows.split(' '),
+                    columns: style.gridTemplateColumns.split(' '),
+                    heights: rects.map(item => item.height),
+                    refreshCell: rect(cell),
+                    refresh: rect(refresh),
+                    aligned: rects.every(item => Math.abs(item.top - rects[0].top) <= 1 && Math.abs(item.bottom - rects[0].bottom) <= 1),
+                    inside: rects.concat(rect(cell)).every(item => item.left >= footerRect.left && item.right <= footerRect.right + .5 && item.top >= footerRect.top && item.bottom <= footerRect.bottom + .5),
+                    overflow: popover.scrollWidth > popover.clientWidth + 1,
+                    refreshWidth: rect(refresh).width,
+                };
+            })()`
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        assert.deepEqual(geometry.labels, ['Dashboard', 'Pause', ''], JSON.stringify({ width, geometry }));
+        assert.equal(geometry.rows.length, 1, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.columns.length, 3, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.aligned, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.inside, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.overflow, false, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.heights.every(height => Math.abs(height - 32) <= 1), JSON.stringify({ width, geometry }));
+        assert.ok(geometry.refreshCell.width >= 39 && geometry.refreshCell.width <= 40, JSON.stringify({ width, geometry }));
         assert.ok(geometry.refreshWidth >= 30 && geometry.refreshWidth <= 32, JSON.stringify({ width, geometry }));
     }
 });

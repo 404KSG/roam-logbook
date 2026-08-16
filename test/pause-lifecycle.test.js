@@ -161,7 +161,7 @@ test('Pause All survives reload and Resume All starts a fresh shared Pomodoro cy
 test('Resume All reconciles a paused Task explicitly clocked in and out during the pause', async () => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     click(topbarButton());
-    click(action('Pause All'));
+    click(action('Pause'));
     await settle();
 
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
@@ -278,7 +278,7 @@ test('an overrun shared cycle is reset after pause and resume', async t => {
     t.mock.timers.tick(31 * 60_000);
 
     click(topbarButton());
-    click(action('Pause All'));
+    click(action('Pause'));
     await settle();
     const pausedRecord = JSON.parse(settingsStore.get('pausedBatch')).data.items[0];
     assert.equal('pomodoroRemainingMs' in pausedRecord, false);
@@ -316,7 +316,7 @@ test('Clock Out All permanently finishes running Tasks and clears an older pause
 test('a later Pause All merges newly running Tasks into the older batch', async () => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'pauseone1' });
     click(topbarButton());
-    click(action('Pause All'));
+    click(action('Pause'));
     await settle();
     assert.deepEqual(
         JSON.parse(settingsStore.get('pausedBatch')).data.items.map(item => item.taskUid),

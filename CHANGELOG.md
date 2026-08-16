@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0-beta.16 — 2026-08-16
+
+- Added an explicit navigation-cue contract to Dashboard task buttons: icon-bearing Running, By Task, and Analytics task entries keep neutral text, muted document icons, quiet hover feedback, and an accessible focus ring while preserving normal and Shift+Click navigation. Icon-less Current Session titles retain their Roam page-reference link treatment.
+- Added a dedicated exactly-one-running footer row: `Dashboard | Pause | Refresh`, with the 32px Refresh control in a fixed 40px cell and no redundant bulk Clock Out action; empty, parallel, paused, and mixed Session layouts remain unchanged.
+- Added beta.16 light/dark navigation styling, keyboard, semantic, action, narrow-layout, and lifecycle coverage; generated the release bundle from the same source.
+
 ## 0.9.0-beta.15 — 2026-08-16
 
 - Made the confirmed no-Session footer a single compact row: Dashboard keeps the flexible first cell and the icon-only Refresh action keeps a fixed 40px second cell without changing the running or paused two-row surface.

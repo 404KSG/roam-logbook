@@ -169,6 +169,8 @@ test('Dashboard Running and By Task links expose the complete Task title', async
         assert.match(link.getAttribute('aria-label'), /^Open this block: .+/);
         assert.equal(link.getAttribute('aria-label'), link.title);
         assert.notEqual(link.getAttribute('aria-label'), 'Open this block');
+        assert.ok(link.classList.contains('rlb-task-link--icon'));
+        assert.equal(link.dataset.navigationCue, 'icon');
     }
     assert.ok(links.some(link => /Child running task/.test(link.title)));
     dashboard.destroy();
@@ -583,6 +585,11 @@ test('Analytics distribution keeps five own-time tasks and an Other bucket', asy
 
     assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row').length, 6);
     assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row .rlb-task-link').length, 5);
+    assert.ok(
+        [...document.querySelectorAll('.rlb-analytics__distribution .rlb-task-link')].every(link =>
+            link.classList.contains('rlb-task-link--icon') && link.dataset.navigationCue === 'icon'
+        )
+    );
     assert.equal(document.querySelector('.rlb-analytics__other-label').textContent, 'Other');
 
     dashboard.destroy();

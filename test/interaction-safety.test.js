@@ -315,11 +315,11 @@ test('Command Palette confirmation expires and unload resets the armed state', a
     assert.equal(clock.getRunning().length, 2, 'unload clears a pending command confirmation');
 });
 
-test('Pause All remains a one-click recoverable action', async () => {
+test('single-session Pause remains a one-click recoverable action', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
     openPopover();
 
-    click(footerAction('Pause All'));
+    click(footerAction('Pause'));
     await settle();
 
     assert.equal(clock.getRunning().length, 0);

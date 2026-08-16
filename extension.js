@@ -664,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.15";
+var PLUGIN_VERSION = "0.9.0-beta.16";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -2656,7 +2656,7 @@ function createDashboard({
   const taskLink = (title, taskUid) => {
     const accessibleName = `Open this block: ${title}`;
     const link = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link",
+      "bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon",
       "",
       (event) => {
         event.stopPropagation();
@@ -2670,6 +2670,7 @@ function createDashboard({
       },
       { title: accessibleName }
     );
+    link.dataset.navigationCue = "icon";
     link.appendChild(el("span", "rlb-task-link__text", title));
     return link;
   };
@@ -4533,6 +4534,39 @@ var STYLES = `
     max-width: var(--rlb-surface-action-height);
 }
 
+.rlb-popover__footer--single-running {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+    grid-template-rows: var(--rlb-surface-action-height);
+    align-items: stretch;
+}
+
+.rlb-popover__footer--single-running > .bp3-button:first-child {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.rlb-popover__footer--single-running > .bp3-button:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.rlb-popover__footer--single-running .rlb-surface__refresh-cell {
+    grid-column: 3;
+    grid-row: 1;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    align-items: center;
+    justify-content: center;
+}
+
+.rlb-popover__footer--single-running .rlb-surface__refresh-cell .rlb-surface__refresh {
+    flex: 0 0 var(--rlb-surface-action-height);
+    width: var(--rlb-surface-action-height);
+    min-width: var(--rlb-surface-action-height);
+    max-width: var(--rlb-surface-action-height);
+}
+
 .rlb-surface__refresh--loading::before {
     animation: rlb-surface-refresh-spin 900ms linear infinite;
 }
@@ -5020,6 +5054,36 @@ var STYLES = `
     white-space: nowrap;
 }
 
+/* Dashboard task buttons already carry a document-open cue. Keep their text
+   in the dashboard's neutral hierarchy; only icon-less Session titles use the
+   Roam page-reference palette below. */
+.bp3-button.bp3-minimal.rlb-task-link--icon {
+    color: var(--rlb-text);
+    text-decoration: none;
+    border-radius: 3px;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon::before {
+    color: var(--rlb-muted);
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon > .rlb-task-link__text {
+    color: inherit;
+    text-decoration: none;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon:hover,
+.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+    color: var(--rlb-text);
+    background: var(--rlb-task-link-hover, rgba(167, 182, 194, 0.14));
+    text-decoration: none;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+    outline: 2px solid var(--rlb-muted);
+    outline-offset: 2px;
+}
+
 /* Only the By Task rollup needs fixed numeric rails. The title column receives
    all remaining room and wraps, while Running keeps its natural table layout. */
 .rlb-task-table {
@@ -5093,6 +5157,7 @@ var STYLES = `
     --rlb-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-link: #316a9f;
     --rlb-surface-link-hover: #2a5a8d;
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.14);
     --rlb-session-running: #7eb794;
     --rlb-accent: var(--roam-accent-color, #316a9f);
     --rlb-accent-soft: rgba(49, 106, 159, 0.12);
@@ -5120,6 +5185,7 @@ var STYLES = `
     --rlb-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-link: #7eb7d5;
     --rlb-surface-link-hover: #9dcae2;
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.18);
     --rlb-session-running: #8ed0aa;
     --rlb-accent: #48aff0;
     --rlb-accent-soft: rgba(72, 175, 240, 0.14);
@@ -5863,13 +5929,6 @@ var STYLES = `
     line-height: 14px;
 }
 
-.rlb-analytics__distribution-header .rlb-task-link {
-    color: var(--rlb-surface-link);
-    text-decoration: underline;
-    text-decoration-color: currentColor;
-    text-underline-offset: 2px;
-}
-
 .rlb-analytics__distribution-duration {
     flex: 0 0 auto;
     color: var(--rlb-muted);
@@ -6140,10 +6199,12 @@ function renderSessionSurface(root, model, options = {}) {
     if (notice4)
       root.appendChild(el("div", "rlb-popover__notice bp3-text-small", notice4));
   }
-  const footer = el(
-    "div",
-    `rlb-popover__footer${model.rows.length === 0 ? " rlb-popover__footer--empty" : ""}`
-  );
+  const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
+  const footerModifiers = [
+    model.rows.length === 0 ? "rlb-popover__footer--empty" : "",
+    singleRunning ? "rlb-popover__footer--single-running" : ""
+  ].filter(Boolean);
+  const footer = el("div", `rlb-popover__footer ${footerModifiers.join(" ")}`.trim());
   footer.appendChild(
     button("bp3-button bp3-small", "Dashboard", () => options.onOpenDashboard?.(), {
       title: "Open Roam Logbook Dashboard"
@@ -6152,8 +6213,8 @@ function renderSessionSurface(root, model, options = {}) {
   if (model.runningCount > 0 || model.pausedCount > 0) {
     if (model.runningCount > 0) {
       footer.appendChild(
-        button("bp3-button bp3-small", "Pause All", () => options.onPauseAll?.(), {
-          title: "Pause all running Sessions"
+        button("bp3-button bp3-small", singleRunning ? "Pause" : "Pause All", () => options.onPauseAll?.(), {
+          title: singleRunning ? "Pause the running Session" : "Pause all running Sessions"
         })
       );
     }

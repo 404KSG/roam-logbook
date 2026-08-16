@@ -151,6 +151,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-surface__refresh-cell \.rlb-surface__refresh[^}]*min-width: var\(--rlb-surface-action-height\)[^}]*min-height: var\(--rlb-surface-action-height\)/s);
     assert.match(css, /\.rlb-popover__footer--empty\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) 40px[^}]*grid-template-rows: var\(--rlb-surface-action-height\)/s);
     assert.match(css, /\.rlb-popover__footer--empty \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 2[^}]*grid-row: 1[^}]*width: 40px/s);
+    assert.match(css, /\.rlb-popover__footer--single-running\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) 40px[^}]*grid-template-rows: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-popover__footer--single-running \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 3[^}]*grid-row: 1[^}]*width: 40px/s);
     assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
     assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
 });
@@ -395,7 +397,7 @@ test('the popover lists the running clock', () => {
     const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
     assert.deepEqual(footerActions.map(action => action.textContent), [
         'Dashboard',
-        'Pause All',
+        'Pause',
         '',
     ]);
     for (const action of footerActions.slice(0, 2)) {
@@ -474,6 +476,10 @@ test('the dashboard renders totals and the task breakdown', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.match(css, /\.rlb-task-table \.rlb-task-link[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text[^}]*white-space: normal/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon\s*\{[^}]*color: var\(--rlb-text\)[^}]*text-decoration: none/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon::before\s*\{[^}]*color: var\(--rlb-muted\)/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon:focus-visible\s*\{[^}]*outline:/s);
+    assert.doesNotMatch(css, /\.rlb-analytics__distribution-header \.rlb-task-link\s*\{[^}]*color: var\(--rlb-surface-link\)/s);
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     click(dialog().querySelector('.rlb-header .bp3-icon-refresh'));

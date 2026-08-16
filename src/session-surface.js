@@ -222,10 +222,12 @@ export function renderSessionSurface(root, model, options = {}) {
         if (notice) root.appendChild(el('div', 'rlb-popover__notice bp3-text-small', notice));
     }
 
-    const footer = el(
-        'div',
-        `rlb-popover__footer${model.rows.length === 0 ? ' rlb-popover__footer--empty' : ''}`
-    );
+    const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
+    const footerModifiers = [
+        model.rows.length === 0 ? 'rlb-popover__footer--empty' : '',
+        singleRunning ? 'rlb-popover__footer--single-running' : '',
+    ].filter(Boolean);
+    const footer = el('div', `rlb-popover__footer ${footerModifiers.join(' ')}`.trim());
     footer.appendChild(
         button('bp3-button bp3-small', 'Dashboard', () => options.onOpenDashboard?.(), {
             title: 'Open Roam Logbook Dashboard',
@@ -234,8 +236,8 @@ export function renderSessionSurface(root, model, options = {}) {
     if (model.runningCount > 0 || model.pausedCount > 0) {
         if (model.runningCount > 0) {
             footer.appendChild(
-                button('bp3-button bp3-small', 'Pause All', () => options.onPauseAll?.(), {
-                    title: 'Pause all running Sessions',
+                button('bp3-button bp3-small', singleRunning ? 'Pause' : 'Pause All', () => options.onPauseAll?.(), {
+                    title: singleRunning ? 'Pause the running Session' : 'Pause all running Sessions',
                 })
             );
         }

@@ -807,7 +807,7 @@ export function createDashboard({
     const taskLink = (title, taskUid) => {
         const accessibleName = `Open this block: ${title}`;
         const link = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link',
+            'bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon',
             '',
             event => {
                 event.stopPropagation();
@@ -821,6 +821,7 @@ export function createDashboard({
             },
             { title: accessibleName }
         );
+        link.dataset.navigationCue = 'icon';
         link.appendChild(el('span', 'rlb-task-link__text', title));
         return link;
     };

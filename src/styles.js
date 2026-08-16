@@ -502,6 +502,39 @@ export const STYLES = `
     max-width: var(--rlb-surface-action-height);
 }
 
+.rlb-popover__footer--single-running {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+    grid-template-rows: var(--rlb-surface-action-height);
+    align-items: stretch;
+}
+
+.rlb-popover__footer--single-running > .bp3-button:first-child {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.rlb-popover__footer--single-running > .bp3-button:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.rlb-popover__footer--single-running .rlb-surface__refresh-cell {
+    grid-column: 3;
+    grid-row: 1;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    align-items: center;
+    justify-content: center;
+}
+
+.rlb-popover__footer--single-running .rlb-surface__refresh-cell .rlb-surface__refresh {
+    flex: 0 0 var(--rlb-surface-action-height);
+    width: var(--rlb-surface-action-height);
+    min-width: var(--rlb-surface-action-height);
+    max-width: var(--rlb-surface-action-height);
+}
+
 .rlb-surface__refresh--loading::before {
     animation: rlb-surface-refresh-spin 900ms linear infinite;
 }
@@ -989,6 +1022,36 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+/* Dashboard task buttons already carry a document-open cue. Keep their text
+   in the dashboard's neutral hierarchy; only icon-less Session titles use the
+   Roam page-reference palette below. */
+.bp3-button.bp3-minimal.rlb-task-link--icon {
+    color: var(--rlb-text);
+    text-decoration: none;
+    border-radius: 3px;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon::before {
+    color: var(--rlb-muted);
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon > .rlb-task-link__text {
+    color: inherit;
+    text-decoration: none;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon:hover,
+.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+    color: var(--rlb-text);
+    background: var(--rlb-task-link-hover, rgba(167, 182, 194, 0.14));
+    text-decoration: none;
+}
+
+.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+    outline: 2px solid var(--rlb-muted);
+    outline-offset: 2px;
+}
+
 /* Only the By Task rollup needs fixed numeric rails. The title column receives
    all remaining room and wraps, while Running keeps its natural table layout. */
 .rlb-task-table {
@@ -1062,6 +1125,7 @@ export const STYLES = `
     --rlb-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-link: #316a9f;
     --rlb-surface-link-hover: #2a5a8d;
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.14);
     --rlb-session-running: #7eb794;
     --rlb-accent: var(--roam-accent-color, #316a9f);
     --rlb-accent-soft: rgba(49, 106, 159, 0.12);
@@ -1089,6 +1153,7 @@ export const STYLES = `
     --rlb-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-link: #7eb7d5;
     --rlb-surface-link-hover: #9dcae2;
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.18);
     --rlb-session-running: #8ed0aa;
     --rlb-accent: #48aff0;
     --rlb-accent-soft: rgba(72, 175, 240, 0.14);
@@ -1830,13 +1895,6 @@ export const STYLES = `
     font-size: 11px;
     font-weight: 500;
     line-height: 14px;
-}
-
-.rlb-analytics__distribution-header .rlb-task-link {
-    color: var(--rlb-surface-link);
-    text-decoration: underline;
-    text-decoration-color: currentColor;
-    text-underline-offset: 2px;
 }
 
 .rlb-analytics__distribution-duration {
