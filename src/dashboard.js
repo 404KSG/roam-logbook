@@ -1,7 +1,6 @@
 /**
  * The dashboard dialog: a compact overview, running sessions, and a per-task
- * breakdown. Analytics is an opt-in second view so opening the dashboard stays
- * list-first and quiet.
+ * breakdown.
  *
  * Reads the graph on open and on refresh only — there is no live subscription,
  * because a dialog that reshuffles under the cursor is worse than a stale one.
@@ -23,12 +22,10 @@ import {
 } from './stats.js';
 import { staleHours } from './settings.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
-import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Roam Logbook';
-const VIEW_HOST_ID = 'roam-logbook-dashboard-view';
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Dashboard overlays are allowed to outlive a single render, and hot reloads
 // can briefly create more than one controller. Keep the document lock shared
@@ -120,8 +117,6 @@ export function createDashboard({
     let lastHierarchy = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
-    let view = 'overview';
-    let viewToggle = null;
     let themeRuntime = null;
     let releaseScrollLock = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
@@ -139,15 +134,6 @@ export function createDashboard({
         discardConfirmTimer = null;
     };
 
-    const focusWithoutScroll = node => {
-        if (!node?.focus) return;
-        try {
-            node.focus({ preventScroll: true });
-        } catch {
-            node.focus();
-        }
-    };
-
     const updateLiveMetricNodes = now => {
         if (!lastModel) return;
         const metrics = summariseSessionMetrics(lastModel.entries, now);
@@ -160,9 +146,6 @@ export function createDashboard({
             selected: formatMinutesHuman(metrics.focusMinutes),
             sessions: String(metrics.sessions),
             tasks: String(lastModel.tasks.length),
-            focus: formatMinutesHuman(metrics.focusMinutes),
-            average: formatMinutesHuman(metrics.averageMinutes),
-            longest: formatMinutesHuman(metrics.longestMinutes),
         };
         for (const node of bodyNode?.querySelectorAll('[data-live-metric]') || []) {
             const value = values[node.dataset.liveMetric];
@@ -200,11 +183,8 @@ export function createDashboard({
         const hierarchy = lastHierarchy || {};
         const transientIssues = lastTransientIssues;
         const refreshNotice = lastRefreshNotice;
-        const analytics = view === 'analytics';
-        summaryNode.hidden = analytics;
-        summaryNode.setAttribute('aria-hidden', String(analytics));
         summaryNode.replaceChildren();
-        if (!analytics) summaryNode.appendChild(overviewBar(model, now));
+        summaryNode.appendChild(overviewBar(model, now));
         bodyNode.replaceChildren();
 
         if (refreshNotice) {
@@ -218,13 +198,6 @@ export function createDashboard({
             ...(hierarchy.issues || []).map(issueRow),
             ...transientIssues.map(issueRow),
         ];
-
-        if (analytics) {
-            bodyNode.appendChild(analyticsSection(model, now));
-            if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
-            startLiveTicker();
-            return;
-        }
 
         if (model.running.length > 0) bodyNode.appendChild(runningSection(model.running, now));
         if (model.entries.length === 0) {
@@ -365,179 +338,6 @@ export function createDashboard({
             wrapper.appendChild(item);
         }
         return wrapper;
-    };
-
-    const svgNode = (name, attributes = {}, textContent = '') => {
-        const node = document.createElementNS(SVG_NS, name);
-        for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
-        if (textContent) node.textContent = textContent;
-        return node;
-    };
-
-    const activityChart = (model, now) => {
-        const section = el('section', 'rlb-analytics__chart rlb-dashboard-panel');
-        const heading = el('div', 'rlb-analytics__activity-header');
-        const titleGroup = el('div', 'rlb-analytics__activity-heading');
-        titleGroup.append(
-            el('h3', 'rlb-analytics__section-title', 'Activity'),
-            el('span', 'rlb-analytics__activity-range', model.activityLabel)
-        );
-        const focus = el('div', 'rlb-analytics__focus');
-        focus.append(
-            el('span', 'rlb-analytics__focus-label', 'Focus time'),
-            (() => {
-                const value = el(
-                    'strong',
-                    'rlb-analytics__focus-value',
-                    formatMinutesHuman(model.sessionMetrics?.focusMinutes || model.totalMinutes)
-                );
-                value.dataset.liveMetric = 'focus';
-                return value;
-            })()
-        );
-        heading.append(titleGroup, focus);
-        section.appendChild(heading);
-        const series = model.activity || [];
-        const titleId = 'roam-logbook-activity-title';
-        const descriptionId = 'roam-logbook-activity-description';
-        const svg = svgNode('svg', {
-            class: 'rlb-analytics__svg',
-            viewBox: '0 0 760 190',
-            role: 'img',
-            'aria-labelledby': `${titleId} ${descriptionId}`,
-            preserveAspectRatio: 'none',
-        });
-        svg.appendChild(svgNode('title', { id: titleId }, `Activity over time · ${model.activityLabel}`));
-        svg.appendChild(
-            svgNode(
-                'desc',
-                { id: descriptionId },
-                series.length > 0
-                    ? `${series.length} daily activity bars. All time is shown as ${model.activityLabel}.`
-                    : 'No activity data is available for this range.'
-            )
-        );
-        const peak = Math.max(1, ...series.map(day => day.minutes));
-        const left = 18;
-        const chartWidth = 724;
-        const chartHeight = 124;
-        const baseline = chartHeight + 8;
-        const barWidth = series.length > 0 ? Math.min(16, Math.max(8, chartWidth / series.length - 8)) : 12;
-        const labelCount = Math.min(7, series.length);
-        const labelIndexes = new Set();
-        if (labelCount > 0) {
-            for (let label = 0; label < labelCount; label += 1) {
-                const denominator = Math.max(1, labelCount - 1);
-                labelIndexes.add(Math.round((label * (series.length - 1)) / denominator));
-            }
-        }
-        svg.appendChild(
-            svgNode('line', {
-                class: 'rlb-analytics__axis',
-                x1: left,
-                y1: baseline,
-                x2: left + chartWidth,
-                y2: baseline,
-            })
-        );
-        series.forEach((day, index) => {
-            const slot = chartWidth / Math.max(1, series.length);
-            const x = left + slot * index + (slot - barWidth) / 2;
-            const height = day.minutes === 0 ? 3 : Math.max(8, (day.minutes / peak) * chartHeight);
-            const y = baseline - height;
-            const rect = svgNode('rect', {
-                class: day.minutes === 0 ? 'rlb-analytics__bar rlb-analytics__bar--empty' : 'rlb-analytics__bar',
-                x,
-                y,
-                width: barWidth,
-                height,
-                rx: 3,
-                'data-date': day.key,
-                'data-minutes': day.minutes,
-            });
-            rect.appendChild(svgNode('title', {}, `${day.key} · ${formatMinutesHuman(day.minutes)}`));
-            svg.appendChild(rect);
-            if (labelIndexes.has(index)) {
-                svg.appendChild(
-                    svgNode(
-                        'text',
-                        { class: 'rlb-analytics__label', x: x + barWidth / 2, y: 166, 'text-anchor': 'middle' },
-                        formatDayLabel(day.date, now)
-                    )
-                );
-            }
-        });
-        section.appendChild(svg);
-        if (series.length === 0 || series.every(day => day.minutes === 0)) {
-            section.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range.'));
-        }
-        return section;
-    };
-
-    const taskDistribution = model => {
-        const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
-        panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Task time distribution'));
-        const rows = model.tasks.filter(task => task.minutes > 0);
-        const top = rows.slice(0, 5);
-        const otherMinutes = rows.slice(5).reduce((sum, task) => sum + task.minutes, 0);
-        if (otherMinutes > 0) top.push({ taskUid: null, title: 'Other', minutes: otherMinutes });
-        const total = rows.reduce((sum, task) => sum + task.minutes, 0);
-        if (top.length === 0) {
-            panel.appendChild(el('p', 'rlb-analytics__empty-note', 'No task time in this range yet.'));
-            return panel;
-        }
-        const list = el('div', 'rlb-analytics__distribution');
-        for (const task of top) {
-            const percentage = total > 0 ? (task.minutes / total) * 100 : 0;
-            const row = el('div', 'rlb-analytics__distribution-row');
-            const header = el('div', 'rlb-analytics__distribution-header');
-            if (task.taskUid) header.appendChild(taskLink(task.title, task.taskUid));
-            else header.appendChild(el('span', 'rlb-analytics__other-label', task.title));
-            header.append(
-                el('span', 'rlb-analytics__distribution-duration', `${Math.round(percentage)}% · ${formatMinutesHuman(task.minutes)}`)
-            );
-            const track = el('div', 'rlb-analytics__distribution-track');
-            const fill = el('span', 'rlb-analytics__distribution-fill');
-            fill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
-            track.appendChild(fill);
-            row.append(header, track);
-            list.appendChild(row);
-        }
-        panel.appendChild(list);
-        return panel;
-    };
-
-    const profileMetric = (label, value) => {
-        const row = el('div', 'rlb-analytics__profile-row');
-        row.append(el('span', 'rlb-analytics__profile-label', label), el('strong', '', value));
-        return row;
-    };
-
-    const sessionProfile = metrics => {
-        const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
-        panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Session profile'));
-        const profile = el('div', 'rlb-analytics__profile');
-        if (metrics.sessions === 0) {
-            profile.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range.'));
-        } else {
-            profile.append(
-                profileMetric('Sessions', String(metrics.sessions)),
-                profileMetric('Active days', String(metrics.activeDays)),
-                profileMetric('Median session', formatMinutesHuman(metrics.medianMinutes))
-            );
-        }
-        panel.appendChild(profile);
-        return panel;
-    };
-
-    const analyticsSection = (model, now) => {
-        const section = el('section', 'rlb-analytics');
-        const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
-        section.appendChild(activityChart(model, now));
-        const panels = el('div', 'rlb-analytics__panels');
-        panels.append(taskDistribution(model), sessionProfile(metrics));
-        section.appendChild(panels);
-        return section;
     };
 
     const runningSection = (running, now) => {
@@ -874,32 +674,6 @@ export function createDashboard({
         }
     };
 
-    const syncViewToggle = () => {
-        if (!viewToggle) return;
-        const analytics = view === 'analytics';
-        viewToggle.className =
-            `bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle ` +
-            `bp3-icon-${analytics ? 'arrow-left' : 'chart'}`;
-        const label = analytics ? 'Back to Overview' : 'Open Analytics';
-        viewToggle.title = label;
-        viewToggle.setAttribute('aria-label', label);
-        viewToggle.setAttribute('aria-pressed', String(analytics));
-        viewToggle.setAttribute('aria-controls', VIEW_HOST_ID);
-    };
-
-    const toggleView = event => {
-        event?.preventDefault?.();
-        event?.stopPropagation?.();
-        view = view === 'overview' ? 'analytics' : 'overview';
-        syncViewToggle();
-        if (bodyNode) {
-            bodyNode.dataset.dashboardView = view;
-            bodyNode.scrollTop = 0;
-        }
-        paint(nowFn());
-        focusWithoutScroll(viewToggle);
-    };
-
     const build = () => {
         const overlay = el('div', 'rlb-root rlb-dashboard');
         overlay.id = ROOT_ID;
@@ -921,22 +695,12 @@ export function createDashboard({
         const subtitle = el(
             'p',
             'rlb-header__subtitle rlb-visually-hidden',
-            'Focus sessions, activity, and task rollups'
+            'Focus sessions, timing, and task rollups'
         );
         subtitle.id = 'roam-logbook-dashboard-description';
         heading.append(title, subtitle);
         dialog.setAttribute('aria-describedby', subtitle.id);
         header.appendChild(heading);
-
-        viewToggle = button(
-            'bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-chart',
-            '',
-            toggleView,
-            { title: 'Open Analytics' }
-        );
-        viewToggle.dataset.action = 'toggle-view';
-        viewToggle.setAttribute('aria-controls', VIEW_HOST_ID);
-        viewToggle.setAttribute('aria-pressed', 'false');
 
         const selectWrapper = el('div', 'bp3-select bp3-small');
         const select = el('select');
@@ -954,7 +718,6 @@ export function createDashboard({
         selectWrapper.appendChild(select);
 
         header.append(
-            viewToggle,
             selectWrapper,
             button('bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button', '', () => {
                 render();
@@ -969,8 +732,6 @@ export function createDashboard({
 
         summaryNode = el('div', 'rlb-summary');
         bodyNode = el('div', 'rlb-body rlb-body__scroll');
-        bodyNode.id = VIEW_HOST_ID;
-        bodyNode.dataset.dashboardView = view;
         dialog.append(header, summaryNode, bodyNode);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -979,13 +740,10 @@ export function createDashboard({
             onChange: palette => applyRoamThemePalette(overlay, palette),
         });
         themeRuntime.apply(overlay);
-        syncViewToggle();
         return overlay;
     };
 
     function close({ restoreFocus = true } = {}) {
-        view = 'overview';
-        syncViewToggle();
         if (!root) {
             releaseScrollLock?.();
             releaseScrollLock = null;
@@ -1016,10 +774,6 @@ export function createDashboard({
                   : null;
             try {
                 if (!root) root = build();
-                if (!alreadyOpen) {
-                    view = 'overview';
-                    syncViewToggle();
-                }
                 if (!alreadyOpen) releaseScrollLock = acquireDocumentScrollLock();
                 root.classList.add('rlb-root--open');
                 root.setAttribute('aria-hidden', 'false');
@@ -1047,7 +801,6 @@ export function createDashboard({
             root = null;
             summaryNode = null;
             bodyNode = null;
-            viewToggle = null;
             lastModel = null;
         },
     };

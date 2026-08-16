@@ -6,7 +6,6 @@ import {
     entryMinutes,
     filterByRange,
     findStaleClocks,
-    summariseByDay,
     summariseByTask,
     summariseSessionMetrics,
 } from '../src/stats.js';
@@ -50,7 +49,7 @@ test('range filtering buckets by start day', () => {
     assert.equal(filterByRange(entries, 'all', NOW).length, 3);
 });
 
-test('an entry crossing midnight counts wholly against the day it began', () => {
+test('an entry crossing midnight remains in the range of its start day', () => {
     const overnight = entry({
         start: new Date(2026, 7, 4, 23, 30),
         end: new Date(2026, 7, 5, 0, 30),
@@ -58,9 +57,7 @@ test('an entry crossing midnight counts wholly against the day it began', () => 
     });
     // Started yesterday, so "today" must not claim it.
     assert.equal(filterByRange([overnight], 'today', NOW).length, 0);
-    const [day] = summariseByDay([overnight], NOW, 2);
-    assert.equal(day.key, '2026-08-04');
-    assert.equal(day.minutes, 60);
+    assert.equal(filterByRange([overnight], 'week', NOW).length, 1);
 });
 
 test('task rollups sum minutes and sort by weight', () => {
@@ -111,12 +108,6 @@ test('a task with a running clock is flagged as running', () => {
     );
     assert.equal(row.running, true);
     assert.equal(row.sessions, 2);
-});
-
-test('the day series is gapless and oldest first', () => {
-    const days = summariseByDay([entry()], NOW, 3);
-    assert.deepEqual(days.map(day => day.key), ['2026-08-03', '2026-08-04', '2026-08-05']);
-    assert.deepEqual(days.map(day => day.minutes), [0, 0, 60]);
 });
 
 test('stale detection only flags clocks older than the threshold', () => {

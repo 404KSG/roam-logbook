@@ -1,9 +1,9 @@
 /**
- * Pure aggregation over clock entries for the dashboard.
+ * Pure aggregation over clock entries for the Dashboard.
  *
- * Entries are bucketed by their *start* day. An entry that runs across midnight
- * counts wholly against the day it began, which is how org's own clock reports
- * read and keeps a session an indivisible thing.
+ * Range filtering uses each entry's start day. An entry that runs across
+ * midnight counts wholly against the day it began, which is how org's own
+ * clock reports read and keeps a session indivisible.
  */
 
 import { isTaskBlock, taskStatus, taskTitle } from './org.js';
@@ -104,46 +104,6 @@ export function summariseSessionMetrics(entries, now) {
         averageMinutes: sessions === 0 ? 0 : focusMinutes / sessions,
         longestMinutes: sorted.at(-1) || 0,
         medianMinutes,
-    };
-}
-
-/** Contiguous per-day totals, oldest first — a gapless series to draw bars from. */
-export function summariseByDay(entries, now, days) {
-    const buckets = new Map();
-    for (const entry of entries) {
-        if (!entry.start) continue;
-        const key = dateKey(entry.start);
-        buckets.set(key, (buckets.get(key) || 0) + entryMinutes(entry, now));
-    }
-
-    const series = [];
-    for (let offset = days - 1; offset >= 0; offset -= 1) {
-        const date = startOfDaysAgo(now, offset);
-        const key = dateKey(date);
-        series.push({ date, key, minutes: buckets.get(key) || 0 });
-    }
-    return series;
-}
-
-/**
- * Activity buckets for the compact Dashboard rail. Finite ranges retain their
- * exact daily series. All time has no finite number of days, so its rail is an
- * explicitly labelled recent window while the selected-range metric remains
- * the exact all-time total.
- */
-export function summariseActivity(entries, now, rangeId) {
-    const range = getRange(rangeId);
-    if (range.days === null) {
-        return {
-            buckets: summariseByDay(filterByRange(entries, 'month', now), now, 30),
-            label: 'Recent 30 days',
-            scope: 'recent-30-days',
-        };
-    }
-    return {
-        buckets: summariseByDay(entries, now, range.days),
-        label: range.label,
-        scope: 'selected-range',
     };
 }
 
@@ -290,7 +250,6 @@ export function flattenForest(forest, options = {}, depth = 0) {
 export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) {
     const inRange = filterByRange(entries, rangeId, now);
     const tasks = summariseByTask(inRange, now);
-    const activity = summariseActivity(entries, now, rangeId);
     return {
         rangeId,
         entries: inRange,
@@ -301,10 +260,6 @@ export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERAR
         weekMinutes: totalMinutes(filterByRange(entries, 'week', now), now),
         tasks,
         tree: buildTaskForest(tasks, hierarchy),
-        days: activity.buckets,
-        activity: activity.buckets,
-        activityLabel: activity.label,
-        activityScope: activity.scope,
         running: entries.filter(entry => entry.running),
         sessionMetrics: summariseSessionMetrics(inRange, now),
         issues: entries.filter(entry => entry.issue),

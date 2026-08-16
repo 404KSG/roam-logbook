@@ -72,20 +72,6 @@ export function formatStarted(start, now = new Date()) {
     };
 }
 
-/** Short chart label: `Today Sat` or `Aug 14 Fri`. */
-export function formatDayLabel(date, now = new Date()) {
-    if (!isValidDate(date)) return '';
-    const sameDay =
-        isValidDate(now) &&
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate();
-    const dateLabel = sameDay
-        ? 'Today'
-        : `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
-    return `${dateLabel} ${DAY_NAMES[date.getDay()]}`;
-}
-
 // The day name is optional and free-form so that graphs written in a non-English
 // locale still round-trip; the trailing `HH:MM` anchors the match.
 const STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;

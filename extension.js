@@ -37,13 +37,6 @@ function formatStarted(start, now = /* @__PURE__ */ new Date()) {
     datetime: `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}`
   };
 }
-function formatDayLabel(date, now = /* @__PURE__ */ new Date()) {
-  if (!isValidDate(date))
-    return "";
-  const sameDay = isValidDate(now) && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
-  const dateLabel = sameDay ? "Today" : `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
-  return `${dateLabel} ${DAY_NAMES[date.getDay()]}`;
-}
 var STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 function parseTimestamp(text) {
   if (typeof text !== "string")
@@ -664,7 +657,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.18";
+var PLUGIN_VERSION = "0.9.0-beta.19";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -1377,37 +1370,6 @@ function summariseSessionMetrics(entries, now) {
     medianMinutes
   };
 }
-function summariseByDay(entries, now, days) {
-  const buckets = /* @__PURE__ */ new Map();
-  for (const entry of entries) {
-    if (!entry.start)
-      continue;
-    const key = dateKey(entry.start);
-    buckets.set(key, (buckets.get(key) || 0) + entryMinutes(entry, now));
-  }
-  const series = [];
-  for (let offset = days - 1; offset >= 0; offset -= 1) {
-    const date = startOfDaysAgo(now, offset);
-    const key = dateKey(date);
-    series.push({ date, key, minutes: buckets.get(key) || 0 });
-  }
-  return series;
-}
-function summariseActivity(entries, now, rangeId) {
-  const range = getRange(rangeId);
-  if (range.days === null) {
-    return {
-      buckets: summariseByDay(filterByRange(entries, "month", now), now, 30),
-      label: "Recent 30 days",
-      scope: "recent-30-days"
-    };
-  }
-  return {
-    buckets: summariseByDay(entries, now, range.days),
-    label: range.label,
-    scope: "selected-range"
-  };
-}
 var MAX_WALK = 50;
 function nearestTaskAncestor(uid, { parentOf, stringOf }) {
   let current = parentOf[uid];
@@ -1510,7 +1472,6 @@ function flattenForest(forest, options = {}, depth = 0) {
 function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) {
   const inRange = filterByRange(entries, rangeId, now);
   const tasks = summariseByTask(inRange, now);
-  const activity = summariseActivity(entries, now, rangeId);
   return {
     rangeId,
     entries: inRange,
@@ -1521,10 +1482,6 @@ function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) 
     weekMinutes: totalMinutes(filterByRange(entries, "week", now), now),
     tasks,
     tree: buildTaskForest(tasks, hierarchy),
-    days: activity.buckets,
-    activity: activity.buckets,
-    activityLabel: activity.label,
-    activityScope: activity.scope,
     running: entries.filter((entry) => entry.running),
     sessionMetrics: summariseSessionMetrics(inRange, now),
     issues: entries.filter((entry) => entry.issue)
@@ -1923,8 +1880,6 @@ function applyRoamThemePalette(root, palette) {
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Roam Logbook";
-var VIEW_HOST_ID = "roam-logbook-dashboard-view";
-var SVG_NS = "http://www.w3.org/2000/svg";
 var documentScrollLocks = /* @__PURE__ */ new WeakMap();
 var restoreInlineStyle = (node, value) => {
   if (!node)
@@ -2012,8 +1967,6 @@ function createDashboard({
   let lastHierarchy = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
-  let view = "overview";
-  let viewToggle = null;
   let themeRuntime = null;
   let releaseScrollLock = null;
   const collapsed = /* @__PURE__ */ new Set();
@@ -2028,15 +1981,6 @@ function createDashboard({
       clearTimeout(discardConfirmTimer);
     discardConfirmTimer = null;
   };
-  const focusWithoutScroll = (node) => {
-    if (!node?.focus)
-      return;
-    try {
-      node.focus({ preventScroll: true });
-    } catch {
-      node.focus();
-    }
-  };
   const updateLiveMetricNodes = (now) => {
     if (!lastModel)
       return;
@@ -2049,10 +1993,7 @@ function createDashboard({
       today: formatMinutesHuman(todayMinutes),
       selected: formatMinutesHuman(metrics.focusMinutes),
       sessions: String(metrics.sessions),
-      tasks: String(lastModel.tasks.length),
-      focus: formatMinutesHuman(metrics.focusMinutes),
-      average: formatMinutesHuman(metrics.averageMinutes),
-      longest: formatMinutesHuman(metrics.longestMinutes)
+      tasks: String(lastModel.tasks.length)
     };
     for (const node of bodyNode?.querySelectorAll("[data-live-metric]") || []) {
       const value = values[node.dataset.liveMetric];
@@ -2092,12 +2033,8 @@ function createDashboard({
     const hierarchy = lastHierarchy || {};
     const transientIssues = lastTransientIssues;
     const refreshNotice = lastRefreshNotice;
-    const analytics = view === "analytics";
-    summaryNode.hidden = analytics;
-    summaryNode.setAttribute("aria-hidden", String(analytics));
     summaryNode.replaceChildren();
-    if (!analytics)
-      summaryNode.appendChild(overviewBar(model, now));
+    summaryNode.appendChild(overviewBar(model, now));
     bodyNode.replaceChildren();
     if (refreshNotice) {
       const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
@@ -2109,13 +2046,6 @@ function createDashboard({
       ...(hierarchy.issues || []).map(issueRow),
       ...transientIssues.map(issueRow)
     ];
-    if (analytics) {
-      bodyNode.appendChild(analyticsSection(model, now));
-      if (issues.length > 0)
-        bodyNode.appendChild(dataIssuesSection(issues));
-      startLiveTicker();
-      return;
-    }
     if (model.running.length > 0)
       bodyNode.appendChild(runningSection(model.running, now));
     if (model.entries.length === 0) {
@@ -2240,176 +2170,6 @@ function createDashboard({
       wrapper.appendChild(item);
     }
     return wrapper;
-  };
-  const svgNode = (name, attributes = {}, textContent = "") => {
-    const node = document.createElementNS(SVG_NS, name);
-    for (const [key, value] of Object.entries(attributes))
-      node.setAttribute(key, String(value));
-    if (textContent)
-      node.textContent = textContent;
-    return node;
-  };
-  const activityChart = (model, now) => {
-    const section = el("section", "rlb-analytics__chart rlb-dashboard-panel");
-    const heading = el("div", "rlb-analytics__activity-header");
-    const titleGroup = el("div", "rlb-analytics__activity-heading");
-    titleGroup.append(
-      el("h3", "rlb-analytics__section-title", "Activity"),
-      el("span", "rlb-analytics__activity-range", model.activityLabel)
-    );
-    const focus = el("div", "rlb-analytics__focus");
-    focus.append(
-      el("span", "rlb-analytics__focus-label", "Focus time"),
-      (() => {
-        const value = el(
-          "strong",
-          "rlb-analytics__focus-value",
-          formatMinutesHuman(model.sessionMetrics?.focusMinutes || model.totalMinutes)
-        );
-        value.dataset.liveMetric = "focus";
-        return value;
-      })()
-    );
-    heading.append(titleGroup, focus);
-    section.appendChild(heading);
-    const series = model.activity || [];
-    const titleId = "roam-logbook-activity-title";
-    const descriptionId = "roam-logbook-activity-description";
-    const svg = svgNode("svg", {
-      class: "rlb-analytics__svg",
-      viewBox: "0 0 760 190",
-      role: "img",
-      "aria-labelledby": `${titleId} ${descriptionId}`,
-      preserveAspectRatio: "none"
-    });
-    svg.appendChild(svgNode("title", { id: titleId }, `Activity over time \xB7 ${model.activityLabel}`));
-    svg.appendChild(
-      svgNode(
-        "desc",
-        { id: descriptionId },
-        series.length > 0 ? `${series.length} daily activity bars. All time is shown as ${model.activityLabel}.` : "No activity data is available for this range."
-      )
-    );
-    const peak = Math.max(1, ...series.map((day) => day.minutes));
-    const left = 18;
-    const chartWidth = 724;
-    const chartHeight = 124;
-    const baseline = chartHeight + 8;
-    const barWidth = series.length > 0 ? Math.min(16, Math.max(8, chartWidth / series.length - 8)) : 12;
-    const labelCount = Math.min(7, series.length);
-    const labelIndexes = /* @__PURE__ */ new Set();
-    if (labelCount > 0) {
-      for (let label = 0; label < labelCount; label += 1) {
-        const denominator = Math.max(1, labelCount - 1);
-        labelIndexes.add(Math.round(label * (series.length - 1) / denominator));
-      }
-    }
-    svg.appendChild(
-      svgNode("line", {
-        class: "rlb-analytics__axis",
-        x1: left,
-        y1: baseline,
-        x2: left + chartWidth,
-        y2: baseline
-      })
-    );
-    series.forEach((day, index) => {
-      const slot = chartWidth / Math.max(1, series.length);
-      const x = left + slot * index + (slot - barWidth) / 2;
-      const height = day.minutes === 0 ? 3 : Math.max(8, day.minutes / peak * chartHeight);
-      const y = baseline - height;
-      const rect = svgNode("rect", {
-        class: day.minutes === 0 ? "rlb-analytics__bar rlb-analytics__bar--empty" : "rlb-analytics__bar",
-        x,
-        y,
-        width: barWidth,
-        height,
-        rx: 3,
-        "data-date": day.key,
-        "data-minutes": day.minutes
-      });
-      rect.appendChild(svgNode("title", {}, `${day.key} \xB7 ${formatMinutesHuman(day.minutes)}`));
-      svg.appendChild(rect);
-      if (labelIndexes.has(index)) {
-        svg.appendChild(
-          svgNode(
-            "text",
-            { class: "rlb-analytics__label", x: x + barWidth / 2, y: 166, "text-anchor": "middle" },
-            formatDayLabel(day.date, now)
-          )
-        );
-      }
-    });
-    section.appendChild(svg);
-    if (series.length === 0 || series.every((day) => day.minutes === 0)) {
-      section.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range."));
-    }
-    return section;
-  };
-  const taskDistribution = (model) => {
-    const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
-    panel.appendChild(el("h3", "rlb-analytics__section-title", "Task time distribution"));
-    const rows = model.tasks.filter((task) => task.minutes > 0);
-    const top = rows.slice(0, 5);
-    const otherMinutes = rows.slice(5).reduce((sum, task) => sum + task.minutes, 0);
-    if (otherMinutes > 0)
-      top.push({ taskUid: null, title: "Other", minutes: otherMinutes });
-    const total = rows.reduce((sum, task) => sum + task.minutes, 0);
-    if (top.length === 0) {
-      panel.appendChild(el("p", "rlb-analytics__empty-note", "No task time in this range yet."));
-      return panel;
-    }
-    const list = el("div", "rlb-analytics__distribution");
-    for (const task of top) {
-      const percentage = total > 0 ? task.minutes / total * 100 : 0;
-      const row = el("div", "rlb-analytics__distribution-row");
-      const header = el("div", "rlb-analytics__distribution-header");
-      if (task.taskUid)
-        header.appendChild(taskLink(task.title, task.taskUid));
-      else
-        header.appendChild(el("span", "rlb-analytics__other-label", task.title));
-      header.append(
-        el("span", "rlb-analytics__distribution-duration", `${Math.round(percentage)}% \xB7 ${formatMinutesHuman(task.minutes)}`)
-      );
-      const track = el("div", "rlb-analytics__distribution-track");
-      const fill = el("span", "rlb-analytics__distribution-fill");
-      fill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
-      track.appendChild(fill);
-      row.append(header, track);
-      list.appendChild(row);
-    }
-    panel.appendChild(list);
-    return panel;
-  };
-  const profileMetric = (label, value) => {
-    const row = el("div", "rlb-analytics__profile-row");
-    row.append(el("span", "rlb-analytics__profile-label", label), el("strong", "", value));
-    return row;
-  };
-  const sessionProfile = (metrics) => {
-    const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
-    panel.appendChild(el("h3", "rlb-analytics__section-title", "Session profile"));
-    const profile = el("div", "rlb-analytics__profile");
-    if (metrics.sessions === 0) {
-      profile.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range."));
-    } else {
-      profile.append(
-        profileMetric("Sessions", String(metrics.sessions)),
-        profileMetric("Active days", String(metrics.activeDays)),
-        profileMetric("Median session", formatMinutesHuman(metrics.medianMinutes))
-      );
-    }
-    panel.appendChild(profile);
-    return panel;
-  };
-  const analyticsSection = (model, now) => {
-    const section = el("section", "rlb-analytics");
-    const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
-    section.appendChild(activityChart(model, now));
-    const panels = el("div", "rlb-analytics__panels");
-    panels.append(taskDistribution(model), sessionProfile(metrics));
-    section.appendChild(panels);
-    return section;
   };
   const runningSection = (running2, now) => {
     const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
@@ -2721,29 +2481,6 @@ function createDashboard({
       focusables[index + 1].focus();
     }
   };
-  const syncViewToggle = () => {
-    if (!viewToggle)
-      return;
-    const analytics = view === "analytics";
-    viewToggle.className = `bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-${analytics ? "arrow-left" : "chart"}`;
-    const label = analytics ? "Back to Overview" : "Open Analytics";
-    viewToggle.title = label;
-    viewToggle.setAttribute("aria-label", label);
-    viewToggle.setAttribute("aria-pressed", String(analytics));
-    viewToggle.setAttribute("aria-controls", VIEW_HOST_ID);
-  };
-  const toggleView = (event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    view = view === "overview" ? "analytics" : "overview";
-    syncViewToggle();
-    if (bodyNode) {
-      bodyNode.dataset.dashboardView = view;
-      bodyNode.scrollTop = 0;
-    }
-    paint(nowFn());
-    focusWithoutScroll(viewToggle);
-  };
   const build = () => {
     const overlay = el("div", "rlb-root rlb-dashboard");
     overlay.id = ROOT_ID;
@@ -2764,21 +2501,12 @@ function createDashboard({
     const subtitle = el(
       "p",
       "rlb-header__subtitle rlb-visually-hidden",
-      "Focus sessions, activity, and task rollups"
+      "Focus sessions, timing, and task rollups"
     );
     subtitle.id = "roam-logbook-dashboard-description";
     heading.append(title, subtitle);
     dialog.setAttribute("aria-describedby", subtitle.id);
     header.appendChild(heading);
-    viewToggle = button(
-      "bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-chart",
-      "",
-      toggleView,
-      { title: "Open Analytics" }
-    );
-    viewToggle.dataset.action = "toggle-view";
-    viewToggle.setAttribute("aria-controls", VIEW_HOST_ID);
-    viewToggle.setAttribute("aria-pressed", "false");
     const selectWrapper = el("div", "bp3-select bp3-small");
     const select = el("select");
     select.setAttribute("aria-label", "Dashboard date range");
@@ -2795,7 +2523,6 @@ function createDashboard({
     });
     selectWrapper.appendChild(select);
     header.append(
-      viewToggle,
       selectWrapper,
       button("bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button", "", () => {
         render();
@@ -2809,8 +2536,6 @@ function createDashboard({
     );
     summaryNode = el("div", "rlb-summary");
     bodyNode = el("div", "rlb-body rlb-body__scroll");
-    bodyNode.id = VIEW_HOST_ID;
-    bodyNode.dataset.dashboardView = view;
     dialog.append(header, summaryNode, bodyNode);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
@@ -2819,12 +2544,9 @@ function createDashboard({
       onChange: (palette) => applyRoamThemePalette(overlay, palette)
     });
     themeRuntime.apply(overlay);
-    syncViewToggle();
     return overlay;
   };
   function close({ restoreFocus = true } = {}) {
-    view = "overview";
-    syncViewToggle();
     if (!root) {
       releaseScrollLock?.();
       releaseScrollLock = null;
@@ -2852,10 +2574,6 @@ function createDashboard({
       try {
         if (!root)
           root = build();
-        if (!alreadyOpen) {
-          view = "overview";
-          syncViewToggle();
-        }
         if (!alreadyOpen)
           releaseScrollLock = acquireDocumentScrollLock();
         root.classList.add("rlb-root--open");
@@ -2884,7 +2602,6 @@ function createDashboard({
       root = null;
       summaryNode = null;
       bodyNode = null;
-      viewToggle = null;
       lastModel = null;
     }
   };
@@ -5168,7 +4885,7 @@ var STYLES = `
     opacity: 0.65;
 }
 
-/* ---- Roam-native analytical dashboard shell ---- */
+/* ---- Roam-native dashboard shell ---- */
 
 .rlb-root {
     --rlb-canvas: var(--roam-bg-color, #fdfdfd);
@@ -5184,10 +4901,6 @@ var STYLES = `
     --rlb-session-running: #7eb794;
     --rlb-accent: var(--roam-accent-color, #316a9f);
     --rlb-accent-soft: rgba(49, 106, 159, 0.12);
-    --rlb-activity-zero: rgba(167, 182, 194, 0.22);
-    --rlb-activity-1: #a7d9b8;
-    --rlb-activity-2: #57ad79;
-    --rlb-activity-3: #16834a;
     --rlb-overlay: rgba(16, 22, 26, 0.56);
     align-items: flex-start;
     padding: clamp(24px, 7vh, 64px) 24px 32px;
@@ -5212,10 +4925,6 @@ var STYLES = `
     --rlb-session-running: #8ed0aa;
     --rlb-accent: #48aff0;
     --rlb-accent-soft: rgba(72, 175, 240, 0.14);
-    --rlb-activity-zero: rgba(167, 182, 194, 0.22);
-    --rlb-activity-1: #4b9b69;
-    --rlb-activity-2: #64c486;
-    --rlb-activity-3: #8be0a7;
     --rlb-overlay: rgba(16, 22, 26, 0.74);
 }
 
@@ -5291,10 +5000,6 @@ var STYLES = `
     background: var(--rlb-surface);
 }
 
-.rlb-summary[hidden] {
-    display: none !important;
-}
-
 .rlb-overview {
     display: grid;
     grid-template-columns: minmax(160px, 0.9fr) minmax(300px, 1.6fr) minmax(160px, 0.9fr);
@@ -5307,10 +5012,6 @@ var STYLES = `
     border: 1px solid var(--rlb-border-light);
     border-radius: 8px;
     background: var(--rlb-surface-subtle);
-}
-
-.rlb-overview--strip {
-    --rlb-overview-divider: var(--rlb-border-light);
 }
 
 .rlb-overview__item {
@@ -5400,73 +5101,6 @@ var STYLES = `
 
 .rlb-overview__value--quiet .rlb-overview__context {
     opacity: 0.82;
-}
-
-.rlb-activity-rail {
-    display: grid;
-    grid-template-columns: repeat(var(--rlb-activity-count, 7), minmax(0, 1fr));
-    align-items: end;
-    gap: 6px;
-    width: 100%;
-    height: 28px;
-    min-width: 0;
-    margin: 0;
-    overflow: hidden;
-}
-
-.rlb-activity__bucket {
-    display: flex;
-    justify-content: center;
-    align-items: end;
-    width: 100%;
-    min-width: 0;
-    height: 28px;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: 0;
-    border-radius: 2px;
-    background: transparent;
-    box-shadow: none;
-    color: var(--rlb-muted);
-}
-
-.rlb-activity__bucket::before,
-.rlb-activity__bucket > * {
-    margin: 0 !important;
-}
-
-.rlb-activity__bucket::before {
-    display: none !important;
-    content: none !important;
-}
-
-.rlb-activity__bucket:focus-visible {
-    outline: 2px solid var(--rlb-accent);
-    outline-offset: 1px;
-}
-
-.rlb-activity__fill {
-    display: block;
-    width: min(10px, 100%);
-    height: 100%;
-    min-height: 0;
-    justify-self: center;
-    border-radius: 2px 2px 0 0;
-    background: var(--rlb-activity-1, #a7d9b8);
-}
-
-.rlb-activity__bucket--level-2 .rlb-activity__fill {
-    background: var(--rlb-activity-2, #57ad79);
-}
-
-.rlb-activity__bucket--level-3 .rlb-activity__fill {
-    background: var(--rlb-activity-3, #16834a);
-}
-
-.rlb-activity__bucket--empty .rlb-activity__fill {
-    width: min(8px, 80%);
-    height: 4px !important;
-    background: var(--rlb-activity-zero, rgba(167, 182, 194, 0.22));
 }
 
 .rlb-body,
@@ -5677,11 +5311,6 @@ var STYLES = `
         white-space: nowrap;
     }
 
-    .rlb-activity-rail,
-    .rlb-activity__bucket {
-        height: 28px;
-    }
-
     .rlb-body,
     .rlb-body__scroll {
         max-height: none;
@@ -5729,32 +5358,13 @@ var STYLES = `
         font-size: 10px;
     }
 
-    .rlb-activity-rail,
-    .rlb-activity__bucket {
-        height: 28px;
-    }
-
     .rlb-body,
     .rlb-body__scroll {
         padding: 10px 12px 20px;
     }
 }
 
-/* ---- beta.15 compact overview and Linear-style analytics ---- */
-
-.rlb-dashboard__view-toggle {
-    flex: 0 0 34px;
-    width: 34px;
-    min-width: 34px;
-    height: 32px;
-    min-height: 32px;
-    color: var(--rlb-muted);
-}
-
-.rlb-dashboard__view-toggle:hover,
-.rlb-dashboard__view-toggle:focus-visible {
-    color: var(--rlb-text);
-}
+/* ---- Compact overview ---- */
 
 .rlb-overview--compact {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -5783,226 +5393,6 @@ var STYLES = `
     text-overflow: ellipsis;
 }
 
-.rlb-analytics,
-.rlb-analytics button,
-.rlb-analytics a,
-.rlb-analytics svg,
-.rlb-analytics svg text {
-    font-family: inherit;
-}
-
-.rlb-analytics {
-    display: grid;
-    gap: 8px;
-    min-width: 0;
-    color: var(--rlb-text);
-    font-size: 11px;
-    line-height: 14px;
-}
-
-.rlb-analytics__chart {
-    position: relative;
-    box-sizing: border-box;
-    min-width: 0;
-    height: 224px;
-    padding: 10px 14px;
-    border: 1px solid var(--rlb-border-light);
-    border-radius: 6px;
-    box-shadow: none;
-}
-
-.rlb-analytics__activity-header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    height: 20px;
-    min-width: 0;
-    margin-bottom: 6px;
-}
-
-.rlb-analytics__activity-heading {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-}
-
-.rlb-analytics__section-title {
-    flex: 0 0 auto;
-    margin: 0;
-    color: var(--rlb-text);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0;
-    line-height: 16px;
-}
-
-.rlb-analytics__activity-range,
-.rlb-analytics__focus-label {
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 14px;
-}
-
-.rlb-analytics__focus {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: baseline;
-    gap: 7px;
-    white-space: nowrap;
-}
-
-.rlb-analytics__focus-value {
-    color: var(--rlb-text);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 20px;
-    font-variant-numeric: tabular-nums;
-}
-
-.rlb-analytics__svg {
-    display: block;
-    width: 100%;
-    height: 176px;
-    overflow: visible;
-    font-family: inherit;
-}
-
-.rlb-analytics__axis {
-    stroke: var(--rlb-border-light);
-    stroke-width: 1;
-}
-
-.rlb-analytics__bar {
-    fill: var(--rlb-activity-3, #16834a);
-}
-
-.rlb-analytics__bar--empty {
-    fill: var(--rlb-activity-zero, rgba(167, 182, 194, 0.22));
-}
-
-.rlb-analytics__label {
-    fill: var(--rlb-muted);
-    font-family: inherit;
-    font-size: 10px;
-    font-weight: 500;
-}
-
-.rlb-analytics__empty-note {
-    margin: 0;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 14px;
-}
-
-.rlb-analytics__chart > .rlb-analytics__empty-note {
-    position: absolute;
-    right: 14px;
-    bottom: 10px;
-    left: 14px;
-}
-
-.rlb-analytics__panels {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
-    gap: 8px;
-    min-width: 0;
-}
-
-.rlb-analytics__panel {
-    box-sizing: border-box;
-    min-width: 0;
-    min-height: 128px;
-    padding: 12px 14px;
-    border: 1px solid var(--rlb-border-light);
-    border-radius: 6px;
-    box-shadow: none;
-}
-
-.rlb-analytics__distribution,
-.rlb-analytics__profile {
-    display: grid;
-    gap: 8px;
-}
-
-.rlb-analytics__distribution-row {
-    min-width: 0;
-}
-
-.rlb-analytics__distribution-header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    min-width: 0;
-    line-height: 14px;
-}
-
-.rlb-analytics__distribution-header .rlb-task-link,
-.rlb-analytics__other-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 14px;
-}
-
-.rlb-analytics__distribution-duration {
-    flex: 0 0 auto;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 14px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-.rlb-analytics__distribution-track {
-    height: 4px;
-    margin-top: 5px;
-    overflow: hidden;
-    border-radius: 2px;
-    background: var(--rlb-border-light);
-}
-
-.rlb-analytics__distribution-fill {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--rlb-activity-2, #57ad79);
-}
-
-.rlb-analytics__profile-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--rlb-border-light);
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 14px;
-}
-
-.rlb-analytics__profile-row:last-child {
-    padding-bottom: 0;
-    border-bottom: 0;
-}
-
-.rlb-analytics__profile-row strong {
-    color: var(--rlb-text);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 16px;
-    font-variant-numeric: tabular-nums;
-}
-
 @media (max-width: 600px) {
     .rlb-overview--compact {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6025,17 +5415,6 @@ var STYLES = `
         border-top: 1px solid var(--rlb-border-light);
     }
 
-    .rlb-analytics__panels {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .rlb-analytics__chart {
-        height: 196px;
-    }
-
-    .rlb-analytics__svg {
-        height: 148px;
-    }
 }
 `;
 

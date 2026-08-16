@@ -113,15 +113,13 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);
     assert.match(css, /\.rlb-visually-hidden\s*{[^}]*position: absolute/s);
     assert.match(css, /\.rlb-overview\s*{/);
-    assert.match(css, /\.rlb-overview--strip\s*{/);
     assert.match(css, /\.rlb-overview\s*{[^}]*height: 80px[^}]*border: 1px solid[^}]*border-radius: 8px/s);
     assert.match(css, /\.rlb-overview__item\s*{[^}]*padding: 9px 14px[^}]*border: 0[^}]*background: transparent/s);
     assert.match(css, /\.rlb-overview__item \+ \.rlb-overview__item\s*{[^}]*border-left: 1px solid/s);
     assert.match(css, /\.rlb-overview__label\s*{/);
     assert.match(css, /\.rlb-overview__value\s*{/);
-    assert.match(css, /\.rlb-activity-rail\s*{[^}]*gap: 6px[^}]*height: 28px/s);
-    assert.match(css, /\.rlb-activity__fill\s*{[^}]*width: min\(10px, 100%\)/s);
     assert.doesNotMatch(css, /\.rlb-stats\s*{/);
+    assert.doesNotMatch(css, /rlb-analytics|rlb-activity|dashboard__view-toggle|toggle-view/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
@@ -431,7 +429,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Roam Logbook');
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').textContent,
-        'Focus sessions, activity, and task rollups'
+        'Focus sessions, timing, and task rollups'
     );
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').getBoundingClientRect().width,
@@ -441,11 +439,9 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
     assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Roam Logbook overview');
     assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 4);
-    const viewToggle = dialog().querySelector('[data-action="toggle-view"]');
-    assert.ok(viewToggle, 'Overview exposes the Analytics view toggle');
-    assert.equal(viewToggle.getAttribute('aria-label'), 'Open Analytics');
-    assert.equal(viewToggle.getAttribute('aria-pressed'), 'false');
-    assert.equal(viewToggle.getAttribute('aria-controls'), 'roam-logbook-dashboard-view');
+    assert.equal(dialog().querySelector('[data-action="toggle-view"]'), null);
+    assert.equal(dialog().querySelector('.rlb-dashboard__view-toggle'), null);
+    assert.equal(dialog().querySelector('svg'), null);
     assert.ok(dialog().querySelector('.rlb-body__scroll'));
     for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {
         const action = dialog().querySelector(selector);
@@ -483,8 +479,6 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon\s*\{[^}]*color: var\(--rlb-text\)[^}]*text-decoration: none/s);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon::before\s*\{[^}]*color: var\(--rlb-muted\)/s);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon:focus-visible\s*\{[^}]*outline:/s);
-    assert.doesNotMatch(css, /\.rlb-analytics__distribution-header \.rlb-task-link\s*\{[^}]*color: var\(--rlb-surface-link\)/s);
-
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     click(dialog().querySelector('.rlb-header .bp3-icon-refresh'));
 });

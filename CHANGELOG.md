@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0-beta.19 — 2026-08-16
+
+- Removed the Dashboard's secondary Analytics/chart view, toggle, chart-only aggregation, rendering, styles, and coverage. The Dashboard is now one compact surface with overview metrics, Running Sessions, By Task rollups, date range, Refresh, and Close controls.
+- Preserved all non-chart behavior, including Session navigation and Shift+Click, popover actions, pause/resume, Pomodoro overrun coloring, and the neutral/yellow/red Session-count colors for 0–3, 4–6, and 7+ Sessions.
+
 ## 0.9.0-beta.18 — 2026-08-16
 
 - Restored the topbar Session count to Roam's default neutral color for 0–3 Sessions; only 4–6 remains yellow and 7+ remains red.

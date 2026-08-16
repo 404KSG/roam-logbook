@@ -346,7 +346,7 @@ test('Dashboard locks document scroll reversibly without moving the dialog root'
     }
 });
 
-test('Overview keeps four compact metrics and contains no chart surface', () => {
+test('Overview keeps four compact metrics and a list-first task surface', () => {
     graph = installGraph([
         { uid: 'day-task', string: '{{[[TODO]]}} Activity task', parent: null },
         { uid: 'day-drawer', string: 'LOGBOOK::', parent: 'day-task' },
@@ -378,9 +378,7 @@ test('Overview keeps four compact metrics and contains no chart surface', () => 
         metrics.map(metric => metric.querySelector('.rlb-overview__label')?.textContent),
         ['Today', 'Last 7 days', 'Sessions', 'Tasks tracked']
     );
-    assert.equal(summary.querySelector('.rlb-activity-rail'), null);
-    assert.equal(summary.querySelector('svg'), null);
-    assert.equal(document.querySelector('.rlb-activity-rail'), null);
+    assert.equal(summary.querySelector('[data-action]'), null);
 
     const byTask = document.querySelector('.rlb-by-task');
     assert.ok(byTask, 'By Task remains the primary follow-up list');
@@ -391,7 +389,7 @@ test('Overview keeps four compact metrics and contains no chart surface', () => 
     dashboard.destroy();
 });
 
-test('beta.14 exposes one semantic overview with four metrics and no activity buckets', () => {
+test('Dashboard exposes one semantic overview with four metrics', () => {
     graph = installGraph([
         { uid: 'compact-task', string: '{{[[TODO]]}} Compact dashboard task', parent: null },
         { uid: 'compact-drawer', string: 'LOGBOOK::', parent: 'compact-task' },
@@ -413,81 +411,7 @@ test('beta.14 exposes one semantic overview with four metrics and no activity bu
     assert.equal(overview.querySelectorAll('dt').length, 4);
     assert.equal(overview.querySelectorAll('dd').length, 4);
     assert.equal(document.querySelectorAll('.rlb-stat').length, 0);
-    assert.equal(overview.querySelector('.rlb-activity-rail'), null);
-    assert.equal(overview.querySelector('svg'), null);
-
-    dashboard.destroy();
-});
-
-test('beta.14 Analytics toggle renders the chart and keeps Overview chart-free', async () => {
-    graph.store.set('compact-dashboard-task', {
-        uid: 'compact-dashboard-task',
-        string: '{{[[TODO]]}} Compact dashboard task',
-        parent: null,
-    });
-    graph.store.set('compact-dashboard-child', {
-        uid: 'compact-dashboard-child',
-        string: '{{[[TODO]]}} Compact dashboard child',
-        parent: 'compact-dashboard-task',
-    });
-    let queryCount = 0;
-    const graphQuery = graph.api.data.q;
-    graph.api.data.q = (...args) => {
-        queryCount += 1;
-        return graphQuery(...args);
-    };
-    await clock.clockIn('compact-dashboard-child', { now: new Date('2026-08-15T09:00:00') });
-    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
-    dashboard.open();
-    const queriesAfterOpen = queryCount;
-
-    const toggle = document.querySelector('[data-action="toggle-view"]');
-    assert.equal(toggle.getAttribute('aria-label'), 'Open Analytics');
-    assert.equal(toggle.getAttribute('aria-pressed'), 'false');
-    assert.equal(document.querySelector('.rlb-analytics'), null);
-    const before = document.querySelector('.rlb-body');
-    const collapsedParent = document.querySelector('.rlb-tree__toggle');
-    assert.ok(collapsedParent, 'the Analytics fixture has a collapsible parent');
-    collapsedParent.click();
-    assert.equal(document.querySelector('.rlb-tree__toggle')?.getAttribute('aria-expanded'), 'false');
-    before.scrollTop = 77;
-    toggle.click();
-    assert.equal(queryCount, queriesAfterOpen, 'view switching does not reread the graph');
-    assert.equal(document.activeElement, toggle, 'view switching restores focus to the same button');
-    assert.ok(document.querySelector('.rlb-analytics'));
-    assert.equal(toggle.getAttribute('aria-label'), 'Back to Overview');
-    assert.equal(toggle.getAttribute('aria-pressed'), 'true');
-    assert.equal(document.querySelectorAll('.rlb-analytics__kpis').length, 0);
-    assert.equal(document.querySelectorAll('.rlb-analytics__metric').length, 0);
-    assert.equal(document.querySelectorAll('.rlb-analytics__svg').length, 1);
-    assert.equal(document.querySelectorAll('.rlb-analytics__bar').length, 7);
-    assert.equal(before.scrollTop, 0);
-    assert.equal(document.querySelector('.rlb-overview'), null, 'Overview summary is hidden in Analytics');
-    assert.equal(document.querySelector('.rlb-summary').hidden, true);
-    assert.equal(document.querySelectorAll('.rlb-analytics__focus-value').length, 1);
-    assert.deepEqual(
-        [...document.querySelectorAll('.rlb-analytics__profile-row .rlb-analytics__profile-label')].map(
-            node => node.textContent
-        ),
-        ['Sessions', 'Active days', 'Median session']
-    );
-    const range = document.querySelector('.rlb-header select');
-    range.value = 'month';
-    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    assert.ok(document.querySelector('.rlb-analytics'), 'range changes preserve Analytics view');
-    assert.ok(queryCount > queriesAfterOpen, 'range changes use the existing graph refresh path');
-    document.querySelector('.rlb-header .bp3-icon-refresh').click();
-    assert.ok(document.querySelector('.rlb-analytics'), 'Refresh preserves Analytics view');
-    toggle.click();
-    assert.equal(document.querySelector('.rlb-analytics'), null);
-    assert.ok(document.querySelector('.rlb-overview'));
-    assert.ok(document.querySelector('.rlb-by-task'));
-    assert.equal(document.querySelector('.rlb-tree__toggle')?.getAttribute('aria-expanded'), 'false');
-
-    dashboard.close();
-    dashboard.open();
-    assert.equal(document.querySelector('[data-action="toggle-view"]').getAttribute('aria-pressed'), 'false');
-    assert.equal(document.querySelector('.rlb-analytics'), null, 'a new open starts in Overview');
+    assert.equal(overview.querySelector('[data-action]'), null);
 
     dashboard.destroy();
 });
@@ -499,98 +423,6 @@ test('beta.10 zero-time overview uses a quiet empty context instead of a primary
     const today = document.querySelector('.rlb-overview__item');
     assert.equal(today.querySelector('.rlb-overview__number').textContent, '0m');
     assert.match(today.querySelector('.rlb-overview__context').textContent, /No active Sessions/);
-
-    dashboard.destroy();
-});
-
-test('beta.15 empty Analytics keeps one Focus time and concise empty panels', () => {
-    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
-    dashboard.open();
-    document.querySelector('[data-action="toggle-view"]').click();
-
-    assert.equal(document.querySelector('.rlb-summary').hidden, true);
-    assert.equal(document.querySelectorAll('.rlb-analytics__kpis').length, 0);
-    assert.equal(document.querySelectorAll('.rlb-analytics__focus-value').length, 1);
-    assert.equal(document.querySelector('.rlb-analytics__focus-value').textContent, '0m');
-    assert.equal(document.querySelectorAll('.rlb-analytics__profile-row').length, 0);
-    assert.match(document.querySelector('.rlb-analytics__chart').textContent, /No Sessions in this range/);
-    assert.match(document.querySelector('.rlb-analytics__panels').textContent, /No Sessions in this range/);
-    assert.match(document.querySelector('.rlb-analytics__panels').textContent, /No task time in this range/);
-
-    dashboard.destroy();
-});
-
-test('Analytics chart labels finite ranges and the All time fallback honestly', () => {
-    graph = installGraph([
-        { uid: 'range-task', string: '{{[[TODO]]}} Range activity', parent: null },
-        { uid: 'range-drawer', string: 'LOGBOOK::', parent: 'range-task' },
-        {
-            uid: 'range-old',
-            string: 'CLOCK:: [2026-07-01 Wed 09:00]--[2026-07-01 Wed 10:00] => 1:00',
-            parent: 'range-drawer',
-        },
-        {
-            uid: 'range-recent',
-            string: 'CLOCK:: [2026-08-10 Mon 09:00]--[2026-08-10 Mon 10:30] => 0:30',
-            parent: 'range-drawer',
-        },
-    ]);
-    const nowMs = new Date('2026-08-15T12:00:00').getTime();
-    const dashboard = createDashboard({ now: () => new Date(nowMs) });
-    dashboard.open();
-
-    document.querySelector('[data-action="toggle-view"]').click();
-    const select = document.querySelector('.rlb-header select');
-    select.value = 'month';
-    select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    let chart = document.querySelector('.rlb-analytics__svg');
-    assert.equal(chart.querySelectorAll('rect').length, 30);
-    assert.match(document.querySelector('.rlb-analytics__activity-range').textContent, /Last 30 days/i);
-    assert.equal(document.querySelectorAll('.rlb-analytics__label').length, 7);
-
-    select.value = 'all';
-    select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    chart = document.querySelector('.rlb-analytics__svg');
-    assert.equal(document.querySelector('.rlb-overview'), null);
-    assert.match(document.querySelector('.rlb-analytics__activity-range').textContent, /Recent 30 days/i);
-    assert.equal(chart.querySelectorAll('rect').length, 30);
-    assert.equal(document.querySelectorAll('.rlb-analytics__label').length, 7);
-
-    dashboard.destroy();
-});
-
-test('Analytics distribution keeps five own-time tasks and an Other bucket', async () => {
-    for (let index = 0; index < 7; index += 1) {
-        const taskUid = `distribution-task-${index}`;
-        const drawerUid = `distribution-drawer-${index}`;
-        const clockUid = `distribution-clock-${index}`;
-        const hour = String(8 + index).padStart(2, '0');
-        const endMinutes = String((index + 1) * 5).padStart(2, '0');
-        graph.store.set(taskUid, {
-            uid: taskUid,
-            string: `{{[[TODO]]}} Distribution task ${index}`,
-            parent: null,
-        });
-        graph.store.set(drawerUid, { uid: drawerUid, string: 'LOGBOOK::', parent: taskUid });
-        graph.store.set(clockUid, {
-            uid: clockUid,
-            string: `CLOCK:: [2026-08-15 Sat ${hour}:00]--[2026-08-15 Sat ${hour}:${endMinutes}] => 0:${endMinutes}`,
-            parent: drawerUid,
-        });
-    }
-
-    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
-    dashboard.open();
-    document.querySelector('[data-action="toggle-view"]').click();
-
-    assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row').length, 6);
-    assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row .rlb-task-link').length, 5);
-    assert.ok(
-        [...document.querySelectorAll('.rlb-analytics__distribution .rlb-task-link')].every(link =>
-            link.classList.contains('rlb-task-link--icon') && link.dataset.navigationCue === 'icon'
-        )
-    );
-    assert.equal(document.querySelector('.rlb-analytics__other-label').textContent, 'Other');
 
     dashboard.destroy();
 });
@@ -618,8 +450,7 @@ test('the Dashboard is list-first when idle and keeps rollup help accessible wit
     assert.equal(info.getAttribute('aria-label'), info.title);
     assert.equal(info.getAttribute('aria-describedby'), 'roam-logbook-task-rollup-help');
     assert.ok(document.getElementById('roam-logbook-task-rollup-help'));
-    assert.equal(document.querySelectorAll('.rlb-activity-rail').length, 0);
-    assert.equal(document.querySelectorAll('.rlb-analytics__svg').length, 0);
+    assert.equal(document.querySelectorAll('[data-action="toggle-view"]').length, 0);
 
     dashboard.destroy();
 });
