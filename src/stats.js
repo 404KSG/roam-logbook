@@ -231,6 +231,154 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     return forest.sort((a, b) => b.total - a.total);
 }
 
+export const TASK_FILTERS = Object.freeze(['ALL', 'TODO', 'DONE']);
+export const TASK_SORT_FIELDS = Object.freeze(['sessions', 'own', 'total']);
+export const TASK_SORT_DIRECTIONS = Object.freeze(['asc', 'desc']);
+
+const TASK_FILTER_SET = new Set(TASK_FILTERS);
+const TASK_SORT_FIELD_SET = new Set(TASK_SORT_FIELDS);
+const TASK_SORT_DIRECTION_SET = new Set(TASK_SORT_DIRECTIONS);
+
+function normaliseTaskFilter(filter) {
+    const value = String(filter ?? 'ALL').toUpperCase();
+    if (!TASK_FILTER_SET.has(value)) {
+        throw new RangeError(`Unknown task filter: ${filter}`);
+    }
+    return value;
+}
+
+function normaliseSortBy(sortBy) {
+    const value = sortBy ?? 'total';
+    if (!TASK_SORT_FIELD_SET.has(value)) {
+        throw new RangeError(`Unknown task sort field: ${sortBy}`);
+    }
+    return value;
+}
+
+function normaliseDirection(direction) {
+    const value = direction ?? 'desc';
+    if (!TASK_SORT_DIRECTION_SET.has(value)) {
+        throw new RangeError(`Unknown task sort direction: ${direction}`);
+    }
+    return value;
+}
+
+function taskIdentity(node) {
+    return node?.taskUid ? `uid:${node.taskUid}` : node;
+}
+
+function taskChildren(node) {
+    return Array.isArray(node?.children) ? node.children : [];
+}
+
+function statusMatches(node, filter) {
+    return filter === 'ALL' || String(node?.status ?? '').toUpperCase() === filter;
+}
+
+function collectTaskCounts(forest, filter) {
+    const all = new Set();
+    const matches = new Set();
+    const visit = node => {
+        const identity = taskIdentity(node);
+        all.add(identity);
+        if (statusMatches(node, filter)) matches.add(identity);
+        for (const child of taskChildren(node)) visit(child);
+    };
+    for (const node of forest) visit(node);
+    return { totalCount: all.size, matchCount: matches.size };
+}
+
+function cloneFilteredNode(node, filter) {
+    const children = taskChildren(node)
+        .map(child => cloneFilteredNode(child, filter))
+        .filter(Boolean);
+    const matches = statusMatches(node, filter);
+    if (filter !== 'ALL' && !matches && children.length === 0) return null;
+
+    return {
+        ...node,
+        context: filter === 'ALL' ? false : !matches,
+        children,
+    };
+}
+
+/**
+ * Filter a task forest without changing the source nodes or their child arrays.
+ *
+ * A matching descendant keeps the minimal ancestor path needed to explain its
+ * position. Those non-matching ancestors are returned with `context: true`.
+ * Unknown task statuses match only the `ALL` filter.
+ *
+ * @returns {{forest: Array<object>, filter: 'ALL'|'TODO'|'DONE', matchCount: number, totalCount: number}}
+ */
+export function filterTaskForest(forest, filter = 'ALL') {
+    const normalisedFilter = normaliseTaskFilter(filter);
+    const source = Array.isArray(forest) ? forest : [];
+    const counts = collectTaskCounts(source, normalisedFilter);
+    return {
+        forest: source.map(node => cloneFilteredNode(node, normalisedFilter)).filter(Boolean),
+        filter: normalisedFilter,
+        ...counts,
+    };
+}
+
+function compareText(left, right) {
+    const a = String(left ?? '');
+    const b = String(right ?? '');
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+
+function numericMetric(node, sortBy) {
+    const value = Number(node?.[sortBy]);
+    return Number.isFinite(value) ? value : 0;
+}
+
+function compareTaskNodes(left, right, sortBy, direction) {
+    const difference = numericMetric(left, sortBy) - numericMetric(right, sortBy);
+    if (difference !== 0) return direction === 'asc' ? difference : -difference;
+
+    const titleDifference = compareText(left?.title, right?.title);
+    if (titleDifference !== 0) return titleDifference;
+    return compareText(left?.taskUid, right?.taskUid);
+}
+
+function sortTaskNode(node, sortBy, direction) {
+    const children = taskChildren(node)
+        .map(child => sortTaskNode(child, sortBy, direction))
+        .sort((left, right) => compareTaskNodes(left, right, sortBy, direction));
+    return { ...node, children };
+}
+
+/** Return a recursively sorted copy of a task forest. */
+export function sortTaskForest(forest, options = {}) {
+    const source = Array.isArray(forest) ? forest : [];
+    const sortBy = normaliseSortBy(options?.sortBy);
+    const direction = normaliseDirection(options?.direction);
+    return source
+        .map(node => sortTaskNode(node, sortBy, direction))
+        .sort((left, right) => compareTaskNodes(left, right, sortBy, direction));
+}
+
+/**
+ * Apply the Dashboard's task-tree transformation as a pure data operation.
+ * Sorting options are accepted here so the public seam can remain stable while
+ * the filter and recursive sibling sort are used together by the Dashboard.
+ */
+export function transformTaskForest(forest, options = {}) {
+    const transformOptions = options ?? {};
+    const filtered = filterTaskForest(forest, transformOptions.filter);
+    const sortBy = normaliseSortBy(transformOptions.sortBy);
+    const direction = normaliseDirection(transformOptions.direction);
+    return {
+        ...filtered,
+        forest: sortTaskForest(filtered.forest, { sortBy, direction }),
+        sortBy,
+        direction,
+    };
+}
+
 /**
  * Depth-first flattening, for rendering the tree as indented table rows.
  *
