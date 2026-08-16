@@ -168,7 +168,7 @@ test('confirmed Pause All empty state resets the shared Pomodoro cycle', async (
     assert.ok(pomodoro.getCycle());
 
     const drawer = graph.childrenOf('pauseone1').find(block => block.string === 'LOGBOOK::');
-    const clockBlock = graph.childrenOf(drawer.uid).find(block => block.string.startsWith('CLOCK::'));
+    const clockBlock = graph.childrenOf(drawer.uid).find(block => /^CLOCK:{1,2} \[/.test(block.string));
     await graph.api.data.block.update({
         block: {
             uid: clockBlock.uid,

@@ -111,7 +111,7 @@ function startOfDaysAgo(date, days) {
 
 // src/org.js
 var DRAWER_LABEL = "LOGBOOK::";
-var CLOCK_LABEL = "CLOCK::";
+var CLOCK_LABEL = "CLOCK:";
 var DRAWER_RE = /^\s*:?LOGBOOK:{1,2}\s*$/i;
 var CLOCK_RE = /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:\d+))?\s*$/i;
 var CLOCK_LIKE_RE = /^\s*:?CLOCK:{1,2}(?:\s|$)/i;
@@ -190,7 +190,7 @@ function parseClockLineDetailed(string) {
     };
   }
   const computedMinutes = end ? durationMinutes(start.getTime(), end.getTime()) : null;
-  const effectiveMinutes = end ? declaredMinutes ?? computedMinutes : null;
+  const effectiveMinutes = end ? computedMinutes : null;
   const issue = end && declaredMinutes !== null && declaredMinutes !== computedMinutes ? {
     code: "declared-duration-mismatch",
     message: `Declared ${match[3]} differs from the ${formatDurationMinutes(computedMinutes)} computed from timestamps.`
@@ -424,14 +424,17 @@ function getChildren(uid) {
   );
   return rows.map(([childUid, string, order]) => ({ uid: childUid, string, order })).sort((a, b) => a.order - b.order);
 }
-async function createBlock({ parentUid, order, string, uid }) {
+async function createBlock({ parentUid, order, string, uid, open }) {
   const create = resolve("block", "create", "createBlock");
   if (!create)
     throw new Error("roamAlphaAPI block.create unavailable");
   const blockUid = uid || generateUid();
+  const block = { string, uid: blockUid };
+  if (open !== void 0)
+    block.open = open;
   await create({
     location: { "parent-uid": parentUid, order },
-    block: { string, uid: blockUid }
+    block
   });
   return blockUid;
 }
@@ -1106,7 +1109,7 @@ async function ensureDrawer(taskUid) {
   const existing = children.find((child) => isDrawerBlock(child.string));
   if (existing)
     return { uid: existing.uid, created: false };
-  const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+  const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL, open: false });
   const confirmation = refreshResult({ notify: false });
   return { uid, created: true, confirmation };
 }
@@ -1227,10 +1230,11 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
           retry: { action: "clock-in", taskUid, drawerUid: drawer.uid }
         };
       }
-      const order = getChildren(drawer.uid).length;
       const clockUid = await createBlock({
         parentUid: drawer.uid,
-        order,
+        // Roam shifts existing siblings when a child is created at 0,
+        // keeping the newest Session at the top of the drawer.
+        order: 0,
         string: formatClockLine(now)
       });
       const confirmation = refreshResult({ notify: false });

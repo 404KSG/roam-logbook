@@ -22,7 +22,7 @@ function seed(blocks) {
 }
 
 const drawerOf = (graph, taskUid) =>
-    graph.childrenOf(taskUid).find(block => block.string.startsWith('LOGBOOK'));
+    graph.childrenOf(taskUid).find(block => block.string.includes('LOGBOOK'));
 
 const clockLinesOf = (graph, taskUid) =>
     graph.childrenOf(drawerOf(graph, taskUid).uid).map(block => block.string);
@@ -37,7 +37,8 @@ test('clocking in creates the drawer and a running entry', async () => {
 
     assert.equal(taskUid, 'taskone01');
     assert.equal(drawerOf(graph, 'taskone01').string, 'LOGBOOK::');
-    assert.deepEqual(clockLinesOf(graph, 'taskone01'), ['CLOCK:: [2026-08-05 Wed 15:58]']);
+    assert.equal(drawerOf(graph, 'taskone01').open, false);
+    assert.deepEqual(clockLinesOf(graph, 'taskone01'), ['CLOCK: [2026-08-05 Wed 15:58]']);
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].title, 'this is a test task');
 });
@@ -48,11 +49,22 @@ test('the drawer sits directly under the task, as in org', async () => {
     assert.equal(graph.childrenOf('taskone01')[0].string, 'LOGBOOK::');
 });
 
+test('Clock In does not collapse an existing drawer', async () => {
+    const graph = seed([
+        TASK,
+        { uid: 'open-drawer', string: 'LOGBOOK::', parent: TASK.uid, open: true },
+    ]);
+
+    await clock.clockIn(TASK.uid, { now: AT_1558 });
+
+    assert.equal(graph.store.get('open-drawer').open, true);
+});
+
 test('entries nest under the drawer, never beside it', async () => {
     const graph = seed([TASK]);
     const { clockUid } = await clock.clockIn('taskone01', { now: AT_1558 });
 
-    // task > LOGBOOK:: > CLOCK:: — a CLOCK block as a sibling of the drawer
+    // task > LOGBOOK:: > CLOCK: — a CLOCK block as a sibling of the drawer
     // would still read back, but it is not the org shape.
     const drawer = graph.store.get(graph.store.get(clockUid).parent);
     assert.equal(drawer.string, 'LOGBOOK::');
@@ -67,19 +79,23 @@ test('clocking out writes the end stamp and the org duration', async () => {
     await clock.clockOut(clock.getRunning()[0].clockUid, { now: AT_1658 });
 
     assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
-        'CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
+        'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
     ]);
     assert.equal(clock.getRunning().length, 0);
 });
 
-test('a second session appends to the existing drawer', async () => {
+test('a second session is inserted before the first and remains independent', async () => {
     const graph = seed([TASK]);
     await clock.clockIn('taskone01', { now: AT_1558 });
     await clock.clockOut(clock.getRunning()[0].clockUid, { now: AT_1658 });
     await clock.clockIn('taskone01', { now: new Date(2026, 7, 5, 18, 0) });
 
     assert.equal(graph.childrenOf('taskone01').filter(b => b.string.startsWith('LOGBOOK')).length, 1);
-    assert.equal(clockLinesOf(graph, 'taskone01').length, 2);
+    assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
+        'CLOCK: [2026-08-05 Wed 18:00]',
+        'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
+    ]);
+    assert.equal(graph.childrenOf(drawerOf(graph, 'taskone01').uid).length, 2);
 });
 
 test('logging against a block reference writes to the original block', async () => {
@@ -108,7 +124,7 @@ test('by default a new clock closes the running one', async () => {
     await clock.clockIn('tasktwo02', { now: AT_1658 });
 
     assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
-        'CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
+        'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
     ]);
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].taskUid, 'tasktwo02');
@@ -143,7 +159,7 @@ test('an end before the start clamps to a zero-length session', async () => {
     await clock.clockOut(clock.getRunning()[0].clockUid, { now: AT_1558 });
 
     assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
-        'CLOCK:: [2026-08-05 Wed 16:58]--[2026-08-05 Wed 16:58] => 0:00',
+        'CLOCK: [2026-08-05 Wed 16:58]--[2026-08-05 Wed 16:58] => 0:00',
     ]);
 });
 
@@ -179,6 +195,32 @@ test('a clock left open in the graph is picked back up on refresh', () => {
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].clockUid, 'entry0001');
     assert.equal(clock.isBlockRunning('taskone01'), true);
+});
+
+test('reload keeps mixed historical drawer and CLOCK spellings readable', () => {
+    const graph = seed([
+        TASK,
+        { uid: 'mixed-drawer', string: ':LOGBOOK:', parent: 'taskone01' },
+        {
+            uid: 'mixed-legacy',
+            string: 'CLOCK:: [2026-08-04 Tue 09:00]--[2026-08-04 Tue 09:30] => 0:30',
+            parent: 'mixed-drawer',
+            order: 1,
+        },
+        {
+            uid: 'mixed-current',
+            string: 'CLOCK: [2026-08-04 Tue 10:00]',
+            parent: 'mixed-drawer',
+            order: 0,
+        },
+    ]);
+
+    assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
+        'CLOCK: [2026-08-04 Tue 10:00]',
+        'CLOCK:: [2026-08-04 Tue 09:00]--[2026-08-04 Tue 09:30] => 0:30',
+    ]);
+    assert.equal(clock.getRunning()[0].clockUid, 'mixed-current');
+    assert.equal(graph.store.get('mixed-legacy').string.includes('CLOCK::'), true);
 });
 
 test('unparseable drawer children are ignored rather than breaking the read', () => {

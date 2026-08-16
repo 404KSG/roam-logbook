@@ -109,7 +109,7 @@ test('Clock out current block with no focused block only notifies and performs z
 
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].clockUid, before);
-    assert.match(graph.childrenOf(graph.childrenOf(TASK.uid)[0].uid)[0].string, /^CLOCK:: \[/);
+    assert.match(graph.childrenOf(graph.childrenOf(TASK.uid)[0].uid)[0].string, /^CLOCK:{1,2} \[/);
     assert.match(toasts.join(' '), /focused block/i);
 });
 

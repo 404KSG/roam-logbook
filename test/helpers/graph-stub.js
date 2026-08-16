@@ -14,23 +14,26 @@ export function installGraph(blocks = []) {
     const store = new Map();
     const pullWatches = new Map();
 
+    const nextOrderByParent = new Map();
     for (const block of blocks) {
+        const parent = block.parent ?? null;
+        const nextOrder = nextOrderByParent.get(parent) || 0;
+        const blockOrder = Number.isFinite(block.order) ? block.order : nextOrder;
         store.set(block.uid, {
             uid: block.uid,
             string: block.string,
-            parent: block.parent ?? null,
+            parent,
+            order: blockOrder,
+            open: block.open === undefined ? true : block.open,
             page: block.page === undefined ? 'Test Page' : block.page,
         });
+        nextOrderByParent.set(parent, Math.max(nextOrder, blockOrder + 1));
     }
 
     const childrenOf = uid =>
         [...store.values()]
             .filter(block => block.parent === uid)
             .sort((a, b) => a.order - b.order);
-
-    // Order is implicit in insertion for seeds; explicit once blocks are created.
-    let order = 0;
-    for (const block of store.values()) block.order = order++;
 
     const q = (datalog, ...args) => {
         if (datalog.includes('LOGBOOK:')) {
@@ -105,11 +108,21 @@ export function installGraph(blocks = []) {
             },
             block: {
                 create: async ({ location, block }) => {
+                    const siblings = [...store.values()].filter(
+                        existing => existing.parent === location['parent-uid']
+                    );
+                    const requestedOrder = Number.isFinite(location.order)
+                        ? Math.max(0, Math.min(location.order, siblings.length))
+                        : siblings.length;
+                    for (const sibling of siblings) {
+                        if (sibling.order >= requestedOrder) sibling.order += 1;
+                    }
                     store.set(block.uid, {
                         uid: block.uid,
                         string: block.string,
                         parent: location['parent-uid'],
-                        order: location.order,
+                        order: requestedOrder,
+                        open: block.open === undefined ? true : block.open,
                         page: store.get(location['parent-uid'])?.page ?? 'Test Page',
                     });
                 },

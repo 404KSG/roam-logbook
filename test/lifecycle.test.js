@@ -185,7 +185,7 @@ test('clocking in shows elapsed time and a singular Session count in the topbar'
 
     const drawer = graph.childrenOf('taskone01')[0];
     assert.equal(drawer.string, 'LOGBOOK::');
-    assert.ok(graph.childrenOf(drawer.uid)[0].string.startsWith('CLOCK:: ['));
+    assert.match(graph.childrenOf(drawer.uid)[0].string, /^CLOCK:{1,2} \[/);
     const [running] = clock.getRunning();
     assert.equal(pomodoro.targetMinutes(running.clockUid), 30, 'Clock In assigns the global target');
 

@@ -240,7 +240,7 @@ async function ensureDrawer(taskUid) {
     const existing = children.find(child => isDrawerBlock(child.string));
     if (existing) return { uid: existing.uid, created: false };
     // Order 0 mirrors org, where the drawer sits immediately under the heading.
-    const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL });
+    const uid = await createBlock({ parentUid: taskUid, order: 0, string: DRAWER_LABEL, open: false });
     const confirmation = refreshResult({ notify: false });
     return { uid, created: true, confirmation };
 }
@@ -383,10 +383,11 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
                     retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid },
                 };
             }
-            const order = getChildren(drawer.uid).length;
             const clockUid = await createBlock({
                 parentUid: drawer.uid,
-                order,
+                // Roam shifts existing siblings when a child is created at 0,
+                // keeping the newest Session at the top of the drawer.
+                order: 0,
                 string: formatClockLine(now),
             });
 

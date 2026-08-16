@@ -272,13 +272,15 @@ export function getPageTitleOfBlock(uid) {
     return rows[0]?.[0] ?? null;
 }
 
-export async function createBlock({ parentUid, order, string, uid }) {
+export async function createBlock({ parentUid, order, string, uid, open }) {
     const create = resolve('block', 'create', 'createBlock');
     if (!create) throw new Error('roamAlphaAPI block.create unavailable');
     const blockUid = uid || generateUid();
+    const block = { string, uid: blockUid };
+    if (open !== undefined) block.open = open;
     await create({
         location: { 'parent-uid': parentUid, order },
-        block: { string, uid: blockUid },
+        block,
     });
     return blockUid;
 }

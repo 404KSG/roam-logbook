@@ -3,7 +3,8 @@
  *
  * There is deliberately no cached mirror of this data: the LOGBOOK drawers *are*
  * the state. A running clock survives a reload, a crash, or an edit made on
- * another device, because it is just a `CLOCK::` block with no end stamp.
+ * another device, because it is just a `CLOCK:` block with no end stamp. The
+ * reader also accepts historical `CLOCK::` and pasted Org drawer variants.
  */
 
 import {
@@ -56,7 +57,7 @@ function queryEntryRows() {
 
 /**
  * @typedef {object} ClockEntry
- * @property {string} clockUid    uid of the `CLOCK::` block itself
+ * @property {string} clockUid    uid of the `CLOCK:` block itself
  * @property {string} taskUid     uid of the task the drawer hangs under
  * @property {string|null} taskString  raw task block text, when recoverable
  * @property {string} title       display title for the task
@@ -67,7 +68,7 @@ function queryEntryRows() {
  * @property {number|null} minutes
  * @property {number|null} computedMinutes  duration from the timestamps
  * @property {number|null} declaredMinutes  hand-written `=> H:MM`, if present
- * @property {number|null} effectiveMinutes  compatible reporting value
+ * @property {number|null} effectiveMinutes  timestamp-derived reporting value
  * @property {object|null} issue            explainable data-health issue
  * @property {object[]} issues              all issues attached to this record
  * @property {string} rawClock              original CLOCK block text

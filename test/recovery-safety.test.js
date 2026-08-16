@@ -363,7 +363,7 @@ test('Resume All returns a structured partial result and retries only the retain
     assert.equal(clock.getRunning().length, 2, 'retry adds only the retained Task');
     assert.equal(
         graph.childrenOf(graph.childrenOf(TASK.uid).find(block => block.string === 'LOGBOOK::').uid).filter(block =>
-            block.string.startsWith('CLOCK::')
+            /^CLOCK:{1,2} \[/.test(block.string)
         ).length,
         2,
         'the already resumed Task keeps exactly one new Session'

@@ -22,7 +22,7 @@ const drawerFor = taskUid =>
 
 const clockBlocksFor = taskUid => {
     const drawer = drawerFor(taskUid);
-    return drawer ? graph.childrenOf(drawer.uid).filter(block => block.string.startsWith('CLOCK::')) : [];
+    return drawer ? graph.childrenOf(drawer.uid).filter(block => /^CLOCK:{1,2} \[/.test(block.string)) : [];
 };
 
 test.beforeEach(async () => {
@@ -69,7 +69,7 @@ test('concurrent Clock in on different Tasks leaves one running Session in singl
     assert.equal(clockBlocksFor(TASK.uid).length, 1);
     assert.match(clockBlocksFor(TASK.uid)[0].string, /--/);
     assert.equal(clockBlocksFor(OTHER.uid).length, 1);
-    assert.match(clockBlocksFor(OTHER.uid)[0].string, /^CLOCK:: \[/);
+    assert.match(clockBlocksFor(OTHER.uid)[0].string, /^CLOCK:{1,2} \[/);
 });
 
 test('concurrent Clock in on different Tasks is allowed in parallel mode', async () => {

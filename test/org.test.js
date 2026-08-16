@@ -41,10 +41,13 @@ test('computes minutes when the => summary is missing', () => {
     assert.equal(parsed.minutes, 150);
 });
 
-test('a hand-edited => summary wins over the stamps', () => {
-    // The user correcting the total by hand is the more trustworthy signal.
+test('timestamp duration wins over a conflicting => summary and exposes the mismatch', () => {
     const parsed = parseClockLine('CLOCK:: [2026-08-05 Wed 15:00]--[2026-08-05 Wed 16:00] => 0:30');
-    assert.equal(parsed.minutes, 30);
+    assert.equal(parsed.computedMinutes, 60);
+    assert.equal(parsed.declaredMinutes, 30);
+    assert.equal(parsed.effectiveMinutes, 60);
+    assert.equal(parsed.minutes, 60);
+    assert.equal(parsed.issue.code, 'declared-duration-mismatch');
 });
 
 test('rejects lines that are not clock entries', () => {
@@ -60,10 +63,10 @@ test('rejects lines that are not clock entries', () => {
 
 test('serialises clock entries in org shape', () => {
     const start = new Date(2026, 7, 5, 15, 58);
-    assert.equal(formatClockLine(start), 'CLOCK:: [2026-08-05 Wed 15:58]');
+    assert.equal(formatClockLine(start), 'CLOCK: [2026-08-05 Wed 15:58]');
     assert.equal(
         formatClockLine(start, new Date(2026, 7, 5, 16, 58)),
-        'CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00'
+        'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00'
     );
 });
 

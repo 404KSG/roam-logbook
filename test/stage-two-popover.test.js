@@ -558,7 +558,7 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
     const cycleBefore = pomodoro.getCycle();
     const pausedBefore = paused.getPaused();
     const clockStringsBefore = [...graph.store.values()]
-        .filter(block => String(block.string).startsWith('CLOCK::'))
+        .filter(block => /^CLOCK:{1,2} \[/.test(String(block.string)))
         .map(block => [block.uid, block.string]);
     const writes = { create: 0, update: 0, delete: 0 };
     const originals = {
@@ -585,7 +585,7 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
     assert.deepEqual(paused.getPaused(), pausedBefore);
     assert.deepEqual(
         [...graph.store.values()]
-            .filter(block => String(block.string).startsWith('CLOCK::'))
+            .filter(block => /^CLOCK:{1,2} \[/.test(String(block.string)))
             .map(block => [block.uid, block.string]),
         clockStringsBefore
     );

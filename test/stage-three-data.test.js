@@ -98,8 +98,8 @@ test('a completed clock keeps computed, declared, effective minutes and an expla
     assert.equal(result.ok, true);
     assert.equal(result.value.computedMinutes, 60);
     assert.equal(result.value.declaredMinutes, 30);
-    assert.equal(result.value.effectiveMinutes, 30);
-    assert.equal(result.value.minutes, 30);
+    assert.equal(result.value.effectiveMinutes, 60);
+    assert.equal(result.value.minutes, 60);
     assert.equal(result.value.issue.code, 'declared-duration-mismatch');
 });
 
@@ -112,20 +112,20 @@ test('readAllEntries preserves orphan and malformed CLOCK records for recovery a
 
     assert.equal(orphan.title, 'Deleted task · health-orphan');
     assert.equal(orphan.issue.code, 'orphan-task');
-    assert.equal(orphan.minutes, 45, 'declared duration remains the compatible effective value');
+    assert.equal(orphan.minutes, 30, 'timestamp duration is the effective reporting value');
     assert.equal(malformed.issue.code, 'invalid-timestamp');
     assert.equal(malformed.start, null);
     assert.equal(malformed.rawClock.includes('09:00:60'), true);
     assert.equal(mismatch.computedMinutes, 60);
     assert.equal(mismatch.declaredMinutes, 30);
-    assert.equal(mismatch.effectiveMinutes, 30);
+    assert.equal(mismatch.effectiveMinutes, 60);
     assert.equal(mismatch.issue.code, 'declared-duration-mismatch');
 
     const model = buildDashboard(entries, {
         now: new Date('2026-08-15T12:00:00'),
         rangeId: 'all',
     });
-    assert.equal(model.totalMinutes, 135, 'valid orphan time remains in global totals');
+    assert.equal(model.totalMinutes, 150, 'valid orphan time remains in global totals');
     assert.ok(model.tasks.some(task => task.title === 'Deleted task · health-orphan'));
     assert.equal(model.issues.length, 3);
 });

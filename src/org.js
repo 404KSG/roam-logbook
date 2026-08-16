@@ -5,7 +5,7 @@
  *
  *   {{[[TODO]]}} this is a test task
  *     - LOGBOOK::
- *       - CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00
+ *       - CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00
  *
  * A clock with no `--[end]` is *running*. That is the whole persistence story:
  * the graph, not extension state, is what survives a reload or a crash.
@@ -20,7 +20,9 @@ import {
 } from './time.js';
 
 export const DRAWER_LABEL = 'LOGBOOK::';
-export const CLOCK_LABEL = 'CLOCK::';
+// New writes use Org's keyword spelling. The parser below remains compatible
+// with Roam's historical CLOCK:: blocks and pasted :CLOCK: variants.
+export const CLOCK_LABEL = 'CLOCK:';
 
 // A leading `:` is accepted so drawers pasted straight out of an org file parse.
 const DRAWER_RE = /^\s*:?LOGBOOK:{1,2}\s*$/i;
@@ -62,12 +64,13 @@ export function taskStatus(string) {
 }
 
 /**
- * Parse one `CLOCK::` block.
+ * Parse one `CLOCK:` block (also accepting historical `CLOCK::` input).
  *
- * The stored `=> H:MM` is authoritative when present — a hand-edited summary is
- * the user telling us what the entry is worth — and recomputed otherwise.
+ * The timestamp interval is authoritative for completed records. The stored
+ * `=> H:MM` is retained as a declared audit value and mismatches stay visible
+ * to data-health surfaces; historical graph text is never rewritten here.
  *
- * @returns {{start: Date, end: Date|null, minutes: number|null, running: boolean}|null}
+ * @returns {{start: Date, end: Date|null, computedMinutes: number|null, declaredMinutes: number|null, effectiveMinutes: number|null, minutes: number|null, running: boolean, issue: object|null}|null}
  */
 export function parseClockLine(string) {
     const result = parseClockLineDetailed(string);
@@ -141,7 +144,7 @@ export function parseClockLineDetailed(string) {
         };
     }
     const computedMinutes = end ? durationMinutes(start.getTime(), end.getTime()) : null;
-    const effectiveMinutes = end ? (declaredMinutes ?? computedMinutes) : null;
+    const effectiveMinutes = end ? computedMinutes : null;
     const issue =
         end && declaredMinutes !== null && declaredMinutes !== computedMinutes
             ? {

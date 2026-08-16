@@ -7,13 +7,18 @@ Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clo
 
 This is an MIT-licensed fork of [forrestchang/roam-logbook](https://github.com/forrestchang/roam-logbook). It preserves the original LOGBOOK/CLOCK workflow and reporting behavior while refining the topbar and dashboard presentation.
 
-Entries are stored in the graph in org's own format, as a `LOGBOOK::` drawer under the task:
+Entries are stored in an Org-style Roam hierarchy, as a `LOGBOOK::` drawer under the task:
 
 ```
 {{[[TODO]]}} this is a test task
   - LOGBOOK::
-    - CLOCK:: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00
+    - CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00
 ```
+
+New drawers are created collapsed, and each new Session is inserted at the top
+of the drawer. New writes use `CLOCK:`; the reader continues to accept existing
+`CLOCK::`, `CLOCK:`, `LOGBOOK::`, `LOGBOOK:`, and `:LOGBOOK:` records. Existing
+graph history is not migrated or merged.
 
 ## Installation
 
@@ -48,7 +53,7 @@ With parallel timing enabled, it follows the stable elapsed timer with only the 
 
 Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or session count for the popover; **Shift+Click on the topbar trigger is intentionally inert**, so it never opens a second surface or moves the layout. Shift+Clicking a Session task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API, while ordinary click keeps the main-window navigation. If Roam rejects or lacks the native sidebar API, the Session popover stays open with a concise retry notice. Every running row has an explicit icon-only **Check Out** action with the same accessible label, while the low-level Discard action stays secondary. Dashboard, Pause/Pause All, Resume All, and Clock Out All are text buttons; when exactly one Session is running, the footer is the compact `Dashboard | Pause | Refresh` row and the individual Check Out action remains on that Session row. Parallel, paused, and mixed states retain their bulk actions. Refresh is one icon-only footer action in each surface, aligned to the same 32px action height. Refresh is a read-only graph re-read with an icon-only loading state, hidden live success status, and actionable error feedback; it keeps the surface open, coalesces fast clicks, and retains the last valid snapshot on failure. Current-session task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue; Dashboard task buttons already show a document-open cue and therefore use neutral text without an extra underline. The shared title/metadata grid keeps the status point, task title, and actions aligned in both surfaces.
 
-**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK::` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK::` Session for each valid Task; this intentionally increases the dashboard's Sessions count.
+**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK:` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume creates a fresh `CLOCK:` Session for each valid Task; this intentionally increases the dashboard's Sessions count. Historical `CLOCK::` entries remain readable.
 
 Resume starts one fresh shared Pomodoro cycle for the resumed batch; it never restores an old per-clock remainder or creates a separate cycle per Task. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. If a user explicitly clocks a paused Task in and out during the break, Resume All records that reconciliation and does not recreate the finished Session. Clicking **Resume All** is explicit consent to restore the whole batch: when that requires parallel clocks, the extension first enables **Allow multiple clocks at once**, restores every valid Task, and shows a notice. It never intentionally leaves a one-Task partial result because the setting was off. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
 
@@ -122,7 +127,7 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 ## Notes
 
 - Timestamps carry no timezone, matching org — `[2026-08-05 Wed 15:58]` reads as 15:58 wherever you open it.
-- Durations truncate to whole minutes. A hand-edited `=> H:MM` is taken as authoritative over the stamps around it.
+- Durations truncate to whole minutes. Valid start/end timestamps are authoritative; a hand-edited conflicting `=> H:MM` remains visible as a data-health issue but does not change reports.
 - A session that runs past midnight counts wholly against the day it began, as org's own clock reports do.
 - Everything happens locally against your graph: no external telemetry, network calls, or runtime dependency.
 
