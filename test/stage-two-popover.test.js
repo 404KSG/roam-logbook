@@ -108,6 +108,20 @@ test('single running Session keeps Dashboard, Pause, and Refresh on one row', as
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
+    const topbar = topbarButton();
+    const elapsed = topbar.querySelector('.rlb-topbar__time');
+    const count = topbar.querySelector('.rlb-topbar__parallel');
+    assert.match(topbar.textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
+    assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Session`);
+    assert.equal(topbar.querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
+    assert.equal(count.textContent, '1 Session');
+    assert.equal(
+        [...count.classList].some(className =>
+            className.startsWith('rlb-topbar__parallel--load-')
+        ),
+        false
+    );
+
     const popover = openPopover();
     const footer = popover.querySelector('.rlb-popover__footer');
     const actions = [...footer.querySelectorAll('button')];
@@ -1187,7 +1201,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
 test('Topbar and Dashboard expose the same injected elapsed instant', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    const topbarElapsed = topbarWidget().textContent.trim();
+    const topbarElapsed = topbarWidget().querySelector('.rlb-topbar__time').textContent;
 
     paletteCommands.get('Logbook: Open dashboard')();
     const dashboardElapsed = document.querySelector('[data-running-elapsed="true"]').textContent;

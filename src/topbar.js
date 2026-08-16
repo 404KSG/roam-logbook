@@ -485,17 +485,13 @@ export function createTopbar({
         const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(cycleElapsed);
-        if (entries.length > 1) {
-            buttonNode.classList.add('rlb-topbar__button--parallel');
-            parallelNode.textContent = sessionCount(entries.length);
-            separatorNode.textContent = '';
-            syncButtonLayout('parallel');
-        } else {
-            buttonNode.classList.remove('rlb-topbar__button--parallel');
-            parallelNode.textContent = '';
-            separatorNode.textContent = '';
-            syncButtonLayout('single');
-        }
+        // Keep the running count visible even for a single Session. The
+        // icon-only state is reserved for zero running Sessions; once timing
+        // is active, the topbar should always expose the same count contract.
+        buttonNode.classList.add('rlb-topbar__button--parallel');
+        parallelNode.textContent = sessionCount(entries.length);
+        separatorNode.textContent = '';
+        syncButtonLayout('parallel');
 
         if (entries.length > 1) {
             buttonNode.title =

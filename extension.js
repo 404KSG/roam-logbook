@@ -7241,17 +7241,10 @@ ${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} re
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(cycleElapsed);
-    if (entries.length > 1) {
-      buttonNode.classList.add("rlb-topbar__button--parallel");
-      parallelNode.textContent = sessionCount2(entries.length);
-      separatorNode.textContent = "";
-      syncButtonLayout("parallel");
-    } else {
-      buttonNode.classList.remove("rlb-topbar__button--parallel");
-      parallelNode.textContent = "";
-      separatorNode.textContent = "";
-      syncButtonLayout("single");
-    }
+    buttonNode.classList.add("rlb-topbar__button--parallel");
+    parallelNode.textContent = sessionCount2(entries.length);
+    separatorNode.textContent = "";
+    syncButtonLayout("parallel");
     if (entries.length > 1) {
       buttonNode.title = `${sessionCount2(entries.length)} Running
 Primary timer: ${first.title}

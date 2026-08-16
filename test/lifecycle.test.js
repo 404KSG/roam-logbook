@@ -180,7 +180,7 @@ test('the context menu offers clock in on a TODO block only', () => {
     assert.equal(clockIn['display-conditional']({ 'block-uid': 'plain0001' }), false);
 });
 
-test('clocking in shows only the primary live elapsed time in the topbar', async () => {
+test('clocking in shows elapsed time and a singular Session count in the topbar', async () => {
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
 
     const drawer = graph.childrenOf('taskone01')[0];
@@ -189,13 +189,14 @@ test('clocking in shows only the primary live elapsed time in the topbar', async
     const [running] = clock.getRunning();
     assert.equal(pomodoro.targetMinutes(running.clockUid), 30, 'Clock In assigns the global target');
 
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '1 Session');
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
-    assert.doesNotMatch(topbarWidget().textContent, /this is a test task|\/|·|clocks/);
+    assert.doesNotMatch(topbarWidget().textContent, /this is a test task|\/|clocks/);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
     assert.match(topbarWidget().querySelector('button').title, /^1 Session Running\n/);
     assert.equal(
@@ -219,7 +220,7 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
     assert.equal(entry.priorMinutes, 120, 'banked time is derived on refresh, not queried per tick');
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
     assert.match(topbarWidget().querySelector('button').title, /2h 0\dm on this task in total/);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
 });
 
 test('the shared Pomodoro cycle stays overrun when a running CLOCK is edited', () => {
@@ -257,7 +258,10 @@ test('the shared overrun state takes priority over stale metadata', () => {
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
     const cycle = pomodoro.getCycle();
     assert.ok(cycle, 'an external timestamp edit does not reset the shared cycle');
-    assert.equal(topbarWidget().textContent.trim(), formatElapsed(Date.now() - cycle.startedAt));
+    assert.equal(
+        topbarWidget().querySelector('.rlb-topbar__time').textContent,
+        formatElapsed(Date.now() - cycle.startedAt)
+    );
     assert.doesNotMatch(topbarWidget().querySelector('button').title, /likely forgotten/);
 
     click(topbarWidget().querySelector('button'));
@@ -278,7 +282,7 @@ test('a long task name stays in the tooltip without entering visible topbar text
     clock.refresh();
 
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
     assert.match(topbarWidget().querySelector('button').title, new RegExp(longName.slice(0, 20)));
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
@@ -619,7 +623,7 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
     assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 45:00/);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
 
     duration.action.onChange({ target: { value: '20' } });
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45, 'an active Session keeps its captured target');
