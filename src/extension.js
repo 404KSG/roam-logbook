@@ -30,6 +30,7 @@ import {
 import { STYLES, STYLE_ID } from './styles.js';
 import { createTopbar } from './topbar.js';
 import { PLUGIN_VERSION } from './version.js';
+import { attachCompletionHandling } from './completion.js';
 
 const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
 const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
@@ -53,6 +54,7 @@ function createController({ extensionAPI }) {
     });
     let destroyed = false;
     let detachPomodoro = null;
+    let detachCompletion = null;
 
     /** Task text of the block a menu entry was opened on, following references. */
     const targetString = context => {
@@ -226,6 +228,7 @@ function createController({ extensionAPI }) {
             pomodoro.load();
             paused.load();
             detachPomodoro = pomodoro.attach();
+            detachCompletion = attachCompletionHandling({ pauseApi: paused });
             topbar.mount();
             // The graph is the source of truth, so a reload picks any clock left
             // running — including one abandoned days ago — straight back up.
@@ -235,6 +238,8 @@ function createController({ extensionAPI }) {
             if (destroyed) return;
             destroyed = true;
             confirmation.reset();
+            detachCompletion?.();
+            detachCompletion = null;
             detachPomodoro?.();
             detachPomodoro = null;
             pomodoro.reset();

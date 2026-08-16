@@ -1,3 +1,9 @@
+var __defProp = Object.defineProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
 // src/time.js
 var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var MONTH_NAMES = [
@@ -332,6 +338,59 @@ function getBlockString(uid) {
   }
   return rows[0]?.[0] ?? null;
 }
+function watchBlockString(uid, onChange) {
+  const add = resolve(null, "addPullWatch");
+  const remove = resolve(null, "removePullWatch");
+  const pattern = "[:block/string]";
+  const entity = `[:block/uid ${JSON.stringify(uid)}]`;
+  let detached = false;
+  const installationError = typeof uid !== "string" || uid.length === 0 ? new Error("Pull Watch requires a block UID") : typeof onChange !== "function" ? new Error("Pull Watch requires a change callback") : !add ? new Error("roamAlphaAPI addPullWatch unavailable") : null;
+  if (installationError) {
+    return {
+      ok: false,
+      uid,
+      error: installationError,
+      detach: () => ({ ok: false, detached: false, error: installationError })
+    };
+  }
+  const handler = (before, after) => {
+    try {
+      onChange({ uid, before, after });
+    } catch (error) {
+      console.error("[roam-logbook] pull-watch callback failed", error);
+    }
+  };
+  try {
+    add(pattern, entity, handler);
+  } catch (error) {
+    return {
+      ok: false,
+      uid,
+      error,
+      detach: () => ({ ok: false, detached: false, error })
+    };
+  }
+  return {
+    ok: true,
+    uid,
+    detach: () => {
+      if (detached)
+        return { ok: true, detached: false };
+      detached = true;
+      if (!remove) {
+        const error = new Error("roamAlphaAPI removePullWatch unavailable");
+        return { ok: false, detached: false, error };
+      }
+      try {
+        remove(pattern, entity, handler);
+        return { ok: true, detached: true };
+      } catch (error) {
+        detached = false;
+        return { ok: false, detached: false, error };
+      }
+    }
+  };
+}
 function resolveReferencedUid(uid) {
   const seen = /* @__PURE__ */ new Set();
   let current = uid;
@@ -619,6 +678,23 @@ function readHierarchy(taskUids) {
     }
     const referencedTargets = parentRows.map(([, , rawParentString]) => referencedBlockUid(rawParentString)).filter(Boolean);
     const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
+    const parentChoices = /* @__PURE__ */ new Map();
+    for (const [uid, rawParentUid] of parentRows) {
+      const choices = parentChoices.get(uid) || /* @__PURE__ */ new Set();
+      choices.add(rawParentUid);
+      parentChoices.set(uid, choices);
+    }
+    for (const [uid, choices] of parentChoices) {
+      if (choices.size > 1) {
+        issues.push({
+          code: "ambiguous-parent",
+          taskUid: uid,
+          title: `Ambiguous parent \xB7 ${uid}`,
+          rawClock: "",
+          message: `Task ${uid} has more than one confirmed parent; hierarchy roll-up was withheld.`
+        });
+      }
+    }
     for (const [uid, rawParentUid, rawParentString] of parentRows) {
       const referenced = referencedBlockUid(rawParentString);
       const parentUid = referenced || rawParentUid;
@@ -641,6 +717,24 @@ function readHierarchy(taskUids) {
       next.push(parentUid);
     }
     frontier = next;
+  }
+  for (const uid of Object.keys(parentOf)) {
+    const seen = /* @__PURE__ */ new Set();
+    let current = uid;
+    while (current && parentOf[current]) {
+      if (seen.has(current)) {
+        issues.push({
+          code: "cyclic-parent",
+          taskUid: uid,
+          title: `Cyclic parent \xB7 ${uid}`,
+          rawClock: "",
+          message: `Task hierarchy for ${uid} contains a cycle; cascade scope was withheld.`
+        });
+        break;
+      }
+      seen.add(current);
+      current = parentOf[current];
+    }
   }
   return { parentOf, stringOf, mirrorsOf, issues };
 }
@@ -913,6 +1007,41 @@ function reset() {
 function resolveTaskUid(uid) {
   return resolveReferencedUid(uid);
 }
+function doneAncestorFor(taskUid) {
+  const taskString = getBlockString(taskUid);
+  if (taskStatus(taskString) === "DONE")
+    return taskUid;
+  const hierarchy = readHierarchy([taskUid]);
+  if (hierarchy.issues.length > 0) {
+    throw new GraphReadError("Task hierarchy could not be confirmed before Clock In", {
+      issue: {
+        kind: "hierarchy",
+        source: "parent",
+        message: "Task hierarchy could not be confirmed before Clock In",
+        affectedUids: [taskUid]
+      }
+    });
+  }
+  const seen = /* @__PURE__ */ new Set();
+  let current = taskUid;
+  while (current && hierarchy.parentOf[current]) {
+    if (seen.has(current)) {
+      throw new GraphReadError("Task hierarchy contains a cycle before Clock In", {
+        issue: {
+          kind: "hierarchy",
+          source: "parent",
+          message: "Task hierarchy contains a cycle before Clock In",
+          affectedUids: [taskUid]
+        }
+      });
+    }
+    seen.add(current);
+    current = hierarchy.parentOf[current];
+    if (taskStatus(hierarchy.stringOf[current]) === "DONE")
+      return current;
+  }
+  return null;
+}
 async function ensureDrawer(taskUid) {
   const children = getChildren(taskUid);
   const existing = children.find((child) => isDrawerBlock(child.string));
@@ -995,6 +1124,16 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
         throw new Error("No block to clock in");
       const entries = readAllEntries();
       const open = entries.filter((entry) => entry.running);
+      const doneAncestorUid = doneAncestorFor(taskUid);
+      if (doneAncestorUid) {
+        const error = new Error(
+          `Cannot Clock In under DONE Task ${doneAncestorUid}; reopen it first.`
+        );
+        error.code = "done-ancestor";
+        error.taskUid = taskUid;
+        error.doneAncestorUid = doneAncestorUid;
+        throw error;
+      }
       if (allowMultipleClocks()) {
         if (open.some((entry) => entry.taskUid === taskUid)) {
           refresh();
@@ -1176,6 +1315,144 @@ async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date(), sourc
       return result?.closed === true;
     })
   );
+}
+async function clockOutCompletedTask(taskUid, {
+  now = /* @__PURE__ */ new Date(),
+  source = "auto-complete",
+  getPauseTaskUids = null,
+  pruneCompleted: pruneCompleted2 = null
+} = {}) {
+  return enqueueMutation(async () => {
+    try {
+      return await withGraphGuard(async () => {
+        const entries = readAllEntries();
+        const runningEntries = entries.filter((entry) => entry.running);
+        const pauseTaskUids = getPauseTaskUids ? getPauseTaskUids() : [];
+        if (!Array.isArray(pauseTaskUids)) {
+          throw new GraphReadError("Paused Task scope could not be confirmed");
+        }
+        const taskUids = [
+          ...new Set([
+            taskUid,
+            ...runningEntries.map((entry) => entry.taskUid),
+            ...pauseTaskUids
+          ].filter(Boolean))
+        ];
+        const hierarchy = readHierarchy(taskUids);
+        if (hierarchy.issues.length > 0) {
+          throw new GraphReadError("Task hierarchy could not be confirmed for automatic Clock Out", {
+            issue: {
+              kind: "hierarchy",
+              source: "parent",
+              message: "Task hierarchy could not be confirmed for automatic Clock Out",
+              affectedUids: taskUids
+            }
+          });
+        }
+        const stringOf = new Map([
+          ...entries.map((entry) => [entry.taskUid, entry.taskString]),
+          ...Object.entries(hierarchy.stringOf)
+        ]);
+        const taskString = stringOf.get(taskUid) ?? getBlockString(taskUid);
+        if (taskStatus(taskString) !== "DONE") {
+          return {
+            action: "auto-clock-out",
+            source,
+            ok: true,
+            skipped: true,
+            reason: "task-not-done",
+            triggerUid: taskUid,
+            closed: 0,
+            count: 0,
+            completed: 0,
+            failed: 0,
+            pending: 0,
+            pendingClockUids: []
+          };
+        }
+        const targetEntries = entries.filter(
+          (entry) => entry.running && isTaskInConfirmedTree(entry.taskUid, taskUid, hierarchy.parentOf)
+        );
+        const affectedTaskUids = [
+          taskUid,
+          ...targetEntries.map((entry) => entry.taskUid),
+          ...pauseTaskUids.filter(
+            (candidate) => isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
+          )
+        ];
+        const pauseResult = pruneCompleted2 ? pruneCompleted2([...new Set(affectedTaskUids)]) : null;
+        if (pauseResult && pauseResult.ok === false) {
+          throw pauseResult.error || new GraphReadError("Pause Batch could not be reconciled");
+        }
+        const outcome = await closeEntriesNow(
+          entries,
+          targetEntries.map((entry) => entry.clockUid),
+          now,
+          { publish: false }
+        );
+        for (const closed of outcome.results.filter((item) => item.closed)) {
+          const entry = targetEntries.find((item) => item.clockUid === closed.clockUid);
+          publishAction({
+            type: "clock-out",
+            source,
+            clockUid: closed.clockUid,
+            taskUid: entry?.taskUid
+          });
+        }
+        notify();
+        const retry = outcome.retry ? {
+          ...outcome.retry,
+          action: "auto-clock-out",
+          taskUid,
+          retryClockUids: outcome.pendingClockUids
+        } : null;
+        return {
+          ...outcome,
+          action: "auto-clock-out",
+          source,
+          triggerUid: taskUid,
+          taskUids: [...new Set(affectedTaskUids)],
+          pause: pauseResult,
+          retry
+        };
+      });
+    } catch (error) {
+      notice = GRAPH_UNCERTAIN;
+      const pendingClockUids = running.map((entry) => entry.clockUid);
+      return {
+        action: "auto-clock-out",
+        source,
+        ok: false,
+        triggerUid: taskUid,
+        closed: 0,
+        count: 0,
+        completed: 0,
+        failed: pendingClockUids.length,
+        pending: pendingClockUids.length,
+        pendingClockUids,
+        uncertain: true,
+        partial: false,
+        retry: { action: "auto-clock-out", taskUid, retryClockUids: pendingClockUids },
+        error
+      };
+    }
+  });
+}
+function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+  const seen = /* @__PURE__ */ new Set();
+  let current = taskUid;
+  while (current) {
+    if (current === rootUid)
+      return true;
+    if (seen.has(current)) {
+      throw new GraphReadError("Task hierarchy contains a cycle", {
+        issue: { kind: "hierarchy", source: "parent", message: "Task hierarchy contains a cycle" }
+      });
+    }
+    seen.add(current);
+    current = parentOf[current];
+  }
+  return false;
 }
 async function discardClock(clockUid) {
   return enqueueMutation(
@@ -2854,6 +3131,21 @@ function reset2() {
 }
 
 // src/paused.js
+var paused_exports = {};
+__export(paused_exports, {
+  clear: () => clear,
+  clockOutAll: () => clockOutAll,
+  getNotice: () => getNotice2,
+  getPaused: () => getPaused,
+  getPendingResume: () => getPendingResume,
+  load: () => load2,
+  pauseAll: () => pauseAll,
+  pruneCompleted: () => pruneCompleted,
+  reset: () => reset3,
+  resumeAll: () => resumeAll,
+  resumeOne: () => resumeOne,
+  subscribe: () => subscribe2
+});
 var VERSION2 = STATE_FORMATS.pauseBatch;
 var LEGACY_VERSION = 1;
 var items = [];
@@ -2955,6 +3247,48 @@ function subscribe2(listener) {
 }
 function getPaused() {
   return items.map((item) => ({ ...item }));
+}
+function getPendingResume() {
+  return pendingResume.map((item) => ({ ...item }));
+}
+function pruneCompleted(taskUids = []) {
+  const completedTaskUids = [...new Set(taskUids.filter((uid) => typeof uid === "string" && uid))];
+  if (unsupportedRaw2 !== null) {
+    notice3 = "Saved paused-task state is unsupported; completed Tasks were not pruned.";
+    notify2();
+    return {
+      action: "prune-completed-paused",
+      ok: false,
+      completedTaskUids,
+      removed: 0,
+      removedPaused: 0,
+      removedPending: 0,
+      uncertain: true,
+      error: new Error(notice3)
+    };
+  }
+  const scope = new Set(completedTaskUids);
+  const previousItems = items.length;
+  const previousPending = pendingResume.length;
+  items = items.filter((item) => !scope.has(item.taskUid));
+  pendingResume = pendingResume.filter((item) => !scope.has(item.taskUid));
+  const removedPaused = previousItems - items.length;
+  const removedPending = previousPending - pendingResume.length;
+  if (removedPaused > 0 || removedPending > 0) {
+    notice3 = "";
+    persist();
+    notify2();
+  }
+  return {
+    action: "prune-completed-paused",
+    ok: true,
+    completedTaskUids,
+    removed: removedPaused + removedPending,
+    removedPaused,
+    removedPending,
+    uncertain: false,
+    error: null
+  };
 }
 function getNotice2() {
   return notice3;
@@ -3435,6 +3769,16 @@ async function resumeOne(taskUid, { now = /* @__PURE__ */ new Date() } = {}) {
   try {
     await resumeRecord(valid, now);
   } catch (error) {
+    if (error?.code === "done-ancestor") {
+      const cleanup = pruneCompleted([taskUid]);
+      notice3 = "The paused Session was under a completed Task and was not resumed.";
+      notify2();
+      return resumeOneResult({
+        reconciled: true,
+        pruned: cleanup.removed,
+        completedTaskUids: [taskUid]
+      });
+    }
     notice3 = error?.uncertain ? GRAPH_UNCERTAIN : error?.message || "The paused Session could not be resumed.";
     notify2();
     return resumeOneResult({
@@ -3486,6 +3830,7 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let satisfied = 0;
   let uncertain = 0;
   let reconciled = 0;
+  let completedPruned = 0;
   for (const pending of recovered.legacyToCreate) {
     const valid = existingTask(pending);
     if (valid?.uncertain) {
@@ -3573,6 +3918,11 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
         legacyRecovered += 1;
       completedTasks.add(record.taskUid);
     } catch (error) {
+      if (error?.code === "done-ancestor") {
+        completedPruned += pruneCompleted([record.taskUid]).removed;
+        completedTasks.add(record.taskUid);
+        continue;
+      }
       failed += 1;
       retained.push(record);
       console.error("[roam-logbook] could not resume task", record.taskUid, error);
@@ -3591,6 +3941,11 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
   if (pruned > 0)
     messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
+  if (completedPruned > 0) {
+    messages.push(
+      `${completedPruned} paused Session${completedPruned === 1 ? " was" : "s were"} under a completed Task and not resumed.`
+    );
+  }
   if (failed > 0)
     messages.push(`${failed} Task${failed === 1 ? "" : "s"} could not be resumed.`);
   if (uncertain > 0) {
@@ -3622,6 +3977,7 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     uncertain: mutationUncertain,
     error: firstError,
     pruned,
+    completedPruned,
     satisfied,
     blocked: false,
     legacyRecovery,
@@ -3709,6 +4065,19 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
       writtenClockUids: outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
     }
   };
+}
+function clear() {
+  if (unsupportedRaw2 !== null) {
+    notice3 = "Saved paused-task state is unsupported and was kept.";
+    notify2();
+    return false;
+  }
+  items = [];
+  pendingResume = [];
+  notice3 = "";
+  persist();
+  notify2();
+  return true;
 }
 function reset3() {
   items = [];
@@ -6361,6 +6730,128 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   };
 }
 
+// src/completion.js
+function attachCompletionHandling({ pauseApi = null } = {}) {
+  let disposed = false;
+  const watches = /* @__PURE__ */ new Map();
+  const active = /* @__PURE__ */ new Set();
+  let pending = /* @__PURE__ */ new Set();
+  let scheduled = false;
+  const detachAll = () => {
+    for (const watch of watches.values())
+      watch.detach();
+    watches.clear();
+  };
+  const schedule = (uid) => {
+    if (disposed || active.has(uid))
+      return;
+    pending.add(uid);
+    if (scheduled)
+      return;
+    scheduled = true;
+    Promise.resolve().then(async () => {
+      while (!disposed && pending.size > 0) {
+        const current = [...pending];
+        pending = /* @__PURE__ */ new Set();
+        for (const taskUid of current) {
+          if (active.has(taskUid))
+            continue;
+          active.add(taskUid);
+          try {
+            await clockOutCompletedTask(taskUid, {
+              source: "auto-complete",
+              getPauseTaskUids: () => [
+                ...pauseApi?.getPaused?.() || [],
+                ...pauseApi?.getPendingResume?.() || []
+              ].map((item) => item.taskUid),
+              pruneCompleted: (taskUids) => pauseApi?.pruneCompleted?.(taskUids)
+            });
+          } catch (error) {
+            console.error("[roam-logbook] automatic completion action failed", error);
+          } finally {
+            active.delete(taskUid);
+          }
+        }
+      }
+      scheduled = false;
+    }).catch((error) => {
+      scheduled = false;
+      console.error("[roam-logbook] automatic completion reconciliation failed", error);
+    });
+  };
+  const sync = (entries) => {
+    if (disposed || !Array.isArray(entries))
+      return;
+    const pauseTaskUids = [
+      ...pauseApi?.getPaused?.() || [],
+      ...pauseApi?.getPendingResume?.() || []
+    ].map((item) => item.taskUid);
+    const seeds = [
+      ...new Set([...entries.map((entry) => entry.taskUid), ...pauseTaskUids].filter(Boolean))
+    ];
+    let hierarchy;
+    try {
+      hierarchy = readHierarchy(seeds);
+    } catch (error) {
+      console.warn("[roam-logbook] completion hierarchy could not be confirmed", error);
+      return;
+    }
+    if (hierarchy.issues.length > 0) {
+      console.warn("[roam-logbook] completion hierarchy is ambiguous; watches were retained");
+      return;
+    }
+    const desired = new Set(seeds);
+    for (const seed of seeds) {
+      const seen = /* @__PURE__ */ new Set();
+      let current = seed;
+      while (current && hierarchy.parentOf[current]) {
+        if (seen.has(current)) {
+          console.warn("[roam-logbook] completion hierarchy contains a cycle", seed);
+          return;
+        }
+        seen.add(current);
+        current = hierarchy.parentOf[current];
+        desired.add(current);
+      }
+    }
+    for (const uid of desired) {
+      if (watches.has(uid))
+        continue;
+      const result = watchBlockString(uid, () => schedule(uid));
+      if (result.ok)
+        watches.set(uid, result);
+      else
+        console.warn("[roam-logbook] completion watch unavailable", uid, result.error);
+    }
+    for (const [uid, watch] of watches) {
+      if (!desired.has(uid)) {
+        watch.detach();
+        watches.delete(uid);
+      }
+    }
+    const statusOf = new Map([
+      ...entries.map((entry) => [entry.taskUid, entry.status]),
+      ...Object.entries(hierarchy.stringOf).map(([uid, string]) => [
+        uid,
+        taskStatus(string)
+      ])
+    ]);
+    for (const uid of desired) {
+      if (statusOf.get(uid) === "DONE")
+        schedule(uid);
+    }
+  };
+  const unsubscribe = subscribe(sync);
+  return () => {
+    if (disposed)
+      return;
+    disposed = true;
+    pending.clear();
+    unsubscribe();
+    detachAll();
+  };
+}
+
 // src/extension.js
 var CONTEXT_CLOCK_IN = "Logbook: Clock in";
 var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
@@ -6382,6 +6873,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
   });
   let destroyed = false;
   let detachPomodoro = null;
+  let detachCompletion = null;
   const targetString = (context) => {
     const uid = resolveTaskUid(context?.["block-uid"]);
     return getBlockString(uid) ?? context?.["block-string"] ?? "";
@@ -6539,6 +7031,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       load();
       load2();
       detachPomodoro = attach();
+      detachCompletion = attachCompletionHandling({ pauseApi: paused_exports });
       topbar.mount();
       refresh();
     },
@@ -6547,6 +7040,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
         return;
       destroyed = true;
       confirmation.reset();
+      detachCompletion?.();
+      detachCompletion = null;
       detachPomodoro?.();
       detachPomodoro = null;
       reset2();

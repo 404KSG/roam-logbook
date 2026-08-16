@@ -6,9 +6,9 @@
  * graph instance, and each queued action re-reads before it writes.
  */
 
-import { readAllEntries } from './entries.js';
-import { DRAWER_LABEL, formatClockLine, isDrawerBlock } from './org.js';
-import { createBlock, deleteBlock, GraphReadError, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
+import { readAllEntries, readHierarchy } from './entries.js';
+import { DRAWER_LABEL, formatClockLine, isDrawerBlock, taskStatus } from './org.js';
+import { createBlock, deleteBlock, GraphReadError, getBlockString, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
 import { enqueueMutation, resetMutationQueue } from './mutations.js';
 import { allowMultipleClocks } from './settings.js';
 
@@ -199,6 +199,40 @@ export function resolveTaskUid(uid) {
     return resolveReferencedUid(uid);
 }
 
+function doneAncestorFor(taskUid) {
+    const taskString = getBlockString(taskUid);
+    if (taskStatus(taskString) === 'DONE') return taskUid;
+    const hierarchy = readHierarchy([taskUid]);
+    if (hierarchy.issues.length > 0) {
+        throw new GraphReadError('Task hierarchy could not be confirmed before Clock In', {
+            issue: {
+                kind: 'hierarchy',
+                source: 'parent',
+                message: 'Task hierarchy could not be confirmed before Clock In',
+                affectedUids: [taskUid],
+            },
+        });
+    }
+    const seen = new Set();
+    let current = taskUid;
+    while (current && hierarchy.parentOf[current]) {
+        if (seen.has(current)) {
+            throw new GraphReadError('Task hierarchy contains a cycle before Clock In', {
+                issue: {
+                    kind: 'hierarchy',
+                    source: 'parent',
+                    message: 'Task hierarchy contains a cycle before Clock In',
+                    affectedUids: [taskUid],
+                },
+            });
+        }
+        seen.add(current);
+        current = hierarchy.parentOf[current];
+        if (taskStatus(hierarchy.stringOf[current]) === 'DONE') return current;
+    }
+    return null;
+}
+
 /** The task's LOGBOOK drawer, created directly under the task if missing. */
 async function ensureDrawer(taskUid) {
     const children = getChildren(taskUid);
@@ -303,6 +337,16 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             // from both deciding that the task is free.
             const entries = readAllEntries();
             const open = entries.filter(entry => entry.running);
+            const doneAncestorUid = doneAncestorFor(taskUid);
+            if (doneAncestorUid) {
+                const error = new Error(
+                    `Cannot Clock In under DONE Task ${doneAncestorUid}; reopen it first.`
+                );
+                error.code = 'done-ancestor';
+                error.taskUid = taskUid;
+                error.doneAncestorUid = doneAncestorUid;
+                throw error;
+            }
             if (allowMultipleClocks()) {
                 if (open.some(entry => entry.taskUid === taskUid)) {
                     refresh();
@@ -543,6 +587,161 @@ export async function clockOutBlock(blockUid, { now = new Date(), source = 'user
             return result?.closed === true;
         })
     );
+}
+
+/**
+ * Automatically close a completed Task's own and confirmed descendant Sessions.
+ *
+ * The caller may provide Pause Batch hooks, but the graph scope is always
+ * confirmed here from a fresh hierarchy read while inside the mutation queue.
+ */
+export async function clockOutCompletedTask(
+    taskUid,
+    {
+        now = new Date(),
+        source = 'auto-complete',
+        getPauseTaskUids = null,
+        pruneCompleted = null,
+    } = {}
+) {
+    return enqueueMutation(async () => {
+        try {
+            return await withGraphGuard(async () => {
+                const entries = readAllEntries();
+                const runningEntries = entries.filter(entry => entry.running);
+                const pauseTaskUids = getPauseTaskUids ? getPauseTaskUids() : [];
+                if (!Array.isArray(pauseTaskUids)) {
+                    throw new GraphReadError('Paused Task scope could not be confirmed');
+                }
+                const taskUids = [
+                    ...new Set([
+                        taskUid,
+                        ...runningEntries.map(entry => entry.taskUid),
+                        ...pauseTaskUids,
+                    ].filter(Boolean)),
+                ];
+                const hierarchy = readHierarchy(taskUids);
+                if (hierarchy.issues.length > 0) {
+                    throw new GraphReadError('Task hierarchy could not be confirmed for automatic Clock Out', {
+                        issue: {
+                            kind: 'hierarchy',
+                            source: 'parent',
+                            message: 'Task hierarchy could not be confirmed for automatic Clock Out',
+                            affectedUids: taskUids,
+                        },
+                    });
+                }
+                const stringOf = new Map([
+                    ...entries.map(entry => [entry.taskUid, entry.taskString]),
+                    ...Object.entries(hierarchy.stringOf),
+                ]);
+                const taskString = stringOf.get(taskUid) ?? getBlockString(taskUid);
+                if (taskStatus(taskString) !== 'DONE') {
+                    return {
+                        action: 'auto-clock-out',
+                        source,
+                        ok: true,
+                        skipped: true,
+                        reason: 'task-not-done',
+                        triggerUid: taskUid,
+                        closed: 0,
+                        count: 0,
+                        completed: 0,
+                        failed: 0,
+                        pending: 0,
+                        pendingClockUids: [],
+                    };
+                }
+
+                const targetEntries = entries.filter(
+                    entry =>
+                        entry.running &&
+                        isTaskInConfirmedTree(entry.taskUid, taskUid, hierarchy.parentOf)
+                );
+                const affectedTaskUids = [
+                    taskUid,
+                    ...targetEntries.map(entry => entry.taskUid),
+                    ...pauseTaskUids.filter(candidate =>
+                        isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
+                    ),
+                ];
+                const pauseResult = pruneCompleted
+                    ? pruneCompleted([...new Set(affectedTaskUids)])
+                    : null;
+                if (pauseResult && pauseResult.ok === false) {
+                    throw pauseResult.error || new GraphReadError('Pause Batch could not be reconciled');
+                }
+                const outcome = await closeEntriesNow(
+                    entries,
+                    targetEntries.map(entry => entry.clockUid),
+                    now,
+                    { publish: false }
+                );
+                for (const closed of outcome.results.filter(item => item.closed)) {
+                    const entry = targetEntries.find(item => item.clockUid === closed.clockUid);
+                    publishAction({
+                        type: 'clock-out',
+                        source,
+                        clockUid: closed.clockUid,
+                        taskUid: entry?.taskUid,
+                    });
+                }
+                notify();
+                const retry = outcome.retry
+                    ? {
+                          ...outcome.retry,
+                          action: 'auto-clock-out',
+                          taskUid,
+                          retryClockUids: outcome.pendingClockUids,
+                      }
+                    : null;
+                return {
+                    ...outcome,
+                    action: 'auto-clock-out',
+                    source,
+                    triggerUid: taskUid,
+                    taskUids: [...new Set(affectedTaskUids)],
+                    pause: pauseResult,
+                    retry,
+                };
+            });
+        } catch (error) {
+            notice = GRAPH_UNCERTAIN;
+            const pendingClockUids = running.map(entry => entry.clockUid);
+            return {
+                action: 'auto-clock-out',
+                source,
+                ok: false,
+                triggerUid: taskUid,
+                closed: 0,
+                count: 0,
+                completed: 0,
+                failed: pendingClockUids.length,
+                pending: pendingClockUids.length,
+                pendingClockUids,
+                uncertain: true,
+                partial: false,
+                retry: { action: 'auto-clock-out', taskUid, retryClockUids: pendingClockUids },
+                error,
+            };
+        }
+    });
+}
+
+function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+    const seen = new Set();
+    let current = taskUid;
+    while (current) {
+        if (current === rootUid) return true;
+        if (seen.has(current)) {
+            throw new GraphReadError('Task hierarchy contains a cycle', {
+                issue: { kind: 'hierarchy', source: 'parent', message: 'Task hierarchy contains a cycle' },
+            });
+        }
+        seen.add(current);
+        current = parentOf[current];
+    }
+    return false;
 }
 
 /**

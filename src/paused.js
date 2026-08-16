@@ -149,6 +149,54 @@ export function getPendingResume() {
     return pendingResume.map(item => ({ ...item }));
 }
 
+/**
+ * Remove Pause Batch records whose Tasks were confirmed DONE by the caller.
+ *
+ * The completion coordinator supplies a confirmed scope; this API deliberately
+ * does not infer hierarchy on its own. That keeps pause state changes aligned
+ * with the same graph snapshot used before automatic Clock Out.
+ */
+export function pruneCompleted(taskUids = []) {
+    const completedTaskUids = [...new Set(taskUids.filter(uid => typeof uid === 'string' && uid))];
+    if (unsupportedRaw !== null) {
+        notice = 'Saved paused-task state is unsupported; completed Tasks were not pruned.';
+        notify();
+        return {
+            action: 'prune-completed-paused',
+            ok: false,
+            completedTaskUids,
+            removed: 0,
+            removedPaused: 0,
+            removedPending: 0,
+            uncertain: true,
+            error: new Error(notice),
+        };
+    }
+
+    const scope = new Set(completedTaskUids);
+    const previousItems = items.length;
+    const previousPending = pendingResume.length;
+    items = items.filter(item => !scope.has(item.taskUid));
+    pendingResume = pendingResume.filter(item => !scope.has(item.taskUid));
+    const removedPaused = previousItems - items.length;
+    const removedPending = previousPending - pendingResume.length;
+    if (removedPaused > 0 || removedPending > 0) {
+        notice = '';
+        persist();
+        notify();
+    }
+    return {
+        action: 'prune-completed-paused',
+        ok: true,
+        completedTaskUids,
+        removed: removedPaused + removedPending,
+        removedPaused,
+        removedPending,
+        uncertain: false,
+        error: null,
+    };
+}
+
 export function getNotice() {
     return notice;
 }
@@ -689,6 +737,16 @@ export async function resumeOne(taskUid, { now = new Date() } = {}) {
     try {
         await resumeRecord(valid, now);
     } catch (error) {
+        if (error?.code === 'done-ancestor') {
+            const cleanup = pruneCompleted([taskUid]);
+            notice = 'The paused Session was under a completed Task and was not resumed.';
+            notify();
+            return resumeOneResult({
+                reconciled: true,
+                pruned: cleanup.removed,
+                completedTaskUids: [taskUid],
+            });
+        }
         notice = error?.uncertain ? clock.GRAPH_UNCERTAIN : error?.message || 'The paused Session could not be resumed.';
         notify();
         return resumeOneResult({
@@ -748,6 +806,7 @@ export async function resumeAll({ now = new Date() } = {}) {
     let satisfied = 0;
     let uncertain = 0;
     let reconciled = 0;
+    let completedPruned = 0;
 
     for (const pending of recovered.legacyToCreate) {
         const valid = existingTask(pending);
@@ -839,6 +898,11 @@ export async function resumeAll({ now = new Date() } = {}) {
             if (record.legacy === true) legacyRecovered += 1;
             completedTasks.add(record.taskUid);
         } catch (error) {
+            if (error?.code === 'done-ancestor') {
+                completedPruned += pruneCompleted([record.taskUid]).removed;
+                completedTasks.add(record.taskUid);
+                continue;
+            }
             failed += 1;
             retained.push(record);
             console.error('[roam-logbook] could not resume task', record.taskUid, error);
@@ -857,6 +921,11 @@ export async function resumeAll({ now = new Date() } = {}) {
     const messages = [];
     if (enabledMultiple) messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
     if (pruned > 0) messages.push(`${pruned} missing Task${pruned === 1 ? ' was' : 's were'} removed.`);
+    if (completedPruned > 0) {
+        messages.push(
+            `${completedPruned} paused Session${completedPruned === 1 ? ' was' : 's were'} under a completed Task and not resumed.`
+        );
+    }
     if (failed > 0) messages.push(`${failed} Task${failed === 1 ? '' : 's'} could not be resumed.`);
     if (uncertain > 0) {
         messages.push(
@@ -887,6 +956,7 @@ export async function resumeAll({ now = new Date() } = {}) {
         uncertain: mutationUncertain,
         error: firstError,
         pruned,
+        completedPruned,
         satisfied,
         blocked: false,
         legacyRecovery,

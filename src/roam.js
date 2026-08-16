@@ -141,6 +141,78 @@ export function getBlockString(uid) {
 }
 
 /**
+ * Watch one block's graph text through Roam's Pull Watch API.
+ *
+ * The returned detach function is safe to call more than once. Installation and
+ * removal are explicit results because a missing or throwing Pull Watch API must
+ * never be mistaken for a healthy watcher.
+ */
+export function watchBlockString(uid, onChange) {
+    const add = resolve(null, 'addPullWatch');
+    const remove = resolve(null, 'removePullWatch');
+    const pattern = '[:block/string]';
+    const entity = `[:block/uid ${JSON.stringify(uid)}]`;
+    let detached = false;
+
+    const installationError =
+        typeof uid !== 'string' || uid.length === 0
+            ? new Error('Pull Watch requires a block UID')
+            : typeof onChange !== 'function'
+              ? new Error('Pull Watch requires a change callback')
+              : !add
+                ? new Error('roamAlphaAPI addPullWatch unavailable')
+                : null;
+
+    if (installationError) {
+        return {
+            ok: false,
+            uid,
+            error: installationError,
+            detach: () => ({ ok: false, detached: false, error: installationError }),
+        };
+    }
+
+    const handler = (before, after) => {
+        try {
+            onChange({ uid, before, after });
+        } catch (error) {
+            console.error('[roam-logbook] pull-watch callback failed', error);
+        }
+    };
+
+    try {
+        add(pattern, entity, handler);
+    } catch (error) {
+        return {
+            ok: false,
+            uid,
+            error,
+            detach: () => ({ ok: false, detached: false, error }),
+        };
+    }
+
+    return {
+        ok: true,
+        uid,
+        detach: () => {
+            if (detached) return { ok: true, detached: false };
+            detached = true;
+            if (!remove) {
+                const error = new Error('roamAlphaAPI removePullWatch unavailable');
+                return { ok: false, detached: false, error };
+            }
+            try {
+                remove(pattern, entity, handler);
+                return { ok: true, detached: true };
+            } catch (error) {
+                detached = false;
+                return { ok: false, detached: false, error };
+            }
+        },
+    };
+}
+
+/**
  * Follow a block that is nothing but a `((reference))` through to what it points at.
  *
  * A bare reference is transparent everywhere in this extension: clocking one logs

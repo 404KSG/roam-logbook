@@ -211,10 +211,11 @@ const readBlockStrings = uids => {
  * @property {Record<string,string[]>} mirrorsOf  task uid → blocks that are pure
  *   references to it, so a task referenced under another task rolls up there too
  *
- * Only tasks that actually carry clock entries are looked up, which keeps this to
- * a handful of small queries no matter how large the graph is. The flip side is
- * that a *parent* task's own mirrors are not followed — a second-order case left
- * for a later pass.
+ * Only supplied seed tasks and their ancestors are looked up, which keeps this
+ * to a handful of small queries no matter how large the graph is. Callers may
+ * seed paused or pending-resume Tasks as well as Tasks with clock entries. The
+ * flip side is that a *parent* task's own mirrors are not followed — a
+ * second-order case left for a later pass.
  */
 export function readHierarchy(taskUids) {
     const parentOf = {};
@@ -260,6 +261,23 @@ export function readHierarchy(taskUids) {
             .map(([, , rawParentString]) => referencedBlockUid(rawParentString))
             .filter(Boolean);
         const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
+        const parentChoices = new Map();
+        for (const [uid, rawParentUid] of parentRows) {
+            const choices = parentChoices.get(uid) || new Set();
+            choices.add(rawParentUid);
+            parentChoices.set(uid, choices);
+        }
+        for (const [uid, choices] of parentChoices) {
+            if (choices.size > 1) {
+                issues.push({
+                    code: 'ambiguous-parent',
+                    taskUid: uid,
+                    title: `Ambiguous parent · ${uid}`,
+                    rawClock: '',
+                    message: `Task ${uid} has more than one confirmed parent; hierarchy roll-up was withheld.`,
+                });
+            }
+        }
         for (const [uid, rawParentUid, rawParentString] of parentRows) {
             // Sub-tasks are routinely written under a `((reference))` to a task
             // rather than under the task itself — pulling a task into a daily note
@@ -286,6 +304,28 @@ export function readHierarchy(taskUids) {
             next.push(parentUid);
         }
         frontier = next;
+    }
+
+    // A malformed graph can point an ancestor back into the same chain. Keep the
+    // map useful for diagnostics, but make the ambiguity explicit to callers that
+    // must not guess a cascade scope.
+    for (const uid of Object.keys(parentOf)) {
+        const seen = new Set();
+        let current = uid;
+        while (current && parentOf[current]) {
+            if (seen.has(current)) {
+                issues.push({
+                    code: 'cyclic-parent',
+                    taskUid: uid,
+                    title: `Cyclic parent · ${uid}`,
+                    rawClock: '',
+                    message: `Task hierarchy for ${uid} contains a cycle; cascade scope was withheld.`,
+                });
+                break;
+            }
+            seen.add(current);
+            current = parentOf[current];
+        }
     }
 
     return { parentOf, stringOf, mirrorsOf, issues };

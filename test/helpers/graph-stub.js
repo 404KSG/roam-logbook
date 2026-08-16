@@ -12,6 +12,7 @@ let nextUid = 0;
 export function installGraph(blocks = []) {
     nextUid = 0;
     const store = new Map();
+    const pullWatches = new Map();
 
     for (const block of blocks) {
         store.set(block.uid, {
@@ -86,6 +87,22 @@ export function installGraph(blocks = []) {
         util: { generateUID: () => `uid${++nextUid}` },
         data: {
             q,
+            addPullWatch: (pattern, entity, callback) => {
+                const match = String(entity).match(/\[:block\/uid\s+"([^"]+)"\]/);
+                if (!match) throw new Error(`graph-stub: unsupported pull-watch entity ${entity}`);
+                const uid = match[1];
+                const watchers = pullWatches.get(uid) || new Set();
+                watchers.add(callback);
+                pullWatches.set(uid, watchers);
+            },
+            removePullWatch: (pattern, entity, callback) => {
+                const match = String(entity).match(/\[:block\/uid\s+"([^"]+)"\]/);
+                if (!match) throw new Error(`graph-stub: unsupported pull-watch entity ${entity}`);
+                const uid = match[1];
+                const watchers = pullWatches.get(uid);
+                watchers?.delete(callback);
+                if (watchers?.size === 0) pullWatches.delete(uid);
+            },
             block: {
                 create: async ({ location, block }) => {
                     store.set(block.uid, {
@@ -98,7 +115,13 @@ export function installGraph(blocks = []) {
                 },
                 update: async ({ block }) => {
                     const existing = store.get(block.uid);
-                    if (existing) existing.string = block.string;
+                    if (!existing) return;
+                    const before = { ':block/string': existing.string };
+                    existing.string = block.string;
+                    const after = { ':block/string': block.string };
+                    for (const callback of [...(pullWatches.get(block.uid) || [])]) {
+                        callback(before, after);
+                    }
                 },
                 delete: async ({ block }) => {
                     for (const child of childrenOf(block.uid)) store.delete(child.uid);
@@ -117,7 +140,13 @@ export function installGraph(blocks = []) {
     if (globalThis.window) globalThis.window.roamAlphaAPI = api;
     else globalThis.window = { roamAlphaAPI: api };
 
-    return { store, childrenOf, api };
+    return {
+        store,
+        childrenOf,
+        api,
+        pullWatchCount: () => [...pullWatches.values()].reduce((count, watchers) => count + watchers.size, 0),
+        pullWatchUids: () => [...pullWatches.keys()],
+    };
 }
 
 export function uninstallGraph() {
