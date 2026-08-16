@@ -416,6 +416,65 @@ test('Dashboard exposes one semantic overview with four metrics', () => {
     dashboard.destroy();
 });
 
+test('Dashboard overview names the active date range without abstract helper copy', () => {
+    graph = installGraph([
+        { uid: 'range-week-task', string: '{{[[TODO]]}} Week task', parent: null },
+        { uid: 'range-week-drawer', string: 'LOGBOOK::', parent: 'range-week-task' },
+        {
+            uid: 'range-week-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 09:30] => 0:30',
+            parent: 'range-week-drawer',
+        },
+        { uid: 'range-month-task', string: '{{[[TODO]]}} Month task', parent: null },
+        { uid: 'range-month-drawer', string: 'LOGBOOK::', parent: 'range-month-task' },
+        {
+            uid: 'range-month-clock',
+            string: 'CLOCK:: [2026-08-01 Sat 09:00]--[2026-08-01 Sat 09:30] => 0:30',
+            parent: 'range-month-drawer',
+        },
+        { uid: 'range-all-task', string: '{{[[TODO]]}} All-time task', parent: null },
+        { uid: 'range-all-drawer', string: 'LOGBOOK::', parent: 'range-all-task' },
+        {
+            uid: 'range-all-clock',
+            string: 'CLOCK:: [2026-01-01 Thu 09:00]--[2026-01-01 Thu 09:30] => 0:30',
+            parent: 'range-all-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const metric = label =>
+        [...document.querySelectorAll('.rlb-overview__item')].find(
+            item => item.querySelector('.rlb-overview__label')?.textContent === label
+        );
+    const context = label => metric(label)?.querySelector('.rlb-overview__context')?.textContent;
+    const assertNoAbstractRangeCopy = () => {
+        assert.doesNotMatch(document.documentElement.outerHTML, /selected range/i);
+    };
+
+    assert.equal(context('Last 7 days'), undefined, 'the total already names its range');
+    assert.equal(context('Sessions'), 'Last 7 days');
+    assert.equal(context('Tasks tracked'), 'Last 7 days');
+    assertNoAbstractRangeCopy();
+
+    const range = document.querySelector('.rlb-header select');
+    range.value = 'month';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(context('Last 30 days'), undefined);
+    assert.equal(context('Sessions'), 'Last 30 days');
+    assert.equal(context('Tasks tracked'), 'Last 30 days');
+    assertNoAbstractRangeCopy();
+
+    range.value = 'all';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(context('All time'), undefined);
+    assert.equal(context('Sessions'), 'All time');
+    assert.equal(context('Tasks tracked'), 'All time');
+    assertNoAbstractRangeCopy();
+
+    dashboard.destroy();
+});
+
 test('beta.10 zero-time overview uses a quiet empty context instead of a primary visual', () => {
     const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
     dashboard.open();

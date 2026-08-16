@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0-beta.20 — 2026-08-16
+
+- Replaced the Dashboard overview's abstract `selected range` helper copy with the active date-range name on Sessions and Tasks tracked (`Last 7 days`, `Last 30 days`, or `All time`).
+- Removed the duplicate helper from the current-range total card because its label already names the range; Today keeps its active-Session context and all other Dashboard behavior is unchanged.
+- Added default-range, range-switch, All time, and DOM/ARIA copy-cleanliness coverage.
+
 ## 0.9.0-beta.19 — 2026-08-16
 
 - Removed the Dashboard's secondary Analytics/chart view, toggle, chart-only aggregation, rendering, styles, and coverage. The Dashboard is now one compact surface with overview metrics, Running Sessions, By Task rollups, date range, Refresh, and Close controls.

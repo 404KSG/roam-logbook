@@ -322,9 +322,9 @@ export function createDashboard({
                 : 'No active Sessions';
         const metrics = [
             ['Today', formatMinutesHuman(model.todayMinutes), todayContext, 'today'],
-            [rangeLabel, formatMinutesHuman(model.totalMinutes), 'selected range', 'selected'],
-            ['Sessions', String(model.sessionMetrics?.sessions || 0), 'selected range', 'sessions'],
-            ['Tasks tracked', String(model.tasks.length), 'selected range', 'tasks'],
+            [rangeLabel, formatMinutesHuman(model.totalMinutes), null, 'selected'],
+            ['Sessions', String(model.sessionMetrics?.sessions || 0), rangeLabel, 'sessions'],
+            ['Tasks tracked', String(model.tasks.length), rangeLabel, 'tasks'],
         ];
         for (const [label, value, context, key] of metrics) {
             const item = el('div', 'rlb-overview__item rlb-overview__panel');
@@ -332,7 +332,8 @@ export function createDashboard({
             const valueNode = el('dd', 'rlb-overview__value');
             const number = el('span', 'rlb-overview__number', value);
             number.dataset.liveMetric = key;
-            valueNode.append(number, el('span', 'rlb-overview__context', context));
+            valueNode.append(number);
+            if (context) valueNode.append(el('span', 'rlb-overview__context', context));
             heading.append(el('dt', 'rlb-overview__label', label), valueNode);
             item.appendChild(heading);
             wrapper.appendChild(item);
