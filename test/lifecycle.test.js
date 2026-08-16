@@ -149,6 +149,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
     assert.match(css, /\.rlb-surface__refresh-cell[^}]*grid-column: 2[^}]*grid-row: 2/s);
     assert.match(css, /\.rlb-surface__refresh-cell \.rlb-surface__refresh[^}]*min-width: var\(--rlb-surface-action-height\)[^}]*min-height: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-popover__footer--empty\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) 40px[^}]*grid-template-rows: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-popover__footer--empty \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 2[^}]*grid-row: 1[^}]*width: 40px/s);
     assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
     assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
 });

@@ -664,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.14";
+var PLUGIN_VERSION = "0.9.0-beta.15";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -2092,7 +2092,12 @@ function createDashboard({
     const hierarchy = lastHierarchy || {};
     const transientIssues = lastTransientIssues;
     const refreshNotice = lastRefreshNotice;
-    summaryNode.replaceChildren(overviewBar(model, now));
+    const analytics = view === "analytics";
+    summaryNode.hidden = analytics;
+    summaryNode.setAttribute("aria-hidden", String(analytics));
+    summaryNode.replaceChildren();
+    if (!analytics)
+      summaryNode.appendChild(overviewBar(model, now));
     bodyNode.replaceChildren();
     if (refreshNotice) {
       const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
@@ -2104,7 +2109,7 @@ function createDashboard({
       ...(hierarchy.issues || []).map(issueRow),
       ...transientIssues.map(issueRow)
     ];
-    if (view === "analytics") {
+    if (analytics) {
       bodyNode.appendChild(analyticsSection(model, now));
       if (issues.length > 0)
         bodyNode.appendChild(dataIssuesSection(issues));
@@ -2140,6 +2145,8 @@ function createDashboard({
     } catch (error) {
       transientIssues = error.issue ? [error.issue] : error.issues || [];
       if (!lastSnapshot) {
+        summaryNode.hidden = false;
+        summaryNode.setAttribute("aria-hidden", "false");
         summaryNode.replaceChildren();
         const notice4 = el(
           "div",
@@ -2244,14 +2251,33 @@ function createDashboard({
   };
   const activityChart = (model, now) => {
     const section = el("section", "rlb-analytics__chart rlb-dashboard-panel");
-    const title = el("h3", "rlb-analytics__section-title", `Activity \xB7 ${model.activityLabel}`);
-    section.appendChild(title);
+    const heading = el("div", "rlb-analytics__activity-header");
+    const titleGroup = el("div", "rlb-analytics__activity-heading");
+    titleGroup.append(
+      el("h3", "rlb-analytics__section-title", "Activity"),
+      el("span", "rlb-analytics__activity-range", model.activityLabel)
+    );
+    const focus = el("div", "rlb-analytics__focus");
+    focus.append(
+      el("span", "rlb-analytics__focus-label", "Focus time"),
+      (() => {
+        const value = el(
+          "strong",
+          "rlb-analytics__focus-value",
+          formatMinutesHuman(model.sessionMetrics?.focusMinutes || model.totalMinutes)
+        );
+        value.dataset.liveMetric = "focus";
+        return value;
+      })()
+    );
+    heading.append(titleGroup, focus);
+    section.appendChild(heading);
     const series = model.activity || [];
     const titleId = "roam-logbook-activity-title";
     const descriptionId = "roam-logbook-activity-description";
     const svg = svgNode("svg", {
       class: "rlb-analytics__svg",
-      viewBox: "0 0 760 236",
+      viewBox: "0 0 760 190",
       role: "img",
       "aria-labelledby": `${titleId} ${descriptionId}`,
       preserveAspectRatio: "none"
@@ -2267,23 +2293,31 @@ function createDashboard({
     const peak = Math.max(1, ...series.map((day) => day.minutes));
     const left = 18;
     const chartWidth = 724;
-    const chartHeight = 154;
-    const barWidth = series.length > 0 ? Math.min(28, Math.max(8, chartWidth / series.length - 8)) : 12;
-    const labelStep = series.length <= 7 ? 1 : series.length <= 14 ? 2 : 5;
+    const chartHeight = 124;
+    const baseline = chartHeight + 8;
+    const barWidth = series.length > 0 ? Math.min(16, Math.max(8, chartWidth / series.length - 8)) : 12;
+    const labelCount = Math.min(7, series.length);
+    const labelIndexes = /* @__PURE__ */ new Set();
+    if (labelCount > 0) {
+      for (let label = 0; label < labelCount; label += 1) {
+        const denominator = Math.max(1, labelCount - 1);
+        labelIndexes.add(Math.round(label * (series.length - 1) / denominator));
+      }
+    }
     svg.appendChild(
       svgNode("line", {
         class: "rlb-analytics__axis",
         x1: left,
-        y1: chartHeight + 8,
+        y1: baseline,
         x2: left + chartWidth,
-        y2: chartHeight + 8
+        y2: baseline
       })
     );
     series.forEach((day, index) => {
       const slot = chartWidth / Math.max(1, series.length);
       const x = left + slot * index + (slot - barWidth) / 2;
       const height = day.minutes === 0 ? 3 : Math.max(8, day.minutes / peak * chartHeight);
-      const y = chartHeight + 8 - height;
+      const y = baseline - height;
       const rect = svgNode("rect", {
         class: day.minutes === 0 ? "rlb-analytics__bar rlb-analytics__bar--empty" : "rlb-analytics__bar",
         x,
@@ -2296,11 +2330,11 @@ function createDashboard({
       });
       rect.appendChild(svgNode("title", {}, `${day.key} \xB7 ${formatMinutesHuman(day.minutes)}`));
       svg.appendChild(rect);
-      if (index % labelStep === 0 || index === series.length - 1) {
+      if (labelIndexes.has(index)) {
         svg.appendChild(
           svgNode(
             "text",
-            { class: "rlb-analytics__label", x: x + barWidth / 2, y: 206, "text-anchor": "middle" },
+            { class: "rlb-analytics__label", x: x + barWidth / 2, y: 166, "text-anchor": "middle" },
             formatDayLabel(day.date, now)
           )
         );
@@ -2308,36 +2342,16 @@ function createDashboard({
     });
     section.appendChild(svg);
     if (series.length === 0 || series.every((day) => day.minutes === 0)) {
-      section.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range yet."));
+      section.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range."));
     }
     return section;
-  };
-  const analyticsMetric = (label, value, key, context = "") => {
-    const item = el("div", "rlb-analytics__metric");
-    item.appendChild(el("dt", "rlb-analytics__metric-label", label));
-    const valueNode = el("dd", "rlb-analytics__metric-value", value);
-    if (key)
-      valueNode.dataset.liveMetric = key;
-    item.append(valueNode, el("span", "rlb-analytics__metric-context", context));
-    return item;
-  };
-  const analyticsKpis = (model, metrics) => {
-    const list = el("dl", "rlb-analytics__kpis");
-    list.append(
-      analyticsMetric("Focus time", formatMinutesHuman(metrics.focusMinutes), "focus", "selected range"),
-      analyticsMetric("Sessions", String(metrics.sessions), "sessions", "selected range"),
-      analyticsMetric("Average session", formatMinutesHuman(metrics.averageMinutes), "average", "per Session"),
-      analyticsMetric("Longest session", formatMinutesHuman(metrics.longestMinutes), "longest", "single Session")
-    );
-    list.setAttribute("aria-label", `${DASHBOARD_TITLE} analytics summary`);
-    return list;
   };
   const taskDistribution = (model) => {
     const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
     panel.appendChild(el("h3", "rlb-analytics__section-title", "Task time distribution"));
     const rows = model.tasks.filter((task) => task.minutes > 0);
-    const top = rows.slice(0, 6);
-    const otherMinutes = rows.slice(6).reduce((sum, task) => sum + task.minutes, 0);
+    const top = rows.slice(0, 5);
+    const otherMinutes = rows.slice(5).reduce((sum, task) => sum + task.minutes, 0);
     if (otherMinutes > 0)
       top.push({ taskUid: null, title: "Other", minutes: otherMinutes });
     const total = rows.reduce((sum, task) => sum + task.minutes, 0);
@@ -2376,19 +2390,21 @@ function createDashboard({
     const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
     panel.appendChild(el("h3", "rlb-analytics__section-title", "Session profile"));
     const profile = el("div", "rlb-analytics__profile");
-    profile.append(
-      profileMetric("Completed", String(metrics.completedSessions)),
-      profileMetric("Running", String(metrics.runningSessions)),
-      profileMetric("Active days", String(metrics.activeDays)),
-      profileMetric("Median session", formatMinutesHuman(metrics.medianMinutes))
-    );
+    if (metrics.sessions === 0) {
+      profile.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range."));
+    } else {
+      profile.append(
+        profileMetric("Sessions", String(metrics.sessions)),
+        profileMetric("Active days", String(metrics.activeDays)),
+        profileMetric("Median session", formatMinutesHuman(metrics.medianMinutes))
+      );
+    }
     panel.appendChild(profile);
     return panel;
   };
   const analyticsSection = (model, now) => {
     const section = el("section", "rlb-analytics");
     const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
-    section.appendChild(analyticsKpis(model, metrics));
     section.appendChild(activityChart(model, now));
     const panels = el("div", "rlb-analytics__panels");
     panels.append(taskDistribution(model), sessionProfile(metrics));
@@ -4489,6 +4505,34 @@ var STYLES = `
     justify-self: stretch;
 }
 
+.rlb-popover__footer--empty {
+    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-rows: var(--rlb-surface-action-height);
+    align-items: stretch;
+}
+
+.rlb-popover__footer--empty > .bp3-button:first-child {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.rlb-popover__footer--empty .rlb-surface__refresh-cell {
+    grid-column: 2;
+    grid-row: 1;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    align-items: center;
+    justify-content: center;
+}
+
+.rlb-popover__footer--empty .rlb-surface__refresh-cell .rlb-surface__refresh {
+    flex: 0 0 var(--rlb-surface-action-height);
+    width: var(--rlb-surface-action-height);
+    min-width: var(--rlb-surface-action-height);
+    max-width: var(--rlb-surface-action-height);
+}
+
 .rlb-surface__refresh--loading::before {
     animation: rlb-surface-refresh-spin 900ms linear infinite;
 }
@@ -5158,6 +5202,10 @@ var STYLES = `
     background: var(--rlb-surface);
 }
 
+.rlb-summary[hidden] {
+    display: none !important;
+}
+
 .rlb-overview {
     display: grid;
     grid-template-columns: minmax(160px, 0.9fr) minmax(300px, 1.6fr) minmax(160px, 0.9fr);
@@ -5603,7 +5651,7 @@ var STYLES = `
     }
 }
 
-/* ---- beta.14 compact overview and opt-in analytics ---- */
+/* ---- beta.15 compact overview and Linear-style analytics ---- */
 
 .rlb-dashboard__view-toggle {
     flex: 0 0 34px;
@@ -5646,77 +5694,95 @@ var STYLES = `
     text-overflow: ellipsis;
 }
 
+.rlb-analytics,
+.rlb-analytics button,
+.rlb-analytics a,
+.rlb-analytics svg,
+.rlb-analytics svg text {
+    font-family: inherit;
+}
+
 .rlb-analytics {
     display: grid;
-    gap: 10px;
-    min-width: 0;
-}
-
-.rlb-analytics__kpis {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
-    margin: 0;
-}
-
-.rlb-analytics__metric {
     min-width: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--rlb-border);
-    border-radius: 7px;
-    background: var(--rlb-surface-subtle);
-}
-
-.rlb-analytics__metric-label,
-.rlb-analytics__metric-context {
-    display: block;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.35px;
-    line-height: 1.2;
-    text-transform: uppercase;
-}
-
-.rlb-analytics__metric-value {
-    display: block;
-    margin: 8px 0 3px;
     color: var(--rlb-text);
-    font-size: 20px;
-    font-weight: 650;
-    line-height: 1.1;
-    font-variant-numeric: tabular-nums;
-}
-
-.rlb-analytics__metric-context {
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0;
-    text-transform: none;
+    font-size: 11px;
+    line-height: 14px;
 }
 
 .rlb-analytics__chart {
+    position: relative;
+    box-sizing: border-box;
     min-width: 0;
-    padding: 14px 16px 10px;
+    height: 224px;
+    padding: 10px 14px;
+    border: 1px solid var(--rlb-border-light);
+    border-radius: 6px;
+    box-shadow: none;
+}
+
+.rlb-analytics__activity-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    height: 20px;
+    min-width: 0;
+    margin-bottom: 6px;
+}
+
+.rlb-analytics__activity-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
 }
 
 .rlb-analytics__section-title {
-    margin: 0 0 10px;
+    flex: 0 0 auto;
+    margin: 0;
     color: var(--rlb-text);
     font-size: 12px;
-    font-weight: 650;
-    letter-spacing: 0.15px;
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: 16px;
+}
+
+.rlb-analytics__activity-range,
+.rlb-analytics__focus-label {
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
+}
+
+.rlb-analytics__focus {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: baseline;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+.rlb-analytics__focus-value {
+    color: var(--rlb-text);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
 }
 
 .rlb-analytics__svg {
     display: block;
     width: 100%;
-    height: 220px;
+    height: 176px;
     overflow: visible;
+    font-family: inherit;
 }
 
 .rlb-analytics__axis {
-    stroke: var(--rlb-border);
+    stroke: var(--rlb-border-light);
     stroke-width: 1;
 }
 
@@ -5732,30 +5798,45 @@ var STYLES = `
     fill: var(--rlb-muted);
     font-family: inherit;
     font-size: 10px;
+    font-weight: 500;
 }
 
 .rlb-analytics__empty-note {
-    margin: 4px 0 0;
+    margin: 0;
     color: var(--rlb-muted);
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
+}
+
+.rlb-analytics__chart > .rlb-analytics__empty-note {
+    position: absolute;
+    right: 14px;
+    bottom: 10px;
+    left: 14px;
 }
 
 .rlb-analytics__panels {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
-    gap: 10px;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+    gap: 8px;
     min-width: 0;
 }
 
 .rlb-analytics__panel {
+    box-sizing: border-box;
     min-width: 0;
-    padding: 14px 16px;
+    min-height: 128px;
+    padding: 12px 14px;
+    border: 1px solid var(--rlb-border-light);
+    border-radius: 6px;
+    box-shadow: none;
 }
 
 .rlb-analytics__distribution,
 .rlb-analytics__profile {
     display: grid;
-    gap: 12px;
+    gap: 8px;
 }
 
 .rlb-analytics__distribution-row {
@@ -5768,6 +5849,7 @@ var STYLES = `
     justify-content: space-between;
     gap: 10px;
     min-width: 0;
+    line-height: 14px;
 }
 
 .rlb-analytics__distribution-header .rlb-task-link,
@@ -5776,6 +5858,9 @@ var STYLES = `
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 14px;
 }
 
 .rlb-analytics__distribution-header .rlb-task-link {
@@ -5789,15 +5874,17 @@ var STYLES = `
     flex: 0 0 auto;
     color: var(--rlb-muted);
     font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 
 .rlb-analytics__distribution-track {
-    height: 5px;
-    margin-top: 6px;
+    height: 4px;
+    margin-top: 5px;
     overflow: hidden;
-    border-radius: 999px;
+    border-radius: 2px;
     background: var(--rlb-border-light);
 }
 
@@ -5816,7 +5903,9 @@ var STYLES = `
     padding-bottom: 8px;
     border-bottom: 1px solid var(--rlb-border-light);
     color: var(--rlb-muted);
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
 }
 
 .rlb-analytics__profile-row:last-child {
@@ -5826,7 +5915,9 @@ var STYLES = `
 
 .rlb-analytics__profile-row strong {
     color: var(--rlb-text);
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
     font-variant-numeric: tabular-nums;
 }
 
@@ -5852,13 +5943,16 @@ var STYLES = `
         border-top: 1px solid var(--rlb-border-light);
     }
 
-    .rlb-analytics__kpis,
     .rlb-analytics__panels {
         grid-template-columns: minmax(0, 1fr);
     }
 
+    .rlb-analytics__chart {
+        height: 196px;
+    }
+
     .rlb-analytics__svg {
-        height: 190px;
+        height: 148px;
     }
 }
 `;
@@ -6046,7 +6140,10 @@ function renderSessionSurface(root, model, options = {}) {
     if (notice4)
       root.appendChild(el("div", "rlb-popover__notice bp3-text-small", notice4));
   }
-  const footer = el("div", "rlb-popover__footer");
+  const footer = el(
+    "div",
+    `rlb-popover__footer${model.rows.length === 0 ? " rlb-popover__footer--empty" : ""}`
+  );
   footer.appendChild(
     button("bp3-button bp3-small", "Dashboard", () => options.onOpenDashboard?.(), {
       title: "Open Roam Logbook Dashboard"

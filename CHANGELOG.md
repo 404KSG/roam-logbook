@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0-beta.15 — 2026-08-16
+
+- Made the confirmed no-Session footer a single compact row: Dashboard keeps the flexible first cell and the icon-only Refresh action keeps a fixed 40px second cell without changing the running or paused two-row surface.
+- Rebuilt Analytics as a quieter Linear-style view: the Overview summary and redundant KPI cards disappear while Analytics is active; Activity owns the single Focus time total; the lower panels show top-five own-time tasks plus Other and exactly Sessions, Active days, and Median session.
+- Reduced chart density without reducing meaning: one baseline, up to seven date labels, thin bars, recent-30-day labelling for All time, Roam link colours, accessible empty states, responsive 176px/148px SVG geometry, and a 210–224px desktop chart panel.
+- Added beta.15 unit, browser geometry, responsive, accessibility, empty-state, distribution, and refresh-state coverage.
+
 ## 0.9.0-beta.14 — 2026-08-16
 
 - Split the Dashboard into a chart-free four-metric Overview and a local-state Analytics view, with an accessible icon toggle, KPI summary, native SVG activity chart, Own-time task distribution, and session profile.

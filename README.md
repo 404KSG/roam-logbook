@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.14**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.15**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -22,7 +22,8 @@ The extension is an ESM Roam Depot extension whose default export exposes `onloa
 - The Roam Depot entry for this fork is intentionally submitted as a **Draft preview** first. Until it is accepted, use the shorthand published on that Draft PR if you want to smoke-test it in a non-critical graph.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
-The extension reads and writes the local graph only. There are no analytics, network calls, or runtime services.
+The extension reads and writes the local graph only. Analytics is a local reporting
+view over that graph; there is no external telemetry, network call, or runtime service.
 
 Graph writes are serialized only inside one loaded plugin instance. A fresh read
 before each action and a post-write refresh reduce races, but there is no
@@ -53,7 +54,7 @@ Resume creates a fresh shared Pomodoro cycle from zero for each valid Task; it n
 
 **Shared Pomodoro cycle** — when the first confirmed Session starts, the extension freezes the configured threshold (30 minutes by default) and starts one cycle from that action instant. The topbar shows that cycle's elapsed time, not a historical task total or the age of an arbitrary parallel Session. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. Adding or removing parallel Sessions does not reset the cycle, and changing the setting affects the next cycle. A reload restores a valid persisted cycle or conservatively uses the earliest open CLOCK; a confirmed empty graph clears it. The old `pomodoroTargets` setting is retained only as deprecated compatibility state and no longer controls the visible timer.
 
-**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. The default Overview is intentionally list-first: four compact metrics (Today with active-Session context, selected range total, Sessions, and Tasks tracked), followed by Running when present and the By Task tree. It contains no chart or activity rail. The compact header has one icon-only Analytics toggle immediately before the range selector; switching views is local UI state, preserves the current snapshot/range/tree collapse state, resets body scroll to the top, and performs no graph query. Analytics is a dedicated, accessible view with Focus time, Sessions, Average session, and Longest session KPIs; a native SVG activity chart; top-six Own-time task distribution with an Other bucket; and a Completed/Running/Active days/Median session profile. All time keeps the exact total while the chart is explicitly labelled Recent 30 days. Normal and Shift+Click task links retain Roam navigation and native right-sidebar behavior. The overlay is fixed to the viewport, locks background document scroll while open, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
+**Dashboard** — `Logbook: Open dashboard`, or the button in the popover. The default Overview is intentionally list-first: four compact metrics (Today with active-Session context, selected range total, Sessions, and Tasks tracked), followed by Running when present and the By Task tree. It contains no chart or activity rail. The compact header has one icon-only Analytics toggle immediately before the range selector; switching views is local UI state, preserves the current snapshot/range/tree collapse state, resets body scroll to the top, and performs no graph query. Analytics is a dedicated, accessible view with no Overview summary or redundant KPI row: Activity shows the selected range and the one Focus time total, followed by top-five Own-time tasks plus Other and a three-row Session profile (Sessions, Active days, Median session). The native SVG chart uses one baseline and at most seven date labels; All time keeps the exact total while the chart is explicitly labelled Recent 30 days. Normal and Shift+Click task links retain Roam navigation and native right-sidebar behavior. The overlay is fixed to the viewport, locks background document scroll while open, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
 
 ### Custom hotkeys
 
@@ -112,7 +113,7 @@ By default, clocking in closes whatever was running, the way org-mode behaves. T
 - Timestamps carry no timezone, matching org — `[2026-08-05 Wed 15:58]` reads as 15:58 wherever you open it.
 - Durations truncate to whole minutes. A hand-edited `=> H:MM` is taken as authoritative over the stamps around it.
 - A session that runs past midnight counts wholly against the day it began, as org's own clock reports do.
-- Everything happens locally against your graph: no analytics, no network calls, no runtime dependency.
+- Everything happens locally against your graph: no external telemetry, network calls, or runtime dependency.
 
 ### Compatibility and data health
 

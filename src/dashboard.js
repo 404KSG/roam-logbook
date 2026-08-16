@@ -200,7 +200,11 @@ export function createDashboard({
         const hierarchy = lastHierarchy || {};
         const transientIssues = lastTransientIssues;
         const refreshNotice = lastRefreshNotice;
-        summaryNode.replaceChildren(overviewBar(model, now));
+        const analytics = view === 'analytics';
+        summaryNode.hidden = analytics;
+        summaryNode.setAttribute('aria-hidden', String(analytics));
+        summaryNode.replaceChildren();
+        if (!analytics) summaryNode.appendChild(overviewBar(model, now));
         bodyNode.replaceChildren();
 
         if (refreshNotice) {
@@ -215,7 +219,7 @@ export function createDashboard({
             ...transientIssues.map(issueRow),
         ];
 
-        if (view === 'analytics') {
+        if (analytics) {
             bodyNode.appendChild(analyticsSection(model, now));
             if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
             startLiveTicker();
@@ -249,6 +253,8 @@ export function createDashboard({
         } catch (error) {
             transientIssues = error.issue ? [error.issue] : error.issues || [];
             if (!lastSnapshot) {
+                summaryNode.hidden = false;
+                summaryNode.setAttribute('aria-hidden', 'false');
                 summaryNode.replaceChildren();
                 const notice = el(
                     'div',
@@ -370,14 +376,33 @@ export function createDashboard({
 
     const activityChart = (model, now) => {
         const section = el('section', 'rlb-analytics__chart rlb-dashboard-panel');
-        const title = el('h3', 'rlb-analytics__section-title', `Activity · ${model.activityLabel}`);
-        section.appendChild(title);
+        const heading = el('div', 'rlb-analytics__activity-header');
+        const titleGroup = el('div', 'rlb-analytics__activity-heading');
+        titleGroup.append(
+            el('h3', 'rlb-analytics__section-title', 'Activity'),
+            el('span', 'rlb-analytics__activity-range', model.activityLabel)
+        );
+        const focus = el('div', 'rlb-analytics__focus');
+        focus.append(
+            el('span', 'rlb-analytics__focus-label', 'Focus time'),
+            (() => {
+                const value = el(
+                    'strong',
+                    'rlb-analytics__focus-value',
+                    formatMinutesHuman(model.sessionMetrics?.focusMinutes || model.totalMinutes)
+                );
+                value.dataset.liveMetric = 'focus';
+                return value;
+            })()
+        );
+        heading.append(titleGroup, focus);
+        section.appendChild(heading);
         const series = model.activity || [];
         const titleId = 'roam-logbook-activity-title';
         const descriptionId = 'roam-logbook-activity-description';
         const svg = svgNode('svg', {
             class: 'rlb-analytics__svg',
-            viewBox: '0 0 760 236',
+            viewBox: '0 0 760 190',
             role: 'img',
             'aria-labelledby': `${titleId} ${descriptionId}`,
             preserveAspectRatio: 'none',
@@ -395,23 +420,31 @@ export function createDashboard({
         const peak = Math.max(1, ...series.map(day => day.minutes));
         const left = 18;
         const chartWidth = 724;
-        const chartHeight = 154;
-        const barWidth = series.length > 0 ? Math.min(28, Math.max(8, chartWidth / series.length - 8)) : 12;
-        const labelStep = series.length <= 7 ? 1 : series.length <= 14 ? 2 : 5;
+        const chartHeight = 124;
+        const baseline = chartHeight + 8;
+        const barWidth = series.length > 0 ? Math.min(16, Math.max(8, chartWidth / series.length - 8)) : 12;
+        const labelCount = Math.min(7, series.length);
+        const labelIndexes = new Set();
+        if (labelCount > 0) {
+            for (let label = 0; label < labelCount; label += 1) {
+                const denominator = Math.max(1, labelCount - 1);
+                labelIndexes.add(Math.round((label * (series.length - 1)) / denominator));
+            }
+        }
         svg.appendChild(
             svgNode('line', {
                 class: 'rlb-analytics__axis',
                 x1: left,
-                y1: chartHeight + 8,
+                y1: baseline,
                 x2: left + chartWidth,
-                y2: chartHeight + 8,
+                y2: baseline,
             })
         );
         series.forEach((day, index) => {
             const slot = chartWidth / Math.max(1, series.length);
             const x = left + slot * index + (slot - barWidth) / 2;
             const height = day.minutes === 0 ? 3 : Math.max(8, (day.minutes / peak) * chartHeight);
-            const y = chartHeight + 8 - height;
+            const y = baseline - height;
             const rect = svgNode('rect', {
                 class: day.minutes === 0 ? 'rlb-analytics__bar rlb-analytics__bar--empty' : 'rlb-analytics__bar',
                 x,
@@ -424,11 +457,11 @@ export function createDashboard({
             });
             rect.appendChild(svgNode('title', {}, `${day.key} · ${formatMinutesHuman(day.minutes)}`));
             svg.appendChild(rect);
-            if (index % labelStep === 0 || index === series.length - 1) {
+            if (labelIndexes.has(index)) {
                 svg.appendChild(
                     svgNode(
                         'text',
-                        { class: 'rlb-analytics__label', x: x + barWidth / 2, y: 206, 'text-anchor': 'middle' },
+                        { class: 'rlb-analytics__label', x: x + barWidth / 2, y: 166, 'text-anchor': 'middle' },
                         formatDayLabel(day.date, now)
                     )
                 );
@@ -436,38 +469,17 @@ export function createDashboard({
         });
         section.appendChild(svg);
         if (series.length === 0 || series.every(day => day.minutes === 0)) {
-            section.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range yet.'));
+            section.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range.'));
         }
         return section;
-    };
-
-    const analyticsMetric = (label, value, key, context = '') => {
-        const item = el('div', 'rlb-analytics__metric');
-        item.appendChild(el('dt', 'rlb-analytics__metric-label', label));
-        const valueNode = el('dd', 'rlb-analytics__metric-value', value);
-        if (key) valueNode.dataset.liveMetric = key;
-        item.append(valueNode, el('span', 'rlb-analytics__metric-context', context));
-        return item;
-    };
-
-    const analyticsKpis = (model, metrics) => {
-        const list = el('dl', 'rlb-analytics__kpis');
-        list.append(
-            analyticsMetric('Focus time', formatMinutesHuman(metrics.focusMinutes), 'focus', 'selected range'),
-            analyticsMetric('Sessions', String(metrics.sessions), 'sessions', 'selected range'),
-            analyticsMetric('Average session', formatMinutesHuman(metrics.averageMinutes), 'average', 'per Session'),
-            analyticsMetric('Longest session', formatMinutesHuman(metrics.longestMinutes), 'longest', 'single Session')
-        );
-        list.setAttribute('aria-label', `${DASHBOARD_TITLE} analytics summary`);
-        return list;
     };
 
     const taskDistribution = model => {
         const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
         panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Task time distribution'));
         const rows = model.tasks.filter(task => task.minutes > 0);
-        const top = rows.slice(0, 6);
-        const otherMinutes = rows.slice(6).reduce((sum, task) => sum + task.minutes, 0);
+        const top = rows.slice(0, 5);
+        const otherMinutes = rows.slice(5).reduce((sum, task) => sum + task.minutes, 0);
         if (otherMinutes > 0) top.push({ taskUid: null, title: 'Other', minutes: otherMinutes });
         const total = rows.reduce((sum, task) => sum + task.minutes, 0);
         if (top.length === 0) {
@@ -505,12 +517,15 @@ export function createDashboard({
         const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
         panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Session profile'));
         const profile = el('div', 'rlb-analytics__profile');
-        profile.append(
-            profileMetric('Completed', String(metrics.completedSessions)),
-            profileMetric('Running', String(metrics.runningSessions)),
-            profileMetric('Active days', String(metrics.activeDays)),
-            profileMetric('Median session', formatMinutesHuman(metrics.medianMinutes))
-        );
+        if (metrics.sessions === 0) {
+            profile.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range.'));
+        } else {
+            profile.append(
+                profileMetric('Sessions', String(metrics.sessions)),
+                profileMetric('Active days', String(metrics.activeDays)),
+                profileMetric('Median session', formatMinutesHuman(metrics.medianMinutes))
+            );
+        }
         panel.appendChild(profile);
         return panel;
     };
@@ -518,7 +533,6 @@ export function createDashboard({
     const analyticsSection = (model, now) => {
         const section = el('section', 'rlb-analytics');
         const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
-        section.appendChild(analyticsKpis(model, metrics));
         section.appendChild(activityChart(model, now));
         const panels = el('div', 'rlb-analytics__panels');
         panels.append(taskDistribution(model), sessionProfile(metrics));

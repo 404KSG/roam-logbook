@@ -89,6 +89,20 @@ test.afterEach(t => {
 });
 test.after(() => uninstallGraph());
 
+test('empty Session surface keeps Dashboard and Refresh on one row', () => {
+    const popover = openPopover();
+    const footer = popover.querySelector('.rlb-popover__footer');
+    const actions = [...footer.querySelectorAll('button')];
+    const refreshCell = footer.querySelector('.rlb-surface__refresh-cell');
+
+    assert.ok(footer.classList.contains('rlb-popover__footer--empty'));
+    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
+    assert.equal(refreshCell.dataset.refreshState, 'idle');
+    assert.equal(refreshCell.querySelector('[data-action="refresh"]').getAttribute('aria-label'), 'Refresh Sessions from graph');
+    assert.equal(footer.querySelectorAll('.bp3-button').length, 2);
+    assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
+});
+
 test('running rows expose compact cycle metadata without misleading per-session targets', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });

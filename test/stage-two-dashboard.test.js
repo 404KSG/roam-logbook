@@ -455,11 +455,20 @@ test('beta.14 Analytics toggle renders the chart and keeps Overview chart-free',
     assert.ok(document.querySelector('.rlb-analytics'));
     assert.equal(toggle.getAttribute('aria-label'), 'Back to Overview');
     assert.equal(toggle.getAttribute('aria-pressed'), 'true');
-    assert.equal(document.querySelectorAll('.rlb-analytics__kpis .rlb-analytics__metric').length, 4);
+    assert.equal(document.querySelectorAll('.rlb-analytics__kpis').length, 0);
+    assert.equal(document.querySelectorAll('.rlb-analytics__metric').length, 0);
     assert.equal(document.querySelectorAll('.rlb-analytics__svg').length, 1);
     assert.equal(document.querySelectorAll('.rlb-analytics__bar').length, 7);
     assert.equal(before.scrollTop, 0);
-    assert.ok(document.querySelector('.rlb-overview'), 'the compact summary remains visible');
+    assert.equal(document.querySelector('.rlb-overview'), null, 'Overview summary is hidden in Analytics');
+    assert.equal(document.querySelector('.rlb-summary').hidden, true);
+    assert.equal(document.querySelectorAll('.rlb-analytics__focus-value').length, 1);
+    assert.deepEqual(
+        [...document.querySelectorAll('.rlb-analytics__profile-row .rlb-analytics__profile-label')].map(
+            node => node.textContent
+        ),
+        ['Sessions', 'Active days', 'Median session']
+    );
     const range = document.querySelector('.rlb-header select');
     range.value = 'month';
     range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
@@ -492,6 +501,23 @@ test('beta.10 zero-time overview uses a quiet empty context instead of a primary
     dashboard.destroy();
 });
 
+test('beta.15 empty Analytics keeps one Focus time and concise empty panels', () => {
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
+    dashboard.open();
+    document.querySelector('[data-action="toggle-view"]').click();
+
+    assert.equal(document.querySelector('.rlb-summary').hidden, true);
+    assert.equal(document.querySelectorAll('.rlb-analytics__kpis').length, 0);
+    assert.equal(document.querySelectorAll('.rlb-analytics__focus-value').length, 1);
+    assert.equal(document.querySelector('.rlb-analytics__focus-value').textContent, '0m');
+    assert.equal(document.querySelectorAll('.rlb-analytics__profile-row').length, 0);
+    assert.match(document.querySelector('.rlb-analytics__chart').textContent, /No Sessions in this range/);
+    assert.match(document.querySelector('.rlb-analytics__panels').textContent, /No Sessions in this range/);
+    assert.match(document.querySelector('.rlb-analytics__panels').textContent, /No task time in this range/);
+
+    dashboard.destroy();
+});
+
 test('Analytics chart labels finite ranges and the All time fallback honestly', () => {
     graph = installGraph([
         { uid: 'range-task', string: '{{[[TODO]]}} Range activity', parent: null },
@@ -517,17 +543,47 @@ test('Analytics chart labels finite ranges and the All time fallback honestly', 
     select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     let chart = document.querySelector('.rlb-analytics__svg');
     assert.equal(chart.querySelectorAll('rect').length, 30);
-    assert.match(document.querySelector('.rlb-analytics__section-title').textContent, /Last 30 days/i);
+    assert.match(document.querySelector('.rlb-analytics__activity-range').textContent, /Last 30 days/i);
+    assert.equal(document.querySelectorAll('.rlb-analytics__label').length, 7);
 
     select.value = 'all';
     select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     chart = document.querySelector('.rlb-analytics__svg');
-    assert.equal(
-        document.querySelectorAll('.rlb-overview__item')[1].querySelector('.rlb-overview__label').textContent,
-        'All time'
-    );
-    assert.match(document.querySelector('.rlb-analytics__section-title').textContent, /Recent 30 days/i);
+    assert.equal(document.querySelector('.rlb-overview'), null);
+    assert.match(document.querySelector('.rlb-analytics__activity-range').textContent, /Recent 30 days/i);
     assert.equal(chart.querySelectorAll('rect').length, 30);
+    assert.equal(document.querySelectorAll('.rlb-analytics__label').length, 7);
+
+    dashboard.destroy();
+});
+
+test('Analytics distribution keeps five own-time tasks and an Other bucket', async () => {
+    for (let index = 0; index < 7; index += 1) {
+        const taskUid = `distribution-task-${index}`;
+        const drawerUid = `distribution-drawer-${index}`;
+        const clockUid = `distribution-clock-${index}`;
+        const hour = String(8 + index).padStart(2, '0');
+        const endMinutes = String((index + 1) * 5).padStart(2, '0');
+        graph.store.set(taskUid, {
+            uid: taskUid,
+            string: `{{[[TODO]]}} Distribution task ${index}`,
+            parent: null,
+        });
+        graph.store.set(drawerUid, { uid: drawerUid, string: 'LOGBOOK::', parent: taskUid });
+        graph.store.set(clockUid, {
+            uid: clockUid,
+            string: `CLOCK:: [2026-08-15 Sat ${hour}:00]--[2026-08-15 Sat ${hour}:${endMinutes}] => 0:${endMinutes}`,
+            parent: drawerUid,
+        });
+    }
+
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+    document.querySelector('[data-action="toggle-view"]').click();
+
+    assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row').length, 6);
+    assert.equal(document.querySelectorAll('.rlb-analytics__distribution-row .rlb-task-link').length, 5);
+    assert.equal(document.querySelector('.rlb-analytics__other-label').textContent, 'Other');
 
     dashboard.destroy();
 });

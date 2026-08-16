@@ -222,7 +222,10 @@ export function renderSessionSurface(root, model, options = {}) {
         if (notice) root.appendChild(el('div', 'rlb-popover__notice bp3-text-small', notice));
     }
 
-    const footer = el('div', 'rlb-popover__footer');
+    const footer = el(
+        'div',
+        `rlb-popover__footer${model.rows.length === 0 ? ' rlb-popover__footer--empty' : ''}`
+    );
     footer.appendChild(
         button('bp3-button bp3-small', 'Dashboard', () => options.onOpenDashboard?.(), {
             title: 'Open Roam Logbook Dashboard',
