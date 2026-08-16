@@ -334,10 +334,16 @@ export function renderSessionSurface(root, model, options = {}) {
             );
         }
         if (model.pausedCount > 0) {
+            const resumeLabel = model.pausedCount === 1 ? 'Resume' : 'Resume All';
+            const resumeTitle = model.pausedCount === 1
+                ? 'Resume the paused Task'
+                : 'Resume all paused Tasks';
+            const resumeAll = button('bp3-button bp3-small', resumeLabel, () => options.onResumeAll?.(), {
+                title: resumeTitle,
+            });
+            resumeAll.dataset.action = 'resume-all';
             footer.appendChild(
-                button('bp3-button bp3-small', 'Resume paused Tasks', () => options.onResumeAll?.(), {
-                    title: 'Resume paused Tasks with fresh CLOCK entries',
-                })
+                resumeAll
             );
         }
         if (model.runningCount > 1 || model.pausedCount > 0) {

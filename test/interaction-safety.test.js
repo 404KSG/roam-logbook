@@ -333,5 +333,8 @@ test('single-session Pause remains a one-click recoverable action', async () => 
 
     assert.equal(clock.getRunning().length, 0);
     assert.equal(paused.getPaused().length, 1);
-    assert.equal(footerAction('Resume paused Tasks')?.textContent, 'Resume paused Tasks');
+    const resume = document.querySelector('.rlb-popover__footer [data-action="resume-all"]');
+    assert.equal(resume?.textContent, 'Resume');
+    assert.equal(resume?.title, 'Resume the paused Task');
+    assert.equal(resume?.getAttribute('aria-label'), 'Resume the paused Task');
 });

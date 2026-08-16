@@ -682,11 +682,11 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
         )
     );
     assert.equal(surface.querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
-    assert.ok(
-        [...surface.querySelectorAll('.rlb-popover__footer button')].some(
-            node => node.textContent === 'Resume paused Tasks'
-        )
-    );
+    const resumeAll = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
+    assert.ok(resumeAll);
+    assert.equal(resumeAll.textContent, 'Resume All');
+    assert.equal(resumeAll.title, 'Resume all paused Tasks');
+    assert.equal(resumeAll.getAttribute('aria-label'), 'Resume all paused Tasks');
     assert.ok(pausedRows.every(row => row.querySelector('[data-action="resume"]')));
     assert.ok(
         pausedRows.every(row => {
@@ -717,12 +717,7 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
     assert.equal(clock.getRunning().length, 2);
     assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
     assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause All'));
-    assert.equal(
-        [...surface.querySelectorAll('.rlb-popover__footer button')].some(
-            node => node.textContent === 'Resume paused Tasks'
-        ),
-        false
-    );
+    assert.equal(surface.querySelector('.rlb-popover__footer [data-action="resume-all"]'), null);
 });
 
 test('paused topbar keeps its clock identity while visibly distinguishing paused state from idle', async t => {
@@ -743,6 +738,12 @@ test('paused topbar keeps its clock identity while visibly distinguishing paused
     assert.equal(pausedButton.querySelector('.rlb-topbar__pause-badge'), null);
     assert.match(pausedButton.getAttribute('aria-label'), /1 Task Paused/i);
     assert.equal(pausedButton.textContent, '');
+
+    const resume = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
+    assert.ok(resume);
+    assert.equal(resume.textContent, 'Resume');
+    assert.equal(resume.title, 'Resume the paused Task');
+    assert.equal(resume.getAttribute('aria-label'), 'Resume the paused Task');
 });
 
 test('pending Resume conflicts stay visible as retryable Recovery rows', async () => {

@@ -777,6 +777,53 @@ test('beta.9 surface footer uses one action height across both rows', async t =>
     assert.match(geometry.token, /\d+px/, JSON.stringify(geometry));
 });
 
+test('paused Resume footer labels stay single-line at 320px and 340px', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const width of [320, 340]) {
+        for (const scenario of [
+            { label: 'Resume', accessible: 'Resume the paused Task' },
+            { label: 'Resume All', accessible: 'Resume all paused Tasks' },
+        ]) {
+            const geometry = await withChromium(
+                htmlWithLateHost(
+                    `<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small" data-action="resume-all" title="${scenario.accessible}" aria-label="${scenario.accessible}">${scenario.label}</button><button class="bp3-button bp3-small">Clock Out All</button><div class="rlb-surface__refresh-cell"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div></div>`
+                ),
+                `(() => {
+                    const rect = node => { const value = node.getBoundingClientRect(); return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
+                    const popover = document.querySelector('.rlb-popover');
+                    const footer = document.querySelector('.rlb-popover__footer');
+                    const resume = footer.querySelector('[data-action="resume-all"]');
+                    const range = document.createRange();
+                    range.selectNodeContents(resume);
+                    const lines = [...range.getClientRects()];
+                    const resumeRect = rect(resume);
+                    return {
+                        label: resume.textContent,
+                        accessible: resume.getAttribute('aria-label'),
+                        whiteSpace: getComputedStyle(resume).whiteSpace,
+                        lineCount: lines.length,
+                        height: resumeRect.height,
+                        buttonOverflow: resume.scrollWidth > resume.clientWidth + 0.5,
+                        footerOverflow: footer.scrollWidth > footer.clientWidth + 0.5,
+                        popoverOverflow: popover.scrollWidth > popover.clientWidth + 0.5,
+                        inside: resumeRect.left >= rect(footer).left && resumeRect.right <= rect(footer).right + 0.5,
+                    };
+                })()`
+            );
+            if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.label, scenario.label, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.accessible, scenario.accessible, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.whiteSpace, 'nowrap', JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.lineCount, 1, JSON.stringify({ width, scenario, geometry }));
+            assert.ok(geometry.height >= 31 && geometry.height <= 32, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.buttonOverflow, false, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.footerOverflow, false, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.popoverOverflow, false, JSON.stringify({ width, scenario, geometry }));
+            assert.equal(geometry.inside, true, JSON.stringify({ width, scenario, geometry }));
+        }
+    }
+});
+
 test('beta.12 refresh states keep the footer geometry stable and the live status visually hidden', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
