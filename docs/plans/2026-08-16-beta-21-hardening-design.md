@@ -150,10 +150,10 @@ The release evidence must keep its claim ceiling explicit:
   fake-adapter tests. A final manual Roam smoke covers direct DONE, parent DONE
   with child Sessions, reload recovery, Pause/Resume recovery, native sidebar
   navigation, Dashboard Refresh, and unload cleanup.
-- Bundle gate: a separately authorized source release must regenerate the
-  checked-in `extension.js` and run `npm run verify:bundle` before Depot
-  publication. This beta.21 documentation/metadata pass intentionally does not
-  rebuild or rewrite the root bundle.
+- Bundle gate: the checked-in `extension.js` has been regenerated from the
+  beta.21 source, and `npm run check` plus `npm run verify:bundle` passed. The
+  read-only live verification and final manual Roam smoke remain required before
+  any Depot publication.
 
 ## Release boundary and maintenance
 

@@ -85,6 +85,23 @@ const cleanPending = (value, { version = VERSION, legacy = false } = {}) => {
 const hasLegacyPomodoroFields = value =>
     Boolean(value && ('pomodoroRemainingMs' in value || 'pomodoroSuppressed' in value));
 
+const cleanFinalizingRecord = value => {
+    if (!value || typeof value !== 'object' || typeof value.taskUid !== 'string' || !value.taskUid) return null;
+    const pausedAtMs = Number(value.pausedAtMs);
+    if (!Number.isFinite(pausedAtMs) || pausedAtMs < 0) return null;
+    const clockUid = typeof value.clockUid === 'string' && value.clockUid ? value.clockUid : null;
+    return { taskUid: value.taskUid, pausedAtMs, ...(clockUid ? { clockUid } : {}) };
+};
+
+const cleanFinalizingScope = value => {
+    if (!value || typeof value !== 'object') return null;
+    if (!Array.isArray(value.items) || !Array.isArray(value.pendingResume)) return null;
+    const items = value.items.map(cleanFinalizingRecord);
+    const pendingResume = value.pendingResume.map(cleanFinalizingRecord);
+    if (items.some(item => !item) || pendingResume.some(item => !item)) return null;
+    return { items, pendingResume };
+};
+
 const cleanFinalizing = value => {
     if (!value || typeof value !== 'object' || value.action !== 'clock-out-all') return null;
     if (!Array.isArray(value.targets)) return null;
@@ -96,7 +113,13 @@ const cleanFinalizing = value => {
         if (targets.some(item => `${item.taskUid}\u0000${item.clockUid}` === key)) continue;
         targets.push({ taskUid: target.taskUid, clockUid: target.clockUid });
     }
-    return { action: 'clock-out-all', targets };
+    const scope = 'scope' in value ? cleanFinalizingScope(value.scope) : null;
+    if ('scope' in value && !scope) return null;
+    return {
+        action: 'clock-out-all',
+        targets,
+        ...(scope ? { scope } : {}),
+    };
 };
 
 const serialized = () =>
@@ -108,6 +131,24 @@ const serialized = () =>
             ...(finalizing ? { finalizing } : {}),
         },
     });
+
+const finalizingScope = () => ({
+    items: items.map(cleanFinalizingRecord).filter(Boolean),
+    pendingResume: pendingResume.map(cleanFinalizingRecord).filter(Boolean),
+});
+
+const makeFinalizing = entries => ({
+    action: 'clock-out-all',
+    targets: entries
+        .filter(entry => entry.running)
+        .map(entry => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
+    scope: finalizingScope(),
+});
+
+const sameFinalizingRecord = (record, captured) =>
+    record?.taskUid === captured?.taskUid &&
+    Number(record?.pausedAtMs) === Number(captured?.pausedAtMs) &&
+    (captured?.clockUid ? record?.clockUid === captured.clockUid : !record?.clockUid);
 
 function persist() {
     if (unsupportedRaw !== null) return false;
@@ -169,6 +210,18 @@ export function getPaused() {
 
 export function getPendingResume() {
     return pendingResume.map(item => ({ ...item }));
+}
+
+/** A small explicit recovery state for a saved Clock Out All cleanup. */
+export function getRecoveryState() {
+    if (!finalizing) return null;
+    return {
+        kind: 'finalizing',
+        action: 'commit-pause-batch',
+        targets: finalizing.targets.map(target => ({ ...target })),
+        pendingTaskUids: [...new Set(finalizing.targets.map(target => target.taskUid))],
+        pendingClockUids: finalizing.targets.map(target => target.clockUid),
+    };
 }
 
 /**
@@ -580,7 +633,14 @@ const pendingTasks = () => new Set(pendingResume.map(item => item.taskUid));
  * permanently closed; only targets still open remain recoverable.
  */
 function reconcileFinalizing({ running = [] } = {}) {
-    if (!finalizing) return { ok: true, uncertain: false, activeTaskUids: [] };
+    if (!finalizing) {
+        return {
+            ok: true,
+            uncertain: false,
+            activeTaskUids: [],
+            activeClockUids: [],
+        };
+    }
 
     const runningByClock = new Map(running.map(entry => [entry.clockUid, entry]));
     const activeTargets = finalizing.targets.filter(target => {
@@ -588,18 +648,52 @@ function reconcileFinalizing({ running = [] } = {}) {
         return entry?.taskUid === target.taskUid;
     });
     const activeTaskUids = new Set(activeTargets.map(target => target.taskUid));
+    const activeClockUids = activeTargets.map(target => target.clockUid);
     const previousItems = items;
     const previousPending = pendingResume;
     const previousFinalizing = finalizing;
-    items = items.filter(item => activeTaskUids.has(item.taskUid));
-    pendingResume = pendingResume.filter(item => activeTaskUids.has(item.taskUid));
-    finalizing = activeTargets.length > 0 ? { action: 'clock-out-all', targets: activeTargets } : null;
+    const capturedScope = finalizing.scope;
+    if (capturedScope) {
+        const removableTaskUids = new Set(
+            [...capturedScope.items, ...capturedScope.pendingResume]
+                .map(record => record.taskUid)
+                .filter(taskUid => !activeTaskUids.has(taskUid))
+        );
+        const removeCaptured = (records, captured) => {
+            const remainingCaptured = captured.slice();
+            return records.filter(record => {
+                if (!removableTaskUids.has(record.taskUid)) return true;
+                const index = remainingCaptured.findIndex(item => sameFinalizingRecord(record, item));
+                if (index < 0) return true;
+                remainingCaptured.splice(index, 1);
+                return false;
+            });
+        };
+        items = removeCaptured(items, capturedScope.items);
+        pendingResume = removeCaptured(pendingResume, capturedScope.pendingResume);
+    } else {
+        // Older markers did not capture record identity. Preserve records from
+        // Tasks that were not part of the active target scope rather than
+        // discarding a later unrelated Pause Batch item.
+        items = items.filter(item => activeTaskUids.has(item.taskUid));
+        pendingResume = pendingResume.filter(item => activeTaskUids.has(item.taskUid));
+    }
+    finalizing = activeTargets.length > 0
+        ? { ...finalizing, targets: activeTargets }
+        : null;
 
     const changed =
         previousItems.length !== items.length ||
         previousPending.length !== pendingResume.length ||
         JSON.stringify(previousFinalizing) !== JSON.stringify(finalizing);
-    if (!changed) return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+    if (!changed) {
+        return {
+            ok: true,
+            uncertain: false,
+            activeTaskUids: [...activeTaskUids],
+            activeClockUids,
+        };
+    }
 
     if (!persist()) {
         items = previousItems;
@@ -611,11 +705,12 @@ function reconcileFinalizing({ running = [] } = {}) {
             ok: false,
             uncertain: true,
             activeTaskUids: [...activeTaskUids],
+            activeClockUids,
             error: new Error(notice),
         };
     }
     notify();
-    return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+    return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids], activeClockUids };
 }
 
 const resumeBatchResult = ({
@@ -678,6 +773,39 @@ const resumeOneResult = ({
         item: 'Session',
         completedVerb: 'resumed',
         ...extra,
+    };
+};
+
+const commitFinalizingResult = ({ hadFinalizing = false, finalized }) => {
+    const activeTaskUids = finalized?.activeTaskUids || [];
+    const activeClockUids = finalized?.activeClockUids || [];
+    const uncertain = Boolean(finalized?.uncertain || finalized?.ok === false);
+    const blocked = activeTaskUids.length > 0;
+    const ok = !uncertain && !blocked;
+    const error = finalized?.error || (blocked ? new Error('Clock Out All still has running Sessions.') : null);
+    return {
+        action: 'commit-pause-batch',
+        ok,
+        committed: Boolean(hadFinalizing && ok),
+        count: Boolean(hadFinalizing && ok) ? 1 : 0,
+        completed: Boolean(hadFinalizing && ok) ? 1 : 0,
+        failed: uncertain ? 1 : activeTaskUids.length,
+        pending: activeClockUids.length,
+        pendingTaskUids: activeTaskUids,
+        pendingClockUids: activeClockUids,
+        uncertain,
+        partial: false,
+        blocked,
+        retry: ok
+            ? null
+            : {
+                  action: 'commit-pause-batch',
+                  retryTaskUids: activeTaskUids,
+                  retryClockUids: activeClockUids,
+              },
+        error,
+        item: 'Pause Batch',
+        completedVerb: 'committed',
     };
 };
 
@@ -881,7 +1009,7 @@ export async function resumeOne(taskUid, { now = new Date() } = {}) {
 }
 
 /** Start a fresh CLOCK for each valid paused task and consume successful records. */
-export async function resumeAll({ now = new Date() } = {}) {
+export async function resumeAll({ now = new Date(), reconcileOnly = false } = {}) {
     if (unsupportedRaw !== null) {
         notice = 'Saved paused-task state is unsupported; no Tasks were resumed.';
         notify();
@@ -894,6 +1022,7 @@ export async function resumeAll({ now = new Date() } = {}) {
         });
     }
 
+    const hadFinalizing = Boolean(finalizing);
     notice = '';
     // Read the complete graph snapshot before planning any CLOCK writes. The
     // multiple-clock setting must be enabled before the first resume so a batch
@@ -902,6 +1031,12 @@ export async function resumeAll({ now = new Date() } = {}) {
     if (!initial.ok) {
         notice = clock.getNotice() || 'Graph state could not be confirmed; no further changes were made.';
         notify();
+        if (reconcileOnly) {
+            return commitFinalizingResult({
+                hadFinalizing,
+                finalized: { ok: false, uncertain: true, activeTaskUids: [], activeClockUids: [], error: initial.error },
+            });
+        }
         return resumeBatchResult({
             failed: pendingResume.length + items.length,
             pendingTaskUids: [...items, ...pendingResume].map(item => item.taskUid),
@@ -914,6 +1049,13 @@ export async function resumeAll({ now = new Date() } = {}) {
     }
 
     const finalized = reconcileFinalizing({ running: initial.running });
+    if (reconcileOnly) {
+        if (finalized.activeTaskUids.length > 0) {
+            notice = 'Clock Out All still has running Sessions; they were kept for an explicit retry.';
+            notify();
+        }
+        return commitFinalizingResult({ hadFinalizing, finalized });
+    }
     if (!finalized.ok) {
         return resumeBatchResult({
             failed: finalized.activeTaskUids.length,
@@ -1107,6 +1249,12 @@ export async function resumeAll({ now = new Date() } = {}) {
     });
 }
 
+/** Retry only the saved finalizing cleanup; never resume unrelated paused Tasks. */
+export async function retryFinalizing({ now = new Date() } = {}) {
+    if (!finalizing) return commitFinalizingResult({ hadFinalizing: false, finalized: { ok: true } });
+    return resumeAll({ now, reconcileOnly: true });
+}
+
 /**
  * Permanent bulk finish. Pause state is cleared only after every target closes;
  * failed running tasks become a precise retryable Pause Batch entry.
@@ -1118,12 +1266,7 @@ export async function clockOutAll({ now = new Date() } = {}) {
             now,
             prepare: entries => {
                 const previousFinalizing = finalizing;
-                finalizing = {
-                    action: 'clock-out-all',
-                    targets: entries
-                        .filter(entry => entry.running)
-                        .map(entry => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
-                };
+                finalizing = makeFinalizing(entries);
                 if (!persist()) {
                     finalizing = previousFinalizing;
                     const error = new Error(
@@ -1259,10 +1402,7 @@ export async function clockOutAll({ now = new Date() } = {}) {
     }
     items = [...retained.values()];
     pendingResume = pendingResume.filter(item => stillRunning.some(entry => entry.taskUid === item.taskUid));
-    finalizing = {
-        action: 'clock-out-all',
-        targets: (outcome.entries || []).map(entry => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
-    };
+    finalizing = makeFinalizing(outcome.entries || []);
     notice = outcome.uncertain
         ? clock.GRAPH_UNCERTAIN
         : `${stillRunning.length} Session${stillRunning.length === 1 ? '' : 's'} could not be closed.`;

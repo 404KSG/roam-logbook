@@ -16,11 +16,13 @@
   Shift+Click, native right-sidebar navigation only from task titles, one shared
   Pomodoro cycle, and Task-based paused batches versus Session-based running
   units. Legacy per-session Pomodoro target fields remain compatibility-only.
-- This release metadata pass keeps Roam Depot **Draft** and does not touch the
-  external PR or rebuild the root bundle. No dependency upgrade is included; the
-  existing esbuild advisory is dev-only non-runtime maintenance. Release evidence
-  should report the current suite result from a clean run rather than pinning a
-  brittle exact test count; the read-only live smoke remains a publication gate.
+- This beta.21 release keeps Roam Depot **Draft** and does not touch the external
+  PR. The checked-in root bundle has been rebuilt, and `npm run check` plus
+  `npm run verify:bundle` passed. No dependency upgrade is included; the existing
+  esbuild advisory is dev-only non-runtime maintenance. Release evidence should
+  report the current suite result from a clean run rather than pinning a brittle
+  exact test count; the read-only live verification and final manual Roam smoke
+  remain publication gates.
 
 ## 0.9.0-beta.20 — 2026-08-16
 

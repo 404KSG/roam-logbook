@@ -771,33 +771,34 @@ export async function clockOutCompletedTask(
     });
 }
 
-function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+function confirmedTreeRelation(taskUid, rootUid, parentOf) {
     const seen = new Set();
     let current = taskUid;
     while (current) {
-        if (current === rootUid) return true;
+        if (current === rootUid) return { matched: true, cyclic: false };
         if (seen.has(current)) {
-            throw new GraphReadError('Task hierarchy contains a cycle', {
-                issue: { kind: 'hierarchy', source: 'parent', message: 'Task hierarchy contains a cycle' },
-            });
+            return { matched: false, cyclic: true };
         }
         seen.add(current);
         current = parentOf[current];
     }
-    return false;
+    return { matched: false, cyclic: false };
+}
+
+function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+    return confirmedTreeRelation(taskUid, rootUid, parentOf).matched;
 }
 
 function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
     if (issue?.code === 'ancestor-depth-exceeded' && !parentOf[rootUid]) return true;
     if (issue?.code === 'ambiguous-parent') {
         if (issue.taskUid === rootUid) return true;
-        return (issue.parentUids || []).some(candidate => {
-            try {
-                return isTaskInConfirmedTree(candidate, rootUid, parentOf);
-            } catch {
-                return true;
-            }
-        });
+        const taskToRoot = confirmedTreeRelation(issue.taskUid, rootUid, parentOf);
+        const rootToTask = confirmedTreeRelation(rootUid, issue.taskUid, parentOf);
+        if (taskToRoot.matched || rootToTask.matched) return true;
+        return (issue.parentUids || []).some(candidate =>
+            confirmedTreeRelation(candidate, rootUid, parentOf).matched
+        );
     }
     const affected = [
         issue?.taskUid,
@@ -806,12 +807,37 @@ function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
         ...(Array.isArray(issue?.affectedUids) ? issue.affectedUids : []),
     ].filter(uid => typeof uid === 'string' && uid);
     if (affected.length === 0) return true;
-    return affected.some(uid => {
-        try {
-            return isTaskInConfirmedTree(uid, rootUid, parentOf) || isTaskInConfirmedTree(rootUid, uid, parentOf);
-        } catch {
-            return true;
+
+    // A cycle can make a direct path traversal inconclusive. Use the connected
+    // component only for that malformed path, so an unrelated cycle is isolated
+    // while any cycle attached to the root remains conservative.
+    const adjacent = new Map();
+    const connect = (left, right) => {
+        if (!left || !right) return;
+        (adjacent.get(left) || adjacent.set(left, new Set()).get(left)).add(right);
+        (adjacent.get(right) || adjacent.set(right, new Set()).get(right)).add(left);
+    };
+    for (const [child, parent] of Object.entries(parentOf || {})) connect(child, parent);
+    if (issue?.taskUid) {
+        for (const parent of [issue.parentUid, ...(issue.parentUids || [])]) {
+            connect(issue.taskUid, parent);
         }
+    }
+
+    const component = new Set([rootUid]);
+    const frontier = [rootUid];
+    while (frontier.length > 0) {
+        const current = frontier.pop();
+        for (const neighbor of adjacent.get(current) || []) {
+            if (component.has(neighbor)) continue;
+            component.add(neighbor);
+            frontier.push(neighbor);
+        }
+    }
+    return affected.some(uid => {
+        const down = confirmedTreeRelation(uid, rootUid, parentOf);
+        const up = confirmedTreeRelation(rootUid, uid, parentOf);
+        return down.matched || up.matched || down.cyclic || up.cyclic ? component.has(uid) : false;
     });
 }
 

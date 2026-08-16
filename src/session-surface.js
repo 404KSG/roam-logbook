@@ -175,6 +175,7 @@ export function buildSessionSurfaceModel({
     entries = [],
     pausedItems = [],
     pendingItems = [],
+    recoveryState = null,
     now,
     staleHours = 8,
 }) {
@@ -207,6 +208,7 @@ export function buildSessionSurfaceModel({
         entries: entries.slice(),
         pausedItems: pausedItems.slice(),
         pendingItems: pendingItems.slice(),
+        recoveryState: recoveryState ? { ...recoveryState } : null,
         rows: [...runningRows, ...pausedRows, ...recoveryRows],
         runningCount: entries.length,
         pausedCount: pausedItems.length,
@@ -222,6 +224,8 @@ const surfaceTitle = model =>
           ? `${taskCount(model.pausedCount)} Paused`
           : model.recoveryCount > 0
             ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? 'y' : 'ies'} Required`
+            : model.recoveryState
+              ? 'Pause Batch Recovery Required'
           : SURFACE_TITLE;
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
@@ -298,7 +302,19 @@ export function renderSessionSurface(root, model, options = {}) {
             title: 'Open Roam Logbook Dashboard',
         })
     );
-    if (model.runningCount > 0 || model.pausedCount > 0) {
+    if (model.recoveryState) {
+        const recovery = button(
+            'bp3-button bp3-small',
+            'Retry Pause Batch cleanup',
+            () => options.onRetryRecovery?.(),
+            {
+                title: 'Commit the saved Pause Batch cleanup without resuming paused Tasks',
+            }
+        );
+        recovery.dataset.action = 'retry-pause-batch';
+        footer.appendChild(recovery);
+    }
+    if (model.runningCount > 0 || model.pausedCount > 0 || model.recoveryState) {
         if (model.runningCount > 0) {
             footer.appendChild(
                 button('bp3-button bp3-small', singleRunning ? 'Pause' : 'Pause All', () => options.onPauseAll?.(), {

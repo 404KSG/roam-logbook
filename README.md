@@ -169,11 +169,11 @@ check; GitHub Actions additionally runs the real pinned Docker image
 `src/roam.js` is the adapter boundary for `window.roamAlphaAPI`: it validates
 graph reads and exposes graph writes, Pull Watch lifecycle, and native block
 navigation to the other modules. UI and mutation modules do not call Roam's
-global API directly. This beta.21 documentation/metadata pass intentionally
-does not rebuild the root `extension.js`; a separately authorized release build
-must regenerate and verify it before Depot publication. The existing esbuild
-advisory is dev-only build maintenance, not a runtime extension dependency
-exposure, and no dependency upgrade is included here.
+global API directly. The beta.21 source is fully implemented, the checked-in
+root `extension.js` has been rebuilt, and `npm run check` plus
+`npm run verify:bundle` passed. The existing esbuild advisory is dev-only build
+maintenance, not a runtime extension dependency exposure, and no dependency
+upgrade is included here.
 
 ### Release checklist
 
@@ -188,9 +188,10 @@ exposure, and no dependency upgrade is included here.
   configured graph after reading its guidelines. The verifier is read-only;
   automated tests use a fake adapter and must not be described as live Roam
   verification.
-- Keep Roam Depot status **Draft** until the clean bundle and live-smoke gates
-  pass; this task does not touch the external PR. Record the current suite result
-  from the clean run rather than maintaining a brittle exact test count here.
+- Roam Depot remains **Draft**; the read-only live verification and manual smoke
+  gates remain required before any future publication, and this task does not
+  touch the external PR. Record the current suite result from the clean run
+  rather than maintaining a brittle exact test count here.
 
 The performance tests are synthetic query-count and complexity-regression stubs,
 not benchmarks of a real Roam graph. The final live verification reads the

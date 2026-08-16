@@ -10,16 +10,32 @@
 let tail = Promise.resolve();
 let generation = 0;
 
+const invalidatedMutationResult = () => ({
+    action: 'mutation-invalidated',
+    ok: false,
+    invalidated: true,
+    uncertain: true,
+    retryable: true,
+    partial: false,
+    completed: 0,
+    count: 0,
+    failed: 1,
+    pending: 1,
+    pendingTaskUids: [],
+    pendingClockUids: [],
+    retry: {
+        action: 'retry-mutation',
+        reason: 'extension-reload',
+    },
+    notice: 'This action was interrupted by an extension reload before it could be applied. Retry.',
+    error: new Error('Mutation was invalidated by an extension reload before it could be applied.'),
+});
+
 export function enqueueMutation(action) {
     const expectedGeneration = generation;
     const run = () => {
         if (expectedGeneration !== generation) {
-            return {
-                ok: false,
-                invalidated: true,
-                uncertain: false,
-                error: new Error('Mutation was invalidated by an extension reload.'),
-            };
+            return invalidatedMutationResult();
         }
         return action();
     };

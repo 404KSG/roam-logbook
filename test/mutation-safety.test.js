@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
+import { mutationResultNotice } from '../src/action-result.js';
 
 const TASK = { uid: 'mutatet1', string: '{{[[TODO]]}} mutation task', parent: null };
 const OTHER = { uid: 'mutatet2', string: '{{[[TODO]]}} other task', parent: null };
@@ -177,6 +178,52 @@ test('unload does not reset the mutation tail behind an in-flight Clock In', asy
         1,
         'the new lifecycle must wait for the old graph mutation instead of creating a second drawer'
     );
+});
+
+test('queued mutation invalidation returns a retryable user-visible result', async () => {
+    allowMultiple = true;
+    const clock = await import('../src/clock.js');
+    const originalCreate = graph.api.data.block.create;
+    let release;
+    const gate = new Promise(resolve => {
+        release = resolve;
+    });
+    let started;
+    const startedPromise = new Promise(resolve => {
+        started = resolve;
+    });
+    let blocked = true;
+    graph.api.data.block.create = async args => {
+        if (blocked && args.block.string === 'LOGBOOK::') {
+            blocked = false;
+            started();
+            await gate;
+        }
+        return originalCreate(args);
+    };
+
+    try {
+        const inFlight = clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+        await startedPromise;
+        const queued = clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:00:01') });
+        clock.reset();
+        release();
+
+        const [first, invalidated] = await Promise.all([inFlight, queued]);
+        assert.equal(first.taskUid, TASK.uid);
+        assert.equal(invalidated.ok, false);
+        assert.equal(invalidated.invalidated, true);
+        assert.equal(invalidated.uncertain, true);
+        assert.equal(invalidated.retryable, true);
+        assert.deepEqual(invalidated.retry, {
+            action: 'retry-mutation',
+            reason: 'extension-reload',
+        });
+        assert.match(mutationResultNotice(invalidated), /extension reload.*Retry/i);
+        assert.equal(drawerFor(OTHER.uid), undefined, 'invalidated work must not be silently written');
+    } finally {
+        graph.api.data.block.create = originalCreate;
+    }
 });
 
 test('Clock in stops after a successful close whose refresh cannot confirm graph state', async () => {

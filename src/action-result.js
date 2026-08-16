@@ -14,6 +14,9 @@ const presentedResults = new WeakSet();
 export function mutationResultNotice(result) {
     if (!result) return '';
     const message = typeof result?.message === 'string' ? result.message : result?.error?.message;
+    if (result?.invalidated === true) {
+        return result.notice || 'This action was interrupted by an extension reload before it could be applied. Retry.';
+    }
     if (result?.uncertain === true || (typeof message === 'string' && /Graph state could not be confirmed/i.test(message))) {
         return GRAPH_SYNC_RETRY_NOTICE;
     }

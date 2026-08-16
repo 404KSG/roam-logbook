@@ -191,6 +191,7 @@ export function createTopbar({
             entries: clock.getRunning(),
             pausedItems: paused.getPaused(),
             pendingItems: paused.getPendingResume(),
+            recoveryState: paused.getRecoveryState(),
             now: nowDate(),
             staleHours: staleHours(),
         });
@@ -325,6 +326,7 @@ export function createTopbar({
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
             onResume: item => void run(() => paused.resumeOne(item.taskUid)),
             onRecovery: () => void run(() => paused.resumeAll()),
+            onRetryRecovery: () => void run(() => paused.retryFinalizing()),
             onDiscard: entry => {
                 if (discardConfirmUid !== entry.clockUid) {
                     discardConfirmUid = entry.clockUid;
@@ -434,6 +436,8 @@ export function createTopbar({
         const recoveryItems = paused
             .getPendingResume()
             .filter(item => item?.recoveryState === 'conflict');
+        const finalizingRecovery = paused.getRecoveryState();
+        const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
         const running = entries.length > 0;
         if (running && reconcile) pomodoro.reconcileCycle(entries, { now });
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
@@ -450,21 +454,23 @@ export function createTopbar({
             buttonNode.classList.remove('rlb-topbar__button--parallel');
             buttonNode.classList.toggle(
                 'rlb-topbar__button--paused',
-                pausedItems.length > 0 || recoveryItems.length > 0
+                pausedItems.length > 0 || recoveryItems.length > 0 || Boolean(finalizingRecovery)
             );
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             parallelNode.textContent = '';
             separatorNode.textContent = '';
-            syncButtonLayout(pausedItems.length > 0 || recoveryItems.length > 0 ? 'paused' : 'idle');
+            syncButtonLayout(
+                pausedItems.length > 0 || recoveryItems.length > 0 || finalizingRecovery ? 'paused' : 'idle'
+            );
             buttonNode.title = pausedItems.length
                 ? `${taskCount(pausedItems.length)} Paused — click to resume or review.` +
                   (recoveryItems.length > 0
                       ? `\n${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? '' : 's'} require review.`
                       : '')
-                : recoveryItems.length > 0
-                  ? `${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? '' : 's'} require review — click to retry.`
+                : recoveryCount > 0
+                  ? `${recoveryCount} Recovery item${recoveryCount === 1 ? '' : 's'} require review — click to retry.`
                   : 'Roam Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             return;

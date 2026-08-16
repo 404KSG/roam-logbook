@@ -480,7 +480,7 @@ test('fast Refresh clicks coalesce into one graph read', async t => {
         assert.equal(loading.disabled, true);
         await settle();
         assert.equal(reads, 1);
-        assert.equal(notifications, 0, 'explicit Refresh suppresses the subscriber rerender path');
+        assert.equal(notifications, 1, 'explicit Refresh announces the confirmed reconciliation');
         assert.match(
             popover.querySelector('.rlb-surface__refresh-status').textContent,
             /Updated just now/
@@ -754,6 +754,45 @@ test('pending Resume conflicts stay visible as retryable Recovery rows', async (
     assert.equal(notice.getAttribute('aria-live'), 'assertive');
     assert.match(notice.textContent, /Retry after Roam finishes syncing/i);
     assert.ok(surface.querySelector('[data-session-state="recovery"] [data-action="recovery"]'));
+});
+
+test('finalizing cleanup exposes a footer retry without resuming paused Tasks', async () => {
+    settingsStore.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [
+                    {
+                        taskUid: 'popover-task-01',
+                        title: 'Graph Engineering',
+                        pausedAtMs: Date.parse('2026-08-15T08:00:00Z'),
+                    },
+                ],
+                pendingResume: [],
+                finalizing: {
+                    action: 'clock-out-all',
+                    targets: [{ taskUid: 'popover-task-01', clockUid: 'closed-clock' }],
+                    scope: { items: [], pendingResume: [] },
+                },
+            },
+        })
+    );
+    extension.onunload();
+    extension.onload({ extensionAPI });
+
+    const surface = openPopover();
+    const retry = surface.querySelector('[data-action="retry-pause-batch"]');
+    assert.ok(retry, 'finalizing cleanup has an explicit recovery action');
+    assert.equal(retry.textContent, 'Retry Pause Batch cleanup');
+    assert.match(retry.title, /without resuming paused Tasks/i);
+
+    click(retry);
+    await settle();
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), ['popover-task-01']);
+    assert.equal(paused.getRecoveryState(), null);
 });
 
 test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {

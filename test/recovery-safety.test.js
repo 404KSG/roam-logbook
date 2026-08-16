@@ -191,6 +191,49 @@ test('Clock Out All keeps a durable finalizing marker when clearing the batch ca
     assert.equal(JSON.parse(store.get('pausedBatch')).data.finalizing, undefined);
 });
 
+test('finalizing cleanup preserves a new Pause Batch item across settings failure and reload', async () => {
+    const { clock, paused } = await install();
+    const { setExtensionAPI } = await import('../src/settings.js');
+    setExtensionAPI(extensionWithMultiple);
+    await clock.clockIn(TASK.uid, { now: T0 });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
+    await clock.clockIn(TASK.uid, { now: new Date(T0.getTime() + 6 * 60_000) });
+
+    const originalSet = extensionWithMultiple.settings.set;
+    let pausedBatchWrites = 0;
+    extensionWithMultiple.settings.set = (key, value) => {
+        if (key === 'pausedBatch') {
+            pausedBatchWrites += 1;
+            if (pausedBatchWrites === 2) throw new Error('Pause Batch commit failed');
+        }
+        return originalSet(key, value);
+    };
+
+    try {
+        await paused.clockOutAll({ now: new Date(T0.getTime() + 7 * 60_000) });
+    } finally {
+        extensionWithMultiple.settings.set = originalSet;
+    }
+
+    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 8 * 60_000) });
+    await paused.pauseAll({ now: new Date(T0.getTime() + 9 * 60_000) });
+
+    paused.reset();
+    clock.reset();
+    paused.load();
+    clock.refresh();
+
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [OTHER.uid]);
+    assert.ok(paused.getRecoveryState(), 'reload exposes the pending finalizing cleanup');
+    const recovery = await paused.retryFinalizing({ now: new Date(T0.getTime() + 10 * 60_000) });
+
+    assert.equal(recovery.ok, true);
+    assert.equal(recovery.action, 'commit-pause-batch');
+    assert.equal(clock.getRunning().length, 0, 'cleanup does not resume the newly paused Task');
+    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [OTHER.uid]);
+    assert.equal(paused.getRecoveryState(), null);
+});
+
 test('malformed pendingResume is backed up and surfaced without discarding valid Pause Batch records', async () => {
     const { paused } = await install();
     const raw = JSON.stringify({

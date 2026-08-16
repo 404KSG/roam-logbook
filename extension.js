@@ -772,16 +772,31 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
 // src/mutations.js
 var tail = Promise.resolve();
 var generation = 0;
+var invalidatedMutationResult = () => ({
+  action: "mutation-invalidated",
+  ok: false,
+  invalidated: true,
+  uncertain: true,
+  retryable: true,
+  partial: false,
+  completed: 0,
+  count: 0,
+  failed: 1,
+  pending: 1,
+  pendingTaskUids: [],
+  pendingClockUids: [],
+  retry: {
+    action: "retry-mutation",
+    reason: "extension-reload"
+  },
+  notice: "This action was interrupted by an extension reload before it could be applied. Retry.",
+  error: new Error("Mutation was invalidated by an extension reload before it could be applied.")
+});
 function enqueueMutation(action) {
   const expectedGeneration = generation;
   const run = () => {
     if (expectedGeneration !== generation) {
-      return {
-        ok: false,
-        invalidated: true,
-        uncertain: false,
-        error: new Error("Mutation was invalidated by an extension reload.")
-      };
+      return invalidatedMutationResult();
     }
     return action();
   };
@@ -921,7 +936,7 @@ async function withGraphGuard(action) {
 }
 function subscribe(listener) {
   listeners.add(listener);
-  listener(running);
+  listener(running, { reason: "initial" });
   return () => listeners.delete(listener);
 }
 function subscribeActions(listener) {
@@ -946,10 +961,10 @@ function getLastRefreshStatus() {
 function getNotice() {
   return notice;
 }
-function notify() {
+function notify(meta = { reason: "mutation" }) {
   for (const listener of listeners) {
     try {
-      listener(running);
+      listener(running, meta);
     } catch (error) {
       console.error("[roam-logbook] listener failed", error);
     }
@@ -1024,7 +1039,7 @@ function refresh({ entries, notify: shouldNotify = true } = {}) {
   lastRefreshStatus = { ok: true, error: null };
   notice = "";
   if (shouldNotify)
-    notify();
+    notify({ reason: "refresh", explicit: true });
   return running;
 }
 function refreshResult({ entries, notify: shouldNotify = true } = {}) {
@@ -1520,21 +1535,22 @@ async function clockOutCompletedTask(taskUid, {
     }
   });
 }
-function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+function confirmedTreeRelation(taskUid, rootUid, parentOf) {
   const seen = /* @__PURE__ */ new Set();
   let current = taskUid;
   while (current) {
     if (current === rootUid)
-      return true;
+      return { matched: true, cyclic: false };
     if (seen.has(current)) {
-      throw new GraphReadError("Task hierarchy contains a cycle", {
-        issue: { kind: "hierarchy", source: "parent", message: "Task hierarchy contains a cycle" }
-      });
+      return { matched: false, cyclic: true };
     }
     seen.add(current);
     current = parentOf[current];
   }
-  return false;
+  return { matched: false, cyclic: false };
+}
+function isTaskInConfirmedTree(taskUid, rootUid, parentOf) {
+  return confirmedTreeRelation(taskUid, rootUid, parentOf).matched;
 }
 function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
   if (issue?.code === "ancestor-depth-exceeded" && !parentOf[rootUid])
@@ -1542,13 +1558,13 @@ function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
   if (issue?.code === "ambiguous-parent") {
     if (issue.taskUid === rootUid)
       return true;
-    return (issue.parentUids || []).some((candidate) => {
-      try {
-        return isTaskInConfirmedTree(candidate, rootUid, parentOf);
-      } catch {
-        return true;
-      }
-    });
+    const taskToRoot = confirmedTreeRelation(issue.taskUid, rootUid, parentOf);
+    const rootToTask = confirmedTreeRelation(rootUid, issue.taskUid, parentOf);
+    if (taskToRoot.matched || rootToTask.matched)
+      return true;
+    return (issue.parentUids || []).some(
+      (candidate) => confirmedTreeRelation(candidate, rootUid, parentOf).matched
+    );
   }
   const affected = [
     issue?.taskUid,
@@ -1558,12 +1574,35 @@ function hierarchyIssueAffectsTask(issue, rootUid, parentOf) {
   ].filter((uid) => typeof uid === "string" && uid);
   if (affected.length === 0)
     return true;
-  return affected.some((uid) => {
-    try {
-      return isTaskInConfirmedTree(uid, rootUid, parentOf) || isTaskInConfirmedTree(rootUid, uid, parentOf);
-    } catch {
-      return true;
+  const adjacent = /* @__PURE__ */ new Map();
+  const connect = (left, right) => {
+    if (!left || !right)
+      return;
+    (adjacent.get(left) || adjacent.set(left, /* @__PURE__ */ new Set()).get(left)).add(right);
+    (adjacent.get(right) || adjacent.set(right, /* @__PURE__ */ new Set()).get(right)).add(left);
+  };
+  for (const [child, parent] of Object.entries(parentOf || {}))
+    connect(child, parent);
+  if (issue?.taskUid) {
+    for (const parent of [issue.parentUid, ...issue.parentUids || []]) {
+      connect(issue.taskUid, parent);
     }
+  }
+  const component = /* @__PURE__ */ new Set([rootUid]);
+  const frontier = [rootUid];
+  while (frontier.length > 0) {
+    const current = frontier.pop();
+    for (const neighbor of adjacent.get(current) || []) {
+      if (component.has(neighbor))
+        continue;
+      component.add(neighbor);
+      frontier.push(neighbor);
+    }
+  }
+  return affected.some((uid) => {
+    const down = confirmedTreeRelation(uid, rootUid, parentOf);
+    const up = confirmedTreeRelation(rootUid, uid, parentOf);
+    return down.matched || up.matched || down.cyclic || up.cyclic ? component.has(uid) : false;
   });
 }
 async function discardClock(clockUid) {
@@ -2138,14 +2177,31 @@ var cancelScheduled = (documentRef, scheduled) => {
     clearTimeout(scheduled.id);
 };
 var matchesOrContains = (node, selector) => Boolean(node?.matches?.(selector) || node?.querySelector?.(selector));
-var isTopbarNode = (node) => Boolean(node?.matches?.(TOPBAR_SELECTOR) || node?.closest?.(TOPBAR_SELECTOR));
+var isTopbarRoot = (node) => Boolean(node?.matches?.(TOPBAR_SELECTOR));
+var isTopbarDescendant = (node) => Boolean(node?.closest?.(TOPBAR_SELECTOR));
 var isPageRefNode = (node) => Boolean(
   node?.matches?.(PAGE_REF_SELECTOR) || node?.closest?.(PAGE_REF_SELECTOR) || node?.querySelector?.(PAGE_REF_SELECTOR)
 );
+var containsPluginRoot = (node) => Boolean(node?.querySelector?.(PLUGIN_ROOT_SELECTOR));
+var isSyncCandidate = (documentRef, node) => semanticSyncCandidate(node) || smallGeometry(node) && candidateColors(documentRef, node).some(isStableGreen);
+var isPreviousSyncCandidate = (record) => {
+  const node = record?.target;
+  if (record?.type !== "attributes" || !node)
+    return false;
+  const values = [
+    record.attributeName === "class" ? record.oldValue : node.className,
+    record.attributeName === "aria-label" ? record.oldValue : node.getAttribute?.("aria-label"),
+    record.attributeName === "title" ? record.oldValue : node.getAttribute?.("title"),
+    record.attributeName === "data-state" ? record.oldValue : node.getAttribute?.("data-state"),
+    record.attributeName === "data-status" ? record.oldValue : node.getAttribute?.("data-status")
+  ];
+  return /saving|saved|sync|synced|synchroniz/i.test(values.filter(Boolean).join(" "));
+};
+var containsSyncCandidate = (documentRef, node) => isSyncCandidate(documentRef, node) || Boolean([...node?.querySelectorAll?.("*") || []].some((child) => isSyncCandidate(documentRef, child)));
 var isDocumentThemeNode = (node) => Boolean(
   node?.nodeType === 1 && (node === node.ownerDocument?.documentElement || node === node.ownerDocument?.body)
 );
-var isRelevantMutation = (record) => {
+var isRelevantMutation = (record, documentRef) => {
   const target = record.target;
   if (target?.closest?.("[data-rlb-palette-probe]"))
     return false;
@@ -2155,7 +2211,15 @@ var isRelevantMutation = (record) => {
     const oldClass = record.attributeName === "class" ? record.oldValue || "" : "";
     const wasTopbar = /(^|\s)rm-topbar(?:\s|$)/.test(oldClass);
     const wasPageRef = /(^|\s)rm-page-ref(?:[-_]|\s|$)/.test(oldClass);
-    if (isTopbarNode(target) || wasTopbar || isPageRefNode(target) || wasPageRef)
+    if (THEME_ROOT_ATTRIBUTES.has(record.attributeName) && containsPluginRoot(target)) {
+      return true;
+    }
+    if (isTopbarRoot(target) || wasTopbar)
+      return true;
+    if (isTopbarDescendant(target)) {
+      return isSyncCandidate(documentRef, target) || isPreviousSyncCandidate(record);
+    }
+    if (isPageRefNode(target) || wasPageRef)
       return true;
     return THEME_ROOT_ATTRIBUTES.has(record.attributeName) && (isDocumentThemeNode(target) || target?.matches?.(ROAM_HOST_SELECTOR));
   }
@@ -2167,8 +2231,11 @@ var isRelevantMutation = (record) => {
       return false;
     return !node?.closest?.(PLUGIN_ROOT_SELECTOR);
   });
-  if (isTopbarNode(target))
+  if (isTopbarRoot(target))
     return true;
+  if (isTopbarDescendant(target)) {
+    return nodes.some((node) => containsSyncCandidate(documentRef, node));
+  }
   return nodes.some((node) => matchesOrContains(node, TOPBAR_SELECTOR) || isPageRefNode(node));
 };
 var applyPalette = (root, palette) => {
@@ -2228,7 +2295,7 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
     const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
     if (MutationObserverCtor && target) {
       state.observer = new MutationObserverCtor((records) => {
-        if (records.some(isRelevantMutation))
+        if (records.some((record) => isRelevantMutation(record, documentRef)))
           scheduleRefresh();
       });
       state.observer.observe(target, {
@@ -3367,12 +3434,14 @@ __export(paused_exports, {
   getNotice: () => getNotice2,
   getPaused: () => getPaused,
   getPendingResume: () => getPendingResume,
+  getRecoveryState: () => getRecoveryState,
   load: () => load2,
   pauseAll: () => pauseAll,
   pruneCompleted: () => pruneCompleted,
   reset: () => reset3,
   resumeAll: () => resumeAll,
   resumeOne: () => resumeOne,
+  retryFinalizing: () => retryFinalizing,
   subscribe: () => subscribe2
 });
 var VERSION2 = STATE_FORMATS.pauseBatch;
@@ -3423,6 +3492,26 @@ var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
   };
 };
 var hasLegacyPomodoroFields = (value) => Boolean(value && ("pomodoroRemainingMs" in value || "pomodoroSuppressed" in value));
+var cleanFinalizingRecord = (value) => {
+  if (!value || typeof value !== "object" || typeof value.taskUid !== "string" || !value.taskUid)
+    return null;
+  const pausedAtMs = Number(value.pausedAtMs);
+  if (!Number.isFinite(pausedAtMs) || pausedAtMs < 0)
+    return null;
+  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
+  return { taskUid: value.taskUid, pausedAtMs, ...clockUid ? { clockUid } : {} };
+};
+var cleanFinalizingScope = (value) => {
+  if (!value || typeof value !== "object")
+    return null;
+  if (!Array.isArray(value.items) || !Array.isArray(value.pendingResume))
+    return null;
+  const items2 = value.items.map(cleanFinalizingRecord);
+  const pendingResume2 = value.pendingResume.map(cleanFinalizingRecord);
+  if (items2.some((item) => !item) || pendingResume2.some((item) => !item))
+    return null;
+  return { items: items2, pendingResume: pendingResume2 };
+};
 var cleanFinalizing = (value) => {
   if (!value || typeof value !== "object" || value.action !== "clock-out-all")
     return null;
@@ -3439,7 +3528,14 @@ var cleanFinalizing = (value) => {
       continue;
     targets2.push({ taskUid: target.taskUid, clockUid: target.clockUid });
   }
-  return { action: "clock-out-all", targets: targets2 };
+  const scope = "scope" in value ? cleanFinalizingScope(value.scope) : null;
+  if ("scope" in value && !scope)
+    return null;
+  return {
+    action: "clock-out-all",
+    targets: targets2,
+    ...scope ? { scope } : {}
+  };
 };
 var serialized2 = () => JSON.stringify({
   version: VERSION2,
@@ -3449,6 +3545,16 @@ var serialized2 = () => JSON.stringify({
     ...finalizing ? { finalizing } : {}
   }
 });
+var finalizingScope = () => ({
+  items: items.map(cleanFinalizingRecord).filter(Boolean),
+  pendingResume: pendingResume.map(cleanFinalizingRecord).filter(Boolean)
+});
+var makeFinalizing = (entries) => ({
+  action: "clock-out-all",
+  targets: entries.filter((entry) => entry.running).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
+  scope: finalizingScope()
+});
+var sameFinalizingRecord = (record, captured) => record?.taskUid === captured?.taskUid && Number(record?.pausedAtMs) === Number(captured?.pausedAtMs) && (captured?.clockUid ? record?.clockUid === captured.clockUid : !record?.clockUid);
 function persist() {
   if (unsupportedRaw2 !== null)
     return false;
@@ -3505,6 +3611,17 @@ function getPaused() {
 }
 function getPendingResume() {
   return pendingResume.map((item) => ({ ...item }));
+}
+function getRecoveryState() {
+  if (!finalizing)
+    return null;
+  return {
+    kind: "finalizing",
+    action: "commit-pause-batch",
+    targets: finalizing.targets.map((target) => ({ ...target })),
+    pendingTaskUids: [...new Set(finalizing.targets.map((target) => target.taskUid))],
+    pendingClockUids: finalizing.targets.map((target) => target.clockUid)
+  };
 }
 function pruneCompleted(taskUids = []) {
   const completedTaskUids = [...new Set(taskUids.filter((uid) => typeof uid === "string" && uid))];
@@ -3867,23 +3984,57 @@ async function recoverPending({ running: running2 = [] } = {}) {
 }
 var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
 function reconcileFinalizing({ running: running2 = [] } = {}) {
-  if (!finalizing)
-    return { ok: true, uncertain: false, activeTaskUids: [] };
+  if (!finalizing) {
+    return {
+      ok: true,
+      uncertain: false,
+      activeTaskUids: [],
+      activeClockUids: []
+    };
+  }
   const runningByClock = new Map(running2.map((entry) => [entry.clockUid, entry]));
   const activeTargets = finalizing.targets.filter((target) => {
     const entry = runningByClock.get(target.clockUid);
     return entry?.taskUid === target.taskUid;
   });
   const activeTaskUids = new Set(activeTargets.map((target) => target.taskUid));
+  const activeClockUids = activeTargets.map((target) => target.clockUid);
   const previousItems = items;
   const previousPending = pendingResume;
   const previousFinalizing = finalizing;
-  items = items.filter((item) => activeTaskUids.has(item.taskUid));
-  pendingResume = pendingResume.filter((item) => activeTaskUids.has(item.taskUid));
-  finalizing = activeTargets.length > 0 ? { action: "clock-out-all", targets: activeTargets } : null;
+  const capturedScope = finalizing.scope;
+  if (capturedScope) {
+    const removableTaskUids = new Set(
+      [...capturedScope.items, ...capturedScope.pendingResume].map((record) => record.taskUid).filter((taskUid) => !activeTaskUids.has(taskUid))
+    );
+    const removeCaptured = (records, captured) => {
+      const remainingCaptured = captured.slice();
+      return records.filter((record) => {
+        if (!removableTaskUids.has(record.taskUid))
+          return true;
+        const index = remainingCaptured.findIndex((item) => sameFinalizingRecord(record, item));
+        if (index < 0)
+          return true;
+        remainingCaptured.splice(index, 1);
+        return false;
+      });
+    };
+    items = removeCaptured(items, capturedScope.items);
+    pendingResume = removeCaptured(pendingResume, capturedScope.pendingResume);
+  } else {
+    items = items.filter((item) => activeTaskUids.has(item.taskUid));
+    pendingResume = pendingResume.filter((item) => activeTaskUids.has(item.taskUid));
+  }
+  finalizing = activeTargets.length > 0 ? { ...finalizing, targets: activeTargets } : null;
   const changed = previousItems.length !== items.length || previousPending.length !== pendingResume.length || JSON.stringify(previousFinalizing) !== JSON.stringify(finalizing);
-  if (!changed)
-    return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+  if (!changed) {
+    return {
+      ok: true,
+      uncertain: false,
+      activeTaskUids: [...activeTaskUids],
+      activeClockUids
+    };
+  }
   if (!persist()) {
     items = previousItems;
     pendingResume = previousPending;
@@ -3894,11 +4045,12 @@ function reconcileFinalizing({ running: running2 = [] } = {}) {
       ok: false,
       uncertain: true,
       activeTaskUids: [...activeTaskUids],
+      activeClockUids,
       error: new Error(notice3)
     };
   }
   notify2();
-  return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids] };
+  return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids], activeClockUids };
 }
 var resumeBatchResult = ({
   completed = 0,
@@ -3958,6 +4110,36 @@ var resumeOneResult = ({
     item: "Session",
     completedVerb: "resumed",
     ...extra
+  };
+};
+var commitFinalizingResult = ({ hadFinalizing = false, finalized }) => {
+  const activeTaskUids = finalized?.activeTaskUids || [];
+  const activeClockUids = finalized?.activeClockUids || [];
+  const uncertain = Boolean(finalized?.uncertain || finalized?.ok === false);
+  const blocked = activeTaskUids.length > 0;
+  const ok = !uncertain && !blocked;
+  const error = finalized?.error || (blocked ? new Error("Clock Out All still has running Sessions.") : null);
+  return {
+    action: "commit-pause-batch",
+    ok,
+    committed: Boolean(hadFinalizing && ok),
+    count: Boolean(hadFinalizing && ok) ? 1 : 0,
+    completed: Boolean(hadFinalizing && ok) ? 1 : 0,
+    failed: uncertain ? 1 : activeTaskUids.length,
+    pending: activeClockUids.length,
+    pendingTaskUids: activeTaskUids,
+    pendingClockUids: activeClockUids,
+    uncertain,
+    partial: false,
+    blocked,
+    retry: ok ? null : {
+      action: "commit-pause-batch",
+      retryTaskUids: activeTaskUids,
+      retryClockUids: activeClockUids
+    },
+    error,
+    item: "Pause Batch",
+    completedVerb: "committed"
   };
 };
 async function resumeRecord(record, now) {
@@ -4134,7 +4316,7 @@ async function resumeOne(taskUid, { now = /* @__PURE__ */ new Date() } = {}) {
   notify2();
   return resumeOneResult({ completed: 1, enabledMultiple });
 }
-async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
+async function resumeAll({ now = /* @__PURE__ */ new Date(), reconcileOnly = false } = {}) {
   if (unsupportedRaw2 !== null) {
     notice3 = "Saved paused-task state is unsupported; no Tasks were resumed.";
     notify2();
@@ -4146,11 +4328,18 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
       satisfied: 0
     });
   }
+  const hadFinalizing = Boolean(finalizing);
   notice3 = "";
   const initial = refreshResult();
   if (!initial.ok) {
     notice3 = getNotice() || "Graph state could not be confirmed; no further changes were made.";
     notify2();
+    if (reconcileOnly) {
+      return commitFinalizingResult({
+        hadFinalizing,
+        finalized: { ok: false, uncertain: true, activeTaskUids: [], activeClockUids: [], error: initial.error }
+      });
+    }
     return resumeBatchResult({
       failed: pendingResume.length + items.length,
       pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
@@ -4162,6 +4351,13 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     });
   }
   const finalized = reconcileFinalizing({ running: initial.running });
+  if (reconcileOnly) {
+    if (finalized.activeTaskUids.length > 0) {
+      notice3 = "Clock Out All still has running Sessions; they were kept for an explicit retry.";
+      notify2();
+    }
+    return commitFinalizingResult({ hadFinalizing, finalized });
+  }
   if (!finalized.ok) {
     return resumeBatchResult({
       failed: finalized.activeTaskUids.length,
@@ -4350,6 +4546,11 @@ async function resumeAll({ now = /* @__PURE__ */ new Date() } = {}) {
     legacyRecovered
   });
 }
+async function retryFinalizing({ now = /* @__PURE__ */ new Date() } = {}) {
+  if (!finalizing)
+    return commitFinalizingResult({ hadFinalizing: false, finalized: { ok: true } });
+  return resumeAll({ now, reconcileOnly: true });
+}
 async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   let outcome;
   try {
@@ -4357,10 +4558,7 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
       now,
       prepare: (entries) => {
         const previousFinalizing = finalizing;
-        finalizing = {
-          action: "clock-out-all",
-          targets: entries.filter((entry) => entry.running).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid }))
-        };
+        finalizing = makeFinalizing(entries);
         if (!persist()) {
           finalizing = previousFinalizing;
           const error = new Error(
@@ -4492,10 +4690,7 @@ async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
   }
   items = [...retained.values()];
   pendingResume = pendingResume.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid));
-  finalizing = {
-    action: "clock-out-all",
-    targets: (outcome.entries || []).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid }))
-  };
+  finalizing = makeFinalizing(outcome.entries || []);
   notice3 = outcome.uncertain ? GRAPH_UNCERTAIN : `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
   const persisted = persist();
   if (!persisted) {
@@ -4554,6 +4749,9 @@ function mutationResultNotice(result) {
   if (!result)
     return "";
   const message = typeof result?.message === "string" ? result.message : result?.error?.message;
+  if (result?.invalidated === true) {
+    return result.notice || "This action was interrupted by an extension reload before it could be applied. Retry.";
+  }
   if (result?.uncertain === true || typeof message === "string" && /Graph state could not be confirmed/i.test(message)) {
     return GRAPH_SYNC_RETRY_NOTICE;
   }
@@ -6395,6 +6593,7 @@ function buildSessionSurfaceModel({
   entries = [],
   pausedItems = [],
   pendingItems = [],
+  recoveryState = null,
   now,
   staleHours: staleHours2 = 8
 }) {
@@ -6425,6 +6624,7 @@ function buildSessionSurfaceModel({
     entries: entries.slice(),
     pausedItems: pausedItems.slice(),
     pendingItems: pendingItems.slice(),
+    recoveryState: recoveryState ? { ...recoveryState } : null,
     rows: [...runningRows, ...pausedRows, ...recoveryRows],
     runningCount: entries.length,
     pausedCount: pausedItems.length,
@@ -6432,7 +6632,7 @@ function buildSessionSurfaceModel({
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${taskCount(model.pausedCount)} Paused` : model.recoveryCount > 0 ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? "y" : "ies"} Required` : SURFACE_TITLE;
+var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${taskCount(model.pausedCount)} Paused` : model.recoveryCount > 0 ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? "y" : "ies"} Required` : model.recoveryState ? "Pause Batch Recovery Required" : SURFACE_TITLE;
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
   if (options.titleId)
@@ -6497,7 +6697,19 @@ function renderSessionSurface(root, model, options = {}) {
       title: "Open Roam Logbook Dashboard"
     })
   );
-  if (model.runningCount > 0 || model.pausedCount > 0) {
+  if (model.recoveryState) {
+    const recovery = button(
+      "bp3-button bp3-small",
+      "Retry Pause Batch cleanup",
+      () => options.onRetryRecovery?.(),
+      {
+        title: "Commit the saved Pause Batch cleanup without resuming paused Tasks"
+      }
+    );
+    recovery.dataset.action = "retry-pause-batch";
+    footer.appendChild(recovery);
+  }
+  if (model.runningCount > 0 || model.pausedCount > 0 || model.recoveryState) {
     if (model.runningCount > 0) {
       footer.appendChild(
         button("bp3-button bp3-small", singleRunning ? "Pause" : "Pause All", () => options.onPauseAll?.(), {
@@ -6719,6 +6931,7 @@ function createTopbar({
     entries: getRunning(),
     pausedItems: getPaused(),
     pendingItems: getPendingResume(),
+    recoveryState: getRecoveryState(),
     now: nowDate(),
     staleHours: staleHours()
   });
@@ -6764,7 +6977,7 @@ function createTopbar({
   const refreshSessions = () => {
     if (refreshInFlight)
       return refreshInFlight;
-    const request = Promise.resolve().then(() => refreshResult({ notify: false })).then(
+    const request = Promise.resolve().then(() => refreshResult()).then(
       (result) => {
         if (result?.ok) {
           actionNotice = "";
@@ -6840,6 +7053,7 @@ function createTopbar({
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
       onResume: (item) => void run(() => resumeOne(item.taskUid)),
       onRecovery: () => void run(() => resumeAll()),
+      onRetryRecovery: () => void run(() => retryFinalizing()),
       onDiscard: (entry) => {
         if (discardConfirmUid !== entry.clockUid) {
           discardConfirmUid = entry.clockUid;
@@ -6942,6 +7156,8 @@ function createTopbar({
       return;
     const pausedItems = getPaused();
     const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
+    const finalizingRecovery = getRecoveryState();
+    const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
     const running2 = entries.length > 0;
     if (running2 && reconcile2)
       reconcileCycle(entries, { now });
@@ -6955,16 +7171,18 @@ function createTopbar({
       buttonNode.classList.remove("rlb-topbar__button--parallel");
       buttonNode.classList.toggle(
         "rlb-topbar__button--paused",
-        pausedItems.length > 0 || recoveryItems.length > 0
+        pausedItems.length > 0 || recoveryItems.length > 0 || Boolean(finalizingRecovery)
       );
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       parallelNode.textContent = "";
       separatorNode.textContent = "";
-      syncButtonLayout(pausedItems.length > 0 || recoveryItems.length > 0 ? "paused" : "idle");
+      syncButtonLayout(
+        pausedItems.length > 0 || recoveryItems.length > 0 || finalizingRecovery ? "paused" : "idle"
+      );
       buttonNode.title = pausedItems.length ? `${taskCount2(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
-${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryItems.length > 0 ? `${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review \u2014 click to retry.` : "Roam Logbook \u2014 no Session running. Click for details.";
+${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryCount > 0 ? `${recoveryCount} Recovery item${recoveryCount === 1 ? "" : "s"} require review \u2014 click to retry.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
@@ -7278,6 +7496,7 @@ var retryOrphanedDetachers = () => {
       console.warn("[roam-logbook] deferred completion watch cleanup failed", error);
     }
   }
+  return retryableDetachers.size === 0;
 };
 var issueUids = (issue) => new Set([
   issue?.taskUid,
@@ -7313,7 +7532,7 @@ var ancestorsOf = (seed, parentOf) => {
   return result;
 };
 function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIssue = null } = {}) {
-  retryOrphanedDetachers();
+  let watchCleanupReady = retryOrphanedDetachers();
   let disposed = false;
   const watches = /* @__PURE__ */ new Map();
   const active = /* @__PURE__ */ new Set();
@@ -7422,9 +7641,14 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
       console.error("[roam-logbook] automatic completion reconciliation failed", error);
     });
   };
-  const sync = (entries) => {
+  const sync = (entries, event = {}) => {
     if (disposed || !Array.isArray(entries))
       return;
+    if (!watchCleanupReady) {
+      watchCleanupReady = retryOrphanedDetachers();
+      if (!watchCleanupReady)
+        return;
+    }
     const pauseTaskUids = [
       ...pauseApi?.getPaused?.() || [],
       ...pauseApi?.getPendingResume?.() || []
@@ -7450,12 +7674,14 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
       for (const uid of component)
         desired.add(uid);
     }
+    let installed = false;
     for (const uid of desired) {
       if (watches.has(uid))
         continue;
       const result = watchBlockString(uid, () => schedule(uid));
       if (result.ok) {
         watches.set(uid, result);
+        installed = true;
       } else {
         reportWatchIssue({ type: "install", uid, error: result.error, result });
         console.warn("[roam-logbook] completion watch unavailable", uid, result.error);
@@ -7490,6 +7716,7 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
         retryClockUids.delete(uid);
       }
     }
+    const explicitReconciliation = event.explicit === true || event.reason === "refresh" || event.reason === "reconcile";
     for (const uid of desired) {
       const status = statusOf.get(uid);
       const previous = lastStatus.get(uid);
@@ -7497,9 +7724,23 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
       if (status !== "DONE") {
         retryAttempts.delete(uid);
         retryClockUids.delete(uid);
-      } else if (previous !== "DONE") {
-        retryAttempts.delete(uid);
+      } else if (previous !== "DONE" || explicitReconciliation && retryClockUids.has(uid)) {
+        if (explicitReconciliation)
+          retryAttempts.delete(uid);
         schedule(uid);
+      }
+    }
+    const postInstallPass = Number(event.postInstallPass || 0);
+    if (installed && postInstallPass < 2) {
+      try {
+        const confirmedEntries = readAllEntries().filter((entry) => entry.running);
+        sync(confirmedEntries, {
+          ...event,
+          postInstallPass: postInstallPass + 1
+        });
+      } catch (error) {
+        reportWatchIssue({ type: "post-install-read", error, affectedUids: [...desired] });
+        console.warn("[roam-logbook] completion post-install reconciliation failed", error);
       }
     }
   };

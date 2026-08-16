@@ -124,6 +124,44 @@ test('completion retains a failed detach handle so lifecycle cleanup can be retr
     assert.equal(graph.pullWatchCount(), 0);
 });
 
+test('a failed old watcher detach blocks duplicate installation until cleanup succeeds', async () => {
+    const originalRemove = graph.api.data.removePullWatch;
+    const originalAdd = graph.api.data.addPullWatch;
+    let failRemove = true;
+    let addAttempts = 0;
+    graph.api.data.removePullWatch = (...args) => {
+        if (failRemove) throw new Error('old Pull Watch cannot be removed yet');
+        return originalRemove(...args);
+    };
+    graph.api.data.addPullWatch = (...args) => {
+        addAttempts += 1;
+        return originalAdd(...args);
+    };
+
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    addAttempts = 0;
+    extension.onunload();
+    assert.equal(graph.pullWatchCount(), 1, 'the failed old watch remains installed');
+
+    const detach = attachCompletionHandling();
+    try {
+        clock.refresh();
+        assert.equal(addAttempts, 0, 'a new lifecycle does not duplicate the old watch');
+        assert.equal(graph.pullWatchCount(), 1);
+
+        failRemove = false;
+        graph.api.data.removePullWatch = originalRemove;
+        clock.refresh();
+        assert.equal(addAttempts, 1, 'watch installation resumes after old cleanup succeeds');
+        assert.equal(graph.pullWatchCount(), 1);
+    } finally {
+        failRemove = false;
+        graph.api.data.removePullWatch = originalRemove;
+        graph.api.data.addPullWatch = originalAdd;
+        detach();
+    }
+});
+
 test('DONE on a parent clocks out the parent and its running child Sessions', async () => {
     install([PARENT, CHILD]);
     extension.onunload();
