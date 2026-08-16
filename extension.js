@@ -5454,7 +5454,7 @@ var STYLES = `
 }
 
 .rlb-run--inline-meta .rlb-run__meta-primary {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
 }
 
 .rlb-run--inline-meta .rlb-run__meta-separator {

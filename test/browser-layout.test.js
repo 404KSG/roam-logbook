@@ -671,10 +671,20 @@ test('Session metadata stays on one inline row without crowding actions', async 
                 const titleRect = rect(title);
                 const rowRect = rect(running);
                 const popoverRect = rect(document.querySelector('.rlb-popover'));
+                const ink = node => {
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    const value = range.getBoundingClientRect();
+                    return { left: value.left, right: value.right, top: value.top, bottom: value.bottom };
+                };
+                const primaryInk = ink(primary);
+                const startedInk = ink(started);
+                const separatorRect = rect(separator);
                 return {
                     width: ${width},
                     metaDisplay: getComputedStyle(meta).display,
                     metaWrap: getComputedStyle(meta).flexWrap,
+                    primaryFlex: getComputedStyle(primary).flex,
                     runningInlineMeta: running.classList.contains('rlb-run--inline-meta'),
                     metaGridColumn: getComputedStyle(meta).gridColumn,
                     metaGridRow: getComputedStyle(meta).gridRow,
@@ -693,6 +703,11 @@ test('Session metadata stays on one inline row without crowding actions', async 
                     startedAria: started.getAttribute('aria-label'),
                     primaryText: primary.textContent,
                     startedText: started.textContent,
+                    primaryInk,
+                    separator: separatorRect,
+                    startedInk,
+                    primaryToSeparatorGap: separatorRect.left - primaryInk.right,
+                    separatorToStartedGap: startedInk.left - separatorRect.right,
                     sameLine: Math.max(...metaItems.map(item => item.top)) < Math.min(...metaItems.map(item => item.bottom)),
                     metaBelowTitle: metaRect.top >= titleRect.bottom - 0.5,
                     metaExtendsUnderActions: metaRect.right >= actionRect.right - 0.5,
@@ -713,6 +728,7 @@ test('Session metadata stays on one inline row without crowding actions', async 
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaDisplay, 'flex', JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaWrap, 'nowrap', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.primaryFlex, '0 1 auto', JSON.stringify({ width, geometry }));
         assert.equal(geometry.runningInlineMeta, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaGridColumn, '1 / 3', JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaGridRow, '2', JSON.stringify({ width, geometry }));
@@ -735,6 +751,8 @@ test('Session metadata stays on one inline row without crowding actions', async 
         assert.match(geometry.startedAria, /^Started \[/, JSON.stringify({ width, geometry }));
         assert.equal(geometry.primaryText, '27:02 · 13h 33m total', JSON.stringify({ width, geometry }));
         assert.equal(geometry.startedText, 'Today 15:05', JSON.stringify({ width, geometry }));
+        assert.ok(geometry.primaryToSeparatorGap >= 5 && geometry.primaryToSeparatorGap <= 8, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.separatorToStartedGap >= 5 && geometry.separatorToStartedGap <= 8, JSON.stringify({ width, geometry }));
         assert.equal(geometry.sameLine, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaBelowTitle, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.metaExtendsUnderActions, true, JSON.stringify({ width, geometry }));
