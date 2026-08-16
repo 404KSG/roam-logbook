@@ -43,6 +43,47 @@ export const sessionLoadTone = count => {
     return 'neutral';
 };
 
+export function createPostPaintScheduler({
+    view = typeof window === 'undefined' ? null : window,
+    setTimeoutFn = (callback, delay) => setTimeout(callback, delay),
+    clearTimeoutFn = timerId => clearTimeout(timerId),
+} = {}) {
+    return callback => {
+        let cancelled = false;
+        let frameId = null;
+        let firstTaskId = null;
+        let followingTaskId = null;
+
+        const run = () => {
+            followingTaskId = null;
+            if (!cancelled) callback();
+        };
+        const scheduleFollowingTask = () => {
+            frameId = null;
+            firstTaskId = null;
+            if (!cancelled) followingTaskId = setTimeoutFn(run, 0);
+        };
+
+        if (typeof view?.requestAnimationFrame === 'function') {
+            frameId = view.requestAnimationFrame(scheduleFollowingTask);
+        } else {
+            firstTaskId = setTimeoutFn(scheduleFollowingTask, 0);
+        }
+
+        return () => {
+            cancelled = true;
+            if (frameId !== null && typeof view?.cancelAnimationFrame === 'function') {
+                view.cancelAnimationFrame(frameId);
+            }
+            if (firstTaskId !== null) clearTimeoutFn(firstTaskId);
+            if (followingTaskId !== null) clearTimeoutFn(followingTaskId);
+            frameId = null;
+            firstTaskId = null;
+            followingTaskId = null;
+        };
+    };
+}
+
 /**
  * Where Roam's own left-hand navigation ends.
  *
@@ -63,6 +104,7 @@ export function createTopbar({
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
     clearIntervalFn = tickerId => clearInterval(tickerId),
+    scheduleAfterPaintFn = createPostPaintScheduler(),
 }) {
     let container = null;
     let timeNode = null;
@@ -91,6 +133,7 @@ export function createTopbar({
     let layoutMode = null;
     let actionNotice = '';
     let refreshInFlight = null;
+    let pendingOpenRefresh = null;
     let refreshClearTimer = null;
     let refreshState = { state: 'idle', message: '' };
     let themeRuntime = null;
@@ -114,7 +157,23 @@ export function createTopbar({
         discardConfirmTimer = null;
     };
 
+    const cancelPendingOpenRefresh = () => {
+        const pending = pendingOpenRefresh;
+        if (!pending) return;
+        pendingOpenRefresh = null;
+        pending.cancel?.();
+        if (refreshState.state === 'loading' && !refreshInFlight) {
+            refreshState = { state: 'idle', message: '' };
+        }
+        pending.resolve({
+            ok: false,
+            cancelled: true,
+            running: clock.getRunning(),
+        });
+    };
+
     const closePopover = ({ restoreFocus = true } = {}) => {
+        cancelPendingOpenRefresh();
         resetClockOutConfirmation();
         resetDiscardConfirmation();
         actionNotice = '';
@@ -279,7 +338,41 @@ export function createTopbar({
         return refreshInFlight;
     };
 
+    const requestSessionRefresh = () =>
+        pendingOpenRefresh?.promise || refreshSessions();
+
+    const scheduleOpenRevalidation = () => {
+        if (refreshInFlight) return refreshInFlight;
+        if (pendingOpenRefresh) return pendingOpenRefresh.promise;
+
+        let resolvePending;
+        const promise = new Promise(resolve => {
+            resolvePending = resolve;
+        });
+        const pending = {
+            promise,
+            resolve: resolvePending,
+            cancel: null,
+        };
+        pendingOpenRefresh = pending;
+        pending.cancel = scheduleAfterPaintFn(() => {
+            if (pendingOpenRefresh !== pending) return;
+            pendingOpenRefresh = null;
+            if (destroyed || !popover) {
+                pending.resolve({
+                    ok: false,
+                    cancelled: true,
+                    running: clock.getRunning(),
+                });
+                return;
+            }
+            void refreshSessions().then(pending.resolve);
+        });
+        return promise;
+    };
+
     const run = async action => {
+        cancelPendingOpenRefresh();
         try {
             const result = await action();
             actionNotice = mutationResultNotice(result);
@@ -302,11 +395,12 @@ export function createTopbar({
             notices: surfaceNotices(),
             clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
             refreshState,
-            onRefresh: refreshSessions,
+            onRefresh: requestSessionRefresh,
             onOpenTask: (taskUid, event) => {
                 if (event?.shiftKey) {
                     event.preventDefault();
                     event.stopPropagation();
+                    cancelPendingOpenRefresh();
                     void openBlockInRightSidebar(taskUid).then(result => {
                         if (result?.ok) {
                             closePopover({ restoreFocus: false });
@@ -366,9 +460,12 @@ export function createTopbar({
         const model = sessionModel();
         const refreshStatus = clock.getLastRefreshStatus();
         const options = surfaceOptions();
-        options.emptyMessage = refreshStatus.ok
-            ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
-            : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
+        options.emptyMessage =
+            refreshState.state === 'loading'
+                ? 'Refreshing Session state from graph…'
+                : refreshStatus.ok
+                  ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                  : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
         renderSessionSurface(popover, model, options);
         themeRuntime?.apply(popover);
     }
@@ -388,7 +485,7 @@ export function createTopbar({
             closePopover();
             return;
         }
-        clock.refresh();
+        setRefreshState('loading', REFRESH_LOADING_MESSAGE);
         popover = el('div', 'bp3-card bp3-elevation-3 rlb-popover');
         popover.id = POPOVER_ID;
         popover.setAttribute('role', 'dialog');
@@ -409,6 +506,7 @@ export function createTopbar({
             popover.tabIndex = -1;
             popover.focus();
         }
+        void scheduleOpenRevalidation();
     };
 
     confirmation?.setOnChange(() => {
@@ -837,6 +935,7 @@ export function createTopbar({
         },
         unmount() {
             destroyed = true;
+            cancelPendingOpenRefresh();
             if (refreshClearTimer) clearTimeout(refreshClearTimer);
             refreshClearTimer = null;
             refreshInFlight = null;

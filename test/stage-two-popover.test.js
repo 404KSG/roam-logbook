@@ -46,7 +46,9 @@ const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
 const paused = await import('../src/paused.js');
-const { sessionCount, sessionLoadTone } = await import('../src/topbar.js');
+const { createPostPaintScheduler, createTopbar, sessionCount, sessionLoadTone } =
+    await import('../src/topbar.js');
+const { setExtensionAPI } = await import('../src/settings.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 const shiftClick = node => {
@@ -62,12 +64,76 @@ const settle = async () => {
     await new Promise(resolve => setImmediate(resolve));
     await new Promise(resolve => setImmediate(resolve));
 };
+const settlePostPaint = async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle();
+};
 const topbarButton = () => document.querySelector('#roam-logbook-topbar button');
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 const openPopover = () => {
     click(topbarButton());
     return document.querySelector('body > .rlb-popover');
 };
+
+const createManualPostPaintScheduler = () => {
+    let nextId = 0;
+    const pending = new Map();
+    return {
+        schedule(callback) {
+            const id = ++nextId;
+            pending.set(id, callback);
+            return () => pending.delete(id);
+        },
+        flush() {
+            const callbacks = [...pending.values()];
+            pending.clear();
+            for (const callback of callbacks) callback();
+        },
+        get size() {
+            return pending.size;
+        },
+    };
+};
+
+const mountControlledTopbar = (t, { blocks, scheduler, prime = true }) => {
+    extension.onunload();
+    document.body.innerHTML = '<div class="rm-topbar"></div>';
+    install(blocks);
+    setExtensionAPI(extensionAPI);
+    clock.reset();
+    if (prime) clock.refresh();
+    const topbar = createTopbar({
+        onOpenDashboard: () => {},
+        scheduleAfterPaintFn: scheduler.schedule,
+    });
+    topbar.mount();
+    t.after(() => {
+        topbar.unmount();
+        clock.reset();
+        setExtensionAPI(null);
+    });
+    return topbar;
+};
+
+const cachedSessionBlocks = ({ title = 'Cached Session' } = {}) => [
+    {
+        uid: 'popover-task-01',
+        string: `{{[[TODO]]}} ${title}`,
+        parent: null,
+        page: 'Project Page',
+    },
+    {
+        uid: 'popover-drawer-01',
+        string: 'LOGBOOK::',
+        parent: 'popover-task-01',
+    },
+    {
+        uid: 'popover-clock-01',
+        string: 'CLOCK:: [2026-08-15 Sat 08:30]',
+        parent: 'popover-drawer-01',
+    },
+];
 
 test.beforeEach(() => {
     extension.onunload();
@@ -90,6 +156,292 @@ test.afterEach(t => {
 });
 test.after(() => uninstallGraph());
 
+test('ordinary click paints cached Sessions and loading before post-paint graph revalidation', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(document.querySelector('#roam-logbook-topbar button'));
+    const popover = document.querySelector('body > .rlb-popover');
+    const refresh = popover.querySelector('[data-action="refresh"]');
+
+    assert.ok(popover, 'Popover exists on the click stack');
+    assert.match(popover.textContent, /Cached Session/);
+    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
+    assert.equal(refresh.getAttribute('aria-busy'), 'true');
+    assert.equal(refresh.textContent, '');
+    assert.equal(graphReads, 0, 'graph read waits for the post-paint scheduler');
+    assert.equal(scheduler.size, 1);
+
+    scheduler.flush();
+    await settle();
+
+    assert.equal(graphReads, 1);
+    assert.equal(
+        popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
+        'success'
+    );
+});
+
+test('post-paint scheduler waits for animation frame and a following task and can cancel either phase', () => {
+    let nextId = 0;
+    const frames = new Map();
+    const tasks = new Map();
+    const scheduler = createPostPaintScheduler({
+        view: {
+            requestAnimationFrame: callback => {
+                const id = ++nextId;
+                frames.set(id, callback);
+                return id;
+            },
+            cancelAnimationFrame: id => frames.delete(id),
+        },
+        setTimeoutFn: callback => {
+            const id = ++nextId;
+            tasks.set(id, callback);
+            return id;
+        },
+        clearTimeoutFn: id => tasks.delete(id),
+    });
+    let calls = 0;
+
+    const cancelBeforeFrame = scheduler(() => {
+        calls += 1;
+    });
+    assert.equal(frames.size, 1);
+    assert.equal(tasks.size, 0);
+    cancelBeforeFrame();
+    assert.equal(frames.size, 0);
+
+    const cancelAfterFrame = scheduler(() => {
+        calls += 1;
+    });
+    const frame = [...frames.values()][0];
+    frames.clear();
+    frame();
+    assert.equal(tasks.size, 1);
+    assert.equal(calls, 0);
+    cancelAfterFrame();
+    assert.equal(tasks.size, 0);
+
+    scheduler(() => {
+        calls += 1;
+    });
+    const finalFrame = [...frames.values()][0];
+    frames.clear();
+    finalFrame();
+    const followingTask = [...tasks.values()][0];
+    tasks.clear();
+    followingTask();
+    assert.equal(calls, 1);
+
+    const fallbackTasks = new Map();
+    const fallbackScheduler = createPostPaintScheduler({
+        view: null,
+        setTimeoutFn: callback => {
+            const id = ++nextId;
+            fallbackTasks.set(id, callback);
+            return id;
+        },
+        clearTimeoutFn: id => fallbackTasks.delete(id),
+    });
+    fallbackScheduler(() => {
+        calls += 1;
+    });
+    const firstFallbackTask = [...fallbackTasks.values()][0];
+    fallbackTasks.clear();
+    firstFallbackTask();
+    assert.equal(calls, 1, 'fallback still waits through its first task');
+    const secondFallbackTask = [...fallbackTasks.values()][0];
+    fallbackTasks.clear();
+    secondFallbackTask();
+    assert.equal(calls, 2);
+});
+
+test('external graph Sessions appear only after open-time revalidation settles', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} External Session',
+        parent: null,
+        page: 'Project Page',
+    });
+    graph.store.set('popover-drawer-02', {
+        uid: 'popover-drawer-02',
+        string: 'LOGBOOK::',
+        parent: 'popover-task-02',
+    });
+    graph.store.set('popover-clock-02', {
+        uid: 'popover-clock-02',
+        string: 'CLOCK:: [2026-08-15 Sat 08:45]',
+        parent: 'popover-drawer-02',
+    });
+
+    click(topbarButton());
+    const popover = document.querySelector('body > .rlb-popover');
+    assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
+    assert.doesNotMatch(popover.textContent, /External Session/);
+
+    scheduler.flush();
+    await settle();
+
+    assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
+    assert.match(popover.textContent, /External Session/);
+});
+
+test('failed open-time revalidation preserves cached rows and reports retryable uncertainty', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('temporary graph read failure');
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(topbarButton());
+    const popover = document.querySelector('body > .rlb-popover');
+    assert.match(popover.textContent, /Cached Session/);
+    scheduler.flush();
+    await settle();
+
+    assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
+    assert.match(popover.textContent, /Cached Session/);
+    assert.match(popover.textContent, /retry|could not be confirmed|last valid snapshot/i);
+    assert.doesNotMatch(popover.textContent, /No Session is running/);
+});
+
+test('closing before the post-paint callback cancels revalidation', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(topbarButton());
+    assert.equal(scheduler.size, 1);
+    click(topbarButton());
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+    assert.equal(scheduler.size, 0);
+    scheduler.flush();
+    await settle();
+
+    assert.equal(graphReads, 0);
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+});
+
+test('closing after graph revalidation starts updates shared cache without reopening Popover', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} External Session',
+        parent: null,
+        page: 'Project Page',
+    });
+    graph.store.set('popover-drawer-02', {
+        uid: 'popover-drawer-02',
+        string: 'LOGBOOK::',
+        parent: 'popover-task-02',
+    });
+    graph.store.set('popover-clock-02', {
+        uid: 'popover-clock-02',
+        string: 'CLOCK:: [2026-08-15 Sat 08:45]',
+        parent: 'popover-drawer-02',
+    });
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) {
+            graphReads += 1;
+            click(topbarButton());
+        }
+        return originalQuery(...args);
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(topbarButton());
+    scheduler.flush();
+    await settle();
+
+    assert.equal(graphReads, 1);
+    assert.equal(clock.getRunning().length, 2);
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+    assert.match(topbarButton().textContent, /2 Sessions/);
+});
+
+test('unmount cancels a pending open-time revalidation callback', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    const topbar = mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(topbarButton());
+    assert.equal(scheduler.size, 1);
+    topbar.unmount();
+    assert.equal(scheduler.size, 0);
+    scheduler.flush();
+    await settle();
+
+    assert.equal(graphReads, 0);
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+});
+
+test('manual Refresh during pending and in-flight open revalidation reuses one graph read', async t => {
+    const scheduler = createManualPostPaintScheduler();
+    mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
+
+    click(topbarButton());
+    const popover = document.querySelector('body > .rlb-popover');
+    click(popover.querySelector('[data-action="refresh"]'));
+    assert.equal(graphReads, 0);
+
+    scheduler.flush();
+    click(popover.querySelector('[data-action="refresh"]'));
+    await settle();
+
+    assert.equal(graphReads, 1);
+    assert.equal(
+        popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
+        'success'
+    );
+});
+
 test('empty Session surface keeps Dashboard and Refresh on one row', () => {
     const popover = openPopover();
     const footer = popover.querySelector('.rlb-popover__footer');
@@ -98,7 +450,7 @@ test('empty Session surface keeps Dashboard and Refresh on one row', () => {
 
     assert.ok(footer.classList.contains('rlb-popover__footer--empty'));
     assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
-    assert.equal(refreshCell.dataset.refreshState, 'idle');
+    assert.equal(refreshCell.dataset.refreshState, 'loading');
     assert.equal(refreshCell.querySelector('[data-action="refresh"]').getAttribute('aria-label'), 'Refresh Sessions from graph');
     assert.equal(footer.querySelectorAll('.bp3-button').length, 2);
     assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
@@ -391,7 +743,7 @@ test('Session surfaces keep Refresh copy hidden while preserving accessible stat
     assert.equal(refresh.title, 'Refresh Sessions from graph');
     assert.equal(refresh.getAttribute('aria-label'), 'Refresh Sessions from graph');
     assert.ok(refresh.classList.contains('bp3-icon-refresh'));
-    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'idle');
+    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
     const live = popover.querySelector('.rlb-surface__refresh-status');
     assert.equal(live.getAttribute('role'), 'status');
     assert.equal(live.getAttribute('aria-live'), 'polite');
@@ -421,6 +773,8 @@ test('Session surfaces keep Refresh copy hidden while preserving accessible stat
         loading.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
         /refreshing/i
     );
+    t.mock.timers.tick(0);
+    t.mock.timers.tick(0);
     await settle();
     assert.equal(popover.parentElement, document.body);
     assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
@@ -475,7 +829,7 @@ test('Refresh rereads an external graph Session without closing the popover', as
     });
 
     click(popover.querySelector('[data-action="refresh"]'));
-    await settle();
+    await settlePostPaint();
 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
@@ -505,7 +859,7 @@ test('fast Refresh clicks coalesce into one graph read', async t => {
         const loading = popover.querySelector('[data-action="refresh"]');
         click(loading);
         assert.equal(loading.disabled, true);
-        await settle();
+        await settlePostPaint();
         assert.equal(reads, 1);
         assert.equal(notifications, 1, 'explicit Refresh announces the confirmed reconciliation');
         assert.match(
@@ -530,7 +884,7 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
 
     try {
         click(popover.querySelector('[data-action="refresh"]'));
-        await settle();
+        await settlePostPaint();
     } finally {
         graph.api.data.q = originalQuery;
     }
@@ -1015,21 +1369,26 @@ test('extension unload removes the regular Session popover and topbar cleanly', 
     assert.equal(document.querySelector('#roam-logbook-topbar'), null);
 });
 
-test('topbar does not present a confirmed empty state when graph refresh fails', () => {
+test('topbar does not present a confirmed empty state when graph refresh fails', async t => {
     clock.reset();
     const originalQuery = graph.api.data.q;
     graph.api.data.q = () => {
         throw new Error('graph refresh unavailable');
     };
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+    });
 
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
-    assert.match(popover.textContent, /Graph state could not be confirmed/i);
+    assert.match(popover.textContent, /Refreshing Session state/i);
+    await settlePostPaint();
+    assert.doesNotMatch(popover.textContent, /No Session is running/);
+    assert.match(popover.textContent, /state could not be confirmed|retry/i);
 
-    graph.api.data.q = originalQuery;
 });
 
-test('topbar shows a running Session for a confirmed open CLOCK', () => {
+test('topbar shows a running Session for a confirmed open CLOCK', async () => {
     install([
         {
             uid: 'popover-task-01',
@@ -1047,6 +1406,8 @@ test('topbar shows a running Session for a confirmed open CLOCK', () => {
     clock.reset();
 
     const popover = openPopover();
+    assert.doesNotMatch(popover.textContent, /No Session is running/);
+    await settlePostPaint();
     assert.match(popover.querySelector('.rlb-popover__title').textContent, /1 Session Running/);
     assert.ok(popover.querySelector('.rlb-run'));
     assert.doesNotMatch(popover.textContent, /No Session is running/);
@@ -1129,7 +1490,10 @@ test('popover is modal to keyboard focus and falls back to the dialog when empty
     click(trigger);
     const popover = document.querySelector('body > .rlb-popover');
     assert.equal(popover.getAttribute('aria-modal'), 'true');
-    const focusables = () => [...popover.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')];
+    const focusables = () =>
+        [...popover.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])')].filter(
+            node => !node.disabled && node.getAttribute('aria-hidden') !== 'true'
+        );
     const first = focusables()[0];
     const last = focusables().at(-1);
     last.focus();
