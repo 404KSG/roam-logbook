@@ -587,3 +587,182 @@ test('the Dashboard is list-first when idle and keeps rollup help accessible wit
 
     dashboard.destroy();
 });
+
+const installTaskViewFixture = () => {
+    graph = installGraph([
+        { uid: 'done-parent', string: '{{[[DONE]]}} Completed project', parent: null },
+        { uid: 'todo-child', string: '{{[[TODO]]}} Nested TODO', parent: 'done-parent' },
+        { uid: 'todo-root', string: '{{[[TODO]]}} Todo root', parent: null },
+        { uid: 'done-root', string: '{{[[DONE]]}} Done root', parent: null },
+        { uid: 'unknown-root', string: 'Unclassified root', parent: null },
+        { uid: 'todo-child-drawer', string: 'LOGBOOK::', parent: 'todo-child' },
+        {
+            uid: 'todo-child-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:30] => 0:30',
+            parent: 'todo-child-drawer',
+        },
+        { uid: 'todo-root-drawer', string: 'LOGBOOK::', parent: 'todo-root' },
+        {
+            uid: 'todo-root-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:20] => 0:20',
+            parent: 'todo-root-drawer',
+        },
+        { uid: 'done-root-drawer', string: 'LOGBOOK::', parent: 'done-root' },
+        {
+            uid: 'done-root-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:40] => 0:40',
+            parent: 'done-root-drawer',
+        },
+        { uid: 'unknown-root-drawer', string: 'LOGBOOK::', parent: 'unknown-root' },
+        {
+            uid: 'unknown-root-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:10] => 0:10',
+            parent: 'unknown-root-drawer',
+        },
+    ]);
+};
+
+const taskTitles = () =>
+    [...document.querySelectorAll('.rlb-task-table .rlb-tree__cell .rlb-task-link__text')].map(
+        node => node.textContent
+    );
+
+test('Dashboard task filters keep unique counts and context ancestors without changing overview or running', async () => {
+    installTaskViewFixture();
+    const nowMs = new Date('2026-08-15T12:00:00').getTime();
+    await clock.clockIn('todo-root', { now: new Date(nowMs) });
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+    dashboard.open();
+
+    const byTask = document.querySelector('.rlb-by-task');
+    const filterGroup = byTask.querySelector('[role="group"]');
+    const filterButton = value => byTask.querySelector(`[data-filter="${value}"]`);
+    const count = () => byTask.querySelector('.rlb-task-count').textContent;
+    const overviewBefore = document.querySelector('.rlb-overview').textContent;
+    const runningBefore = document.querySelector('.rlb-running').textContent;
+
+    assert.equal(filterGroup.getAttribute('aria-label'), 'Filter tasks by status');
+    assert.equal(filterButton('ALL').getAttribute('aria-pressed'), 'true');
+    assert.equal(count(), '5 of 5 Tasks');
+    assert.deepEqual(taskTitles(), [
+        'Done root',
+        'Completed project',
+        'Nested TODO',
+        'Todo root',
+        'Unclassified root',
+    ]);
+
+    filterButton('TODO').click();
+    assert.equal(filterButton('TODO').getAttribute('aria-pressed'), 'true');
+    assert.equal(filterButton('ALL').getAttribute('aria-pressed'), 'false');
+    assert.equal(count(), '2 of 5 Tasks');
+    assert.deepEqual(taskTitles(), ['Completed project', 'Nested TODO', 'Todo root']);
+    assert.ok(
+        [...byTask.querySelectorAll('tbody tr')].some(row =>
+            row.classList.contains('rlb-row--context')
+        ),
+        'the required non-matching ancestor is retained as context'
+    );
+    assert.doesNotMatch(byTask.textContent, /Done root|Unclassified root/);
+    assert.equal(document.querySelector('.rlb-overview').textContent, overviewBefore);
+    assert.equal(document.querySelector('.rlb-running').textContent, runningBefore);
+
+    filterButton('DONE').click();
+    assert.equal(count(), '2 of 5 Tasks');
+    assert.deepEqual(taskTitles(), ['Done root', 'Completed project']);
+    assert.doesNotMatch(byTask.textContent, /Nested TODO|Todo root|Unclassified root/);
+    dashboard.destroy();
+});
+
+test('Dashboard shows a status-specific empty state for a filter with no matches', () => {
+    graph = installGraph([
+        { uid: 'only-done', string: '{{[[DONE]]}} Only done', parent: null },
+        { uid: 'only-done-drawer', string: 'LOGBOOK::', parent: 'only-done' },
+        {
+            uid: 'only-done-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:10] => 0:10',
+            parent: 'only-done-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+    document.querySelector('.rlb-by-task [data-filter="TODO"]').click();
+
+    assert.equal(
+        document.querySelector('.rlb-task-empty').textContent,
+        'No TODO Tasks in the selected range.'
+    );
+    assert.equal(document.querySelector('.rlb-task-count').textContent, '0 of 1 Tasks');
+    dashboard.destroy();
+});
+
+test('Dashboard task headers sort recursively with native buttons and expose ARIA state', () => {
+    installTaskViewFixture();
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const header = key => document.querySelector(`.rlb-task-table th[data-sort-key="${key}"]`);
+    const buttonFor = key => header(key).querySelector('button');
+    const taskHeader = document.querySelector('.rlb-task-table th:first-child');
+    const runningHeaderButtons = document.querySelectorAll('.rlb-running thead button');
+
+    assert.equal(header('total').getAttribute('aria-sort'), 'descending');
+    assert.equal(buttonFor('total').getAttribute('aria-pressed'), 'true');
+    assert.equal(header('sessions').hasAttribute('aria-sort'), false);
+    assert.equal(header('own').hasAttribute('aria-sort'), false);
+    assert.equal(taskHeader.querySelector('button'), null);
+    assert.equal(runningHeaderButtons.length, 0);
+    assert.equal(buttonFor('own').title, 'Time recorded directly on this Task');
+    assert.equal(buttonFor('total').title, 'Own time plus all sub-tasks');
+    assert.equal(
+        document.querySelectorAll('.rlb-task-table .rlb-task-sort-arrow[aria-hidden="true"]').length,
+        1
+    );
+
+    buttonFor('own').click();
+    assert.equal(header('own').getAttribute('aria-sort'), 'descending');
+    assert.equal(buttonFor('own').getAttribute('aria-pressed'), 'true');
+    assert.equal(header('total').hasAttribute('aria-sort'), false);
+    assert.equal(buttonFor('own').querySelector('[aria-hidden="true"]').textContent, '↓');
+
+    buttonFor('own').click();
+    assert.equal(header('own').getAttribute('aria-sort'), 'ascending');
+    assert.equal(buttonFor('own').querySelector('[aria-hidden="true"]').textContent, '↑');
+    document.querySelector('.rlb-by-task [data-filter="TODO"]').click();
+    assert.equal(header('own').getAttribute('aria-sort'), 'ascending');
+    assert.equal(document.querySelector('.rlb-by-task [data-filter="TODO"]').getAttribute('aria-pressed'), 'true');
+    dashboard.destroy();
+});
+
+test('Dashboard keeps All and filtered collapse state in separate controller-local views', () => {
+    installTaskViewFixture();
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const rowFor = title =>
+        [...document.querySelectorAll('.rlb-task-table tbody tr')].find(row =>
+            row.querySelector('.rlb-task-link__text')?.textContent === title
+        );
+    const collapseParent = () => rowFor('Completed project').querySelector('.rlb-tree__toggle');
+    const todoFilter = document.querySelector('.rlb-by-task [data-filter="TODO"]');
+    const allFilter = document.querySelector('.rlb-by-task [data-filter="ALL"]');
+
+    collapseParent().click();
+    assert.equal(rowFor('Nested TODO'), undefined);
+
+    todoFilter.click();
+    assert.ok(rowFor('Nested TODO'), 'filtered views start with matching paths expanded');
+    collapseParent().click();
+    assert.equal(rowFor('Nested TODO'), undefined);
+
+    allFilter.click();
+    assert.equal(rowFor('Nested TODO'), undefined, 'All restores its own collapsed state');
+    const range = document.querySelector('.rlb-header select');
+    range.value = 'month';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(document.querySelector('.rlb-by-task [data-filter="ALL"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(rowFor('Nested TODO'), undefined, 'range changes keep the All collapse state');
+    todoFilter.click();
+    assert.equal(rowFor('Nested TODO'), undefined, 'TODO restores its own collapsed state');
+    dashboard.destroy();
+});

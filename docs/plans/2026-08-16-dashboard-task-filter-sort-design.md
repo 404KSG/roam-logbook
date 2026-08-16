@@ -38,4 +38,3 @@ The Dashboard `By task` panel gains a compact status filter and hierarchy-preser
 Pure tests cover status matching, required context ancestors, unknown status, sibling-only recursive sorting, tie-breakers, and immutability. Dashboard DOM tests cover controls, counts, empty states, active arrows, `aria-pressed`, `aria-sort`, explanatory titles, collapse preservation, and unchanged overview/Running metrics. Browser layout tests cover compact desktop controls, sticky table headers, narrow-width wrapping without horizontal control overlap, and existing task-table rails. Full lint, workflow, bundle synchronization, and regression suites must remain green.
 
 No GitHub or Roam Depot push is part of this implementation unless separately requested.
-

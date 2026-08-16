@@ -19,6 +19,7 @@ import {
     getRange,
     RANGES,
     summariseSessionMetrics,
+    transformTaskForest,
 } from './stats.js';
 import { staleHours } from './settings.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
@@ -128,6 +129,19 @@ export function createDashboard({
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
     const collapsed = new Set();
+    // Filtered task views are deliberately independent from the persisted All
+    // view. A first visit to TODO/DONE starts expanded, while returning to All
+    // restores exactly the user's original tree arrangement.
+    const taskView = {
+        filter: 'ALL',
+        sortBy: 'total',
+        direction: 'desc',
+    };
+    const collapsedByFilter = {
+        ALL: collapsed,
+        TODO: new Set(),
+        DONE: new Set(),
+    };
 
     const clearLiveTicker = () => {
         if (liveTicker !== null) clearIntervalFn(liveTicker);
@@ -526,12 +540,12 @@ export function createDashboard({
     };
 
     const tasksSection = tree => {
-        const everyRow = flattenForest(tree);
-        const parentUids = everyRow.filter(node => node.hasChildren).map(node => node.taskUid);
-
         const section = el('section', 'rlb-dashboard-section rlb-dashboard-panel rlb-by-task');
         const heading = el('div', 'rlb-section__heading rlb-panel__header');
         heading.appendChild(el('h3', 'rlb-section__title', 'By task'));
+
+        const taskCount = el('span', 'rlb-task-count');
+        heading.appendChild(taskCount);
 
         const rollupHelp =
             'Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.';
@@ -547,22 +561,85 @@ export function createDashboard({
         help.id = 'roam-logbook-task-rollup-help';
         section.appendChild(help);
 
-        const toggleAll = button('bp3-button bp3-minimal bp3-small', '', () => {
-            const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
-            if (anyExpanded) for (const uid of parentUids) collapsed.add(uid);
-            else collapsed.clear();
+        const filterGroup = el('div', 'rlb-task-filters');
+        filterGroup.setAttribute('role', 'group');
+        filterGroup.setAttribute('aria-label', 'Filter tasks by status');
+        for (const [value, label] of [
+            ['ALL', 'All'],
+            ['TODO', 'TODO'],
+            ['DONE', 'DONE'],
+        ]) {
+            const filterButton = button(
+                'bp3-button bp3-minimal bp3-small rlb-task-filter',
+                label,
+                () => {
+                    taskView.filter = value;
+                    paint();
+                },
+                { title: `Show ${label === 'All' ? 'all tasks' : `${label} tasks`}` }
+            );
+            filterButton.dataset.filter = value;
+            filterButton.setAttribute('aria-pressed', String(taskView.filter === value));
+            filterGroup.appendChild(filterButton);
+        }
+        heading.appendChild(filterGroup);
+
+        let visibleParentUids = [];
+        const toggleAll = button('bp3-button bp3-minimal bp3-small rlb-tree__collapse-all', '', () => {
+            const viewCollapsed = collapsedByFilter[taskView.filter];
+            const anyExpanded = visibleParentUids.some(uid => !viewCollapsed.has(uid));
+            if (anyExpanded) {
+                for (const uid of visibleParentUids) viewCollapsed.add(uid);
+            } else {
+                for (const uid of visibleParentUids) viewCollapsed.delete(uid);
+            }
             paint();
         });
-        if (parentUids.length > 0) heading.appendChild(toggleAll);
+        heading.appendChild(toggleAll);
         section.appendChild(heading);
 
-        const tableHost = el('div');
+        const tableHost = el('div', 'rlb-task-table-host');
         section.appendChild(tableHost);
 
         function paint() {
-            const rows = flattenForest(tree, { isCollapsed: node => collapsed.has(node.taskUid) });
-            const anyExpanded = parentUids.some(uid => !collapsed.has(uid));
+            const transformed = transformTaskForest(tree, {
+                filter: taskView.filter,
+                sortBy: taskView.sortBy,
+                direction: taskView.direction,
+            });
+            const viewCollapsed = collapsedByFilter[taskView.filter];
+            const completeViewRows = flattenForest(transformed.forest);
+            visibleParentUids = [
+                ...new Set(
+                    completeViewRows
+                        .filter(node => node.hasChildren)
+                        .map(node => node.taskUid)
+                ),
+            ];
+            const rows = flattenForest(transformed.forest, {
+                isCollapsed: node => viewCollapsed.has(node.taskUid),
+            });
+            const anyExpanded = visibleParentUids.some(uid => !viewCollapsed.has(uid));
+            taskCount.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
+            for (const filterButton of filterGroup.querySelectorAll('[data-filter]')) {
+                filterButton.setAttribute(
+                    'aria-pressed',
+                    String(filterButton.dataset.filter === taskView.filter)
+                );
+            }
             toggleAll.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
+            toggleAll.hidden = visibleParentUids.length === 0;
+
+            if (transformed.forest.length === 0) {
+                const emptyMessage =
+                    taskView.filter === 'TODO'
+                        ? 'No TODO Tasks in the selected range.'
+                        : taskView.filter === 'DONE'
+                          ? 'No DONE Tasks in the selected range.'
+                          : 'No tasks in the selected range.';
+                tableHost.replaceChildren(el('div', 'rlb-task-empty', emptyMessage));
+                return;
+            }
 
             const table = el('table', 'rlb-table rlb-task-table');
             const columns = el('colgroup');
@@ -578,10 +655,37 @@ export function createDashboard({
             table.appendChild(
                 headerRow([
                     'Task',
-                    { label: 'Sessions', numeric: true },
-                    { label: 'Own', numeric: true },
-                    { label: 'Total', numeric: true },
-                ])
+                    {
+                        label: 'Sessions',
+                        numeric: true,
+                        sortKey: 'sessions',
+                        title: 'Sort by Sessions',
+                    },
+                    {
+                        label: 'Own',
+                        numeric: true,
+                        sortKey: 'own',
+                        title: 'Time recorded directly on this Task',
+                    },
+                    {
+                        label: 'Total',
+                        numeric: true,
+                        sortKey: 'total',
+                        title: 'Own time plus all sub-tasks',
+                    },
+                ], {
+                    sortBy: taskView.sortBy,
+                    direction: taskView.direction,
+                    onSort: sortBy => {
+                        if (taskView.sortBy === sortBy) {
+                            taskView.direction = taskView.direction === 'desc' ? 'asc' : 'desc';
+                        } else {
+                            taskView.sortBy = sortBy;
+                            taskView.direction = 'desc';
+                        }
+                        paint();
+                    },
+                })
             );
             const tbody = el('tbody');
 
@@ -600,8 +704,8 @@ export function createDashboard({
                         }`,
                         '',
                         () => {
-                            if (collapsed.has(node.taskUid)) collapsed.delete(node.taskUid);
-                            else collapsed.add(node.taskUid);
+                            if (viewCollapsed.has(node.taskUid)) viewCollapsed.delete(node.taskUid);
+                            else viewCollapsed.add(node.taskUid);
                             paint();
                         },
                         { title: node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks' }
@@ -616,6 +720,7 @@ export function createDashboard({
                 const mark = statusMark(node.status);
                 if (mark) leading.appendChild(mark);
                 if (node.status === 'DONE') row.classList.add('rlb-row--done');
+                if (node.context) row.classList.add('rlb-row--context');
                 content.appendChild(taskLink(node.title, node.taskUid));
                 // A task reachable from more than one parent is counted under each
                 // of them; say so on the row rather than let the columns look wrong.
@@ -659,17 +764,45 @@ export function createDashboard({
 
     // Numeric headers have to be right-aligned like their cells, or the column
     // label and the figures under it sit against opposite edges.
-    const headerRow = columns => {
+    const headerRow = (columns, { sortBy = null, direction = 'desc', onSort = null } = {}) => {
         const thead = el('thead');
         const row = el('tr');
         for (const column of columns) {
-            const numeric = typeof column === 'object' && column.numeric;
-            const visuallyHidden = typeof column === 'object' && column.visuallyHidden;
+            const config = typeof column === 'object' ? column : { label: column };
+            const numeric = config.numeric;
+            const visuallyHidden = config.visuallyHidden;
             const classes = [numeric ? 'rlb-table__num' : '', visuallyHidden ? 'rlb-visually-hidden' : '']
                 .filter(Boolean)
                 .join(' ');
-            const header = el('th', classes, column.label ?? column);
+            const header = el('th', classes);
             header.setAttribute('scope', 'col');
+            if (config.sortKey) header.dataset.sortKey = config.sortKey;
+            if (config.sortKey && onSort) {
+                const active = config.sortKey === sortBy;
+                if (active) {
+                    header.setAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
+                }
+                const sortButton = button(
+                    'bp3-button bp3-minimal bp3-small rlb-task-sort-button',
+                    '',
+                    () => onSort(config.sortKey),
+                    { title: config.title || `Sort by ${config.label}` }
+                );
+                sortButton.setAttribute('aria-pressed', String(active));
+                sortButton.appendChild(el('span', 'rlb-task-sort-label', config.label));
+                if (active) {
+                    const arrow = el(
+                        'span',
+                        'rlb-task-sort-arrow',
+                        direction === 'asc' ? '↑' : '↓'
+                    );
+                    arrow.setAttribute('aria-hidden', 'true');
+                    sortButton.appendChild(arrow);
+                }
+                header.appendChild(sortButton);
+            } else {
+                header.textContent = config.label;
+            }
             row.appendChild(header);
         }
         thead.appendChild(row);

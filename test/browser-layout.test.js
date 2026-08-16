@@ -1109,3 +1109,86 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
         labelledBy: 'dashboard-title',
     });
 });
+
+test('Dashboard task controls wrap on narrow screens and use a non-overlapping sticky stack on desktop', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const markup = `
+        <div class="rlb-root rlb-root--open rlb-dashboard">
+            <div class="rlb-dialog" style="height:560px">
+                <div class="rlb-body rlb-body__scroll">
+                    <section class="rlb-dashboard-section rlb-dashboard-panel rlb-by-task">
+                        <div class="rlb-section__heading rlb-panel__header">
+                            <h3 class="rlb-section__title">By task</h3>
+                            <span class="rlb-task-count">12 of 34 Tasks</span>
+                            <button class="rlb-tree__info" type="button">i</button>
+                            <div class="rlb-task-filters" role="group" aria-label="Filter tasks by status">
+                                <button type="button" data-filter="ALL" aria-pressed="true">All</button>
+                                <button type="button" data-filter="TODO" aria-pressed="false">TODO</button>
+                                <button type="button" data-filter="DONE" aria-pressed="false">DONE</button>
+                            </div>
+                            <button class="rlb-tree__collapse-all" type="button">Collapse all</button>
+                        </div>
+                        <table class="rlb-table rlb-task-table">
+                            <thead><tr>
+                                <th scope="col">Task</th>
+                                <th scope="col" data-sort-key="sessions" class="rlb-table__num"><button type="button">Sessions</button></th>
+                                <th scope="col" data-sort-key="own" class="rlb-table__num"><button type="button">Own</button></th>
+                                <th scope="col" data-sort-key="total" class="rlb-table__num"><button type="button">Total <span class="rlb-task-sort-arrow" aria-hidden="true">↓</span></button></th>
+                            </tr></thead>
+                            <tbody>${Array.from({ length: 16 }, (_, index) => `<tr><td>Task ${index}</td><td class="rlb-table__num">${index}</td><td class="rlb-table__num">${index}m</td><td class="rlb-table__num">${index}m</td></tr>`).join('')}</tbody>
+                        </table>
+                    </section>
+                </div>
+            </div>
+        </div>`;
+    const expression = `(() => {
+        const rect = node => {
+            const value = node.getBoundingClientRect();
+            return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+        };
+        const toolbar = document.querySelector('.rlb-by-task > .rlb-section__heading');
+        const controls = [...toolbar.querySelectorAll('.rlb-task-count, .rlb-task-filters button, .rlb-tree__collapse-all')];
+        const controlRects = controls.map(rect);
+        const overlaps = controlRects.some((left, index) => controlRects.slice(index + 1).some(right =>
+            left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top
+        ));
+        const tableHeader = document.querySelector('.rlb-task-table thead th');
+        const byTask = document.querySelector('.rlb-by-task');
+        const body = document.querySelector('.rlb-body');
+        const toolbarStyle = getComputedStyle(toolbar);
+        const headerStyle = getComputedStyle(tableHeader);
+        return {
+            toolbar: rect(toolbar),
+            controls: controlRects,
+            overlaps,
+            toolbarPosition: toolbarStyle.position,
+            toolbarDisplay: toolbarStyle.display,
+            toolbarTop: toolbarStyle.top,
+            tableHeaderPosition: headerStyle.position,
+            tableHeaderTop: headerStyle.top,
+            byTaskOverflow: getComputedStyle(byTask).overflow,
+            bodyOverflowY: getComputedStyle(body).overflowY,
+        };
+    })()`;
+
+    for (const width of [320, 340]) {
+        const geometry = await withChromium(htmlWithLateHost(markup), expression, { width, height: 600 });
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        assert.equal(geometry.toolbarPosition, 'static', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.tableHeaderPosition, 'static', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.overlaps, false, JSON.stringify({ width, geometry }));
+        assert.ok(
+            geometry.controls.every(control => control.left >= geometry.toolbar.left - 1 && control.right <= geometry.toolbar.right + 1),
+            JSON.stringify({ width, geometry })
+        );
+    }
+
+    const desktop = await withChromium(htmlWithLateHost(markup), expression, { width: 960, height: 600 });
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ desktop }));
+    assert.equal(desktop.toolbarPosition, 'sticky', JSON.stringify(desktop));
+    assert.equal(desktop.tableHeaderPosition, 'sticky', JSON.stringify(desktop));
+    assert.equal(desktop.toolbarTop, '0px', JSON.stringify(desktop));
+    assert.equal(desktop.tableHeaderTop, '34px', JSON.stringify(desktop));
+    assert.equal(desktop.byTaskOverflow, 'visible', JSON.stringify(desktop));
+    assert.equal(desktop.bodyOverflowY, 'auto', JSON.stringify(desktop));
+});
