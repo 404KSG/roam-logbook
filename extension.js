@@ -664,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.13";
+var PLUGIN_VERSION = "0.9.0-beta.14";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -704,10 +704,10 @@ function booleanSetting(key) {
   if (value === false || value === 0)
     return false;
   if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1")
+    const normalized2 = value.trim().toLowerCase();
+    if (normalized2 === "true" || normalized2 === "1")
       return true;
-    if (normalized === "false" || normalized === "0")
+    if (normalized2 === "false" || normalized2 === "0")
       return false;
   }
   return Boolean(DEFAULTS[key]);
@@ -1356,6 +1356,27 @@ function summariseByTask(entries, now) {
   }
   return [...byTask.values()].sort((a, b) => b.minutes - a.minutes);
 }
+function summariseSessionMetrics(entries, now) {
+  const durations = entries.filter((entry) => entry?.start).map((entry) => entryMinutes(entry, now)).map((minutes) => Math.max(0, minutes));
+  const sorted = durations.slice().sort((a, b) => a - b);
+  const sessions = durations.length;
+  const focusMinutes = durations.reduce((sum, minutes) => sum + minutes, 0);
+  const middle = Math.floor(sorted.length / 2);
+  const medianMinutes = sorted.length === 0 ? 0 : sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  const activeDays = new Set(
+    entries.filter((entry) => entry?.start).map((entry) => dateKey(entry.start))
+  );
+  return {
+    focusMinutes,
+    sessions,
+    completedSessions: entries.filter((entry) => entry?.start && !entry.running).length,
+    runningSessions: entries.filter((entry) => entry?.start && entry.running).length,
+    activeDays: activeDays.size,
+    averageMinutes: sessions === 0 ? 0 : focusMinutes / sessions,
+    longestMinutes: sorted.at(-1) || 0,
+    medianMinutes
+  };
+}
 function summariseByDay(entries, now, days) {
   const buckets = /* @__PURE__ */ new Map();
   for (const entry of entries) {
@@ -1505,6 +1526,7 @@ function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) 
     activityLabel: activity.label,
     activityScope: activity.scope,
     running: entries.filter((entry) => entry.running),
+    sessionMetrics: summariseSessionMetrics(inRange, now),
     issues: entries.filter((entry) => entry.issue)
   };
 }
@@ -1513,9 +1535,396 @@ function findStaleClocks(entries, now, staleHours2) {
   return entries.filter((entry) => entry.running && entry.start.getTime() < cutoff);
 }
 
+// src/theme.js
+var LIGHT_PAGE_LINK = "#316a9f";
+var DARK_PAGE_LINK = "#7eb7d5";
+var LIGHT_SYNC_GREEN = "#7eb794";
+var DARK_SYNC_GREEN = "#8ed0aa";
+var PLUGIN_ROOT_SELECTOR = ".rlb-root, .rlb-popover, #roam-logbook-topbar, [data-roam-logbook]";
+var ROAM_HOST_SELECTOR = ".roam-article, .roam-log-page, .rm-block-text, .roam-body-main, .roam-body";
+var PAGE_REF_SELECTORS = [
+  ".rm-page-ref--link",
+  ".rm-page-ref-link-color",
+  ".rm-page-ref"
+];
+var CUSTOM_LINK_PROPERTIES = [
+  "--page-link-color",
+  "--page-links",
+  "--page-reference-color",
+  "--page-ref-color",
+  "--link-color",
+  "--roam-link-color",
+  "--rm-page-ref-link-color"
+];
+var getWindow = (documentRef, windowRef) => windowRef || documentRef?.defaultView || (typeof window !== "undefined" ? window : null);
+var computedStyle = (documentRef, node, pseudo) => {
+  const view = getWindow(documentRef);
+  try {
+    return view?.getComputedStyle?.(node, pseudo) || null;
+  } catch {
+    return null;
+  }
+};
+var normalized = (value) => typeof value === "string" ? value.trim() : "";
+var isUsableColor = (value) => {
+  const color = normalized(value).toLowerCase();
+  return Boolean(
+    color && color !== "transparent" && color !== "currentcolor" && color !== "inherit" && color !== "initial" && color !== "unset" && color !== "none"
+  );
+};
+var isBrowserDefaultTextColor = (value) => {
+  const color = normalized(value).toLowerCase().replaceAll(" ", "");
+  return color === "#000" || color === "#000000" || color === "rgb(0,0,0)";
+};
+var isPluginNode = (node) => Boolean(node?.closest?.(PLUGIN_ROOT_SELECTOR));
+var isTagOrNamespaceRef = (node) => {
+  if (!node?.classList)
+    return false;
+  const classes = [...node.classList].join(" ").toLowerCase();
+  if (/(^|[-_\s])(tag|namespace)([-_\s]|$)/.test(classes))
+    return true;
+  const pageRefType = normalized(node.getAttribute?.("data-page-ref-type")) || normalized(node.getAttribute?.("data-ref-type"));
+  if (/^(tag|namespace)$/i.test(pageRefType))
+    return true;
+  return Boolean(
+    node.hasAttribute?.("data-tag") || node.hasAttribute?.("data-namespace") || node.hasAttribute?.("data-page-ref-tag") || node.hasAttribute?.("data-page-ref-namespace")
+  );
+};
+var isVisibleRealNode = (documentRef, node) => {
+  if (!node?.isConnected || isPluginNode(node) || isTagOrNamespaceRef(node))
+    return false;
+  if (node.getAttribute?.("aria-hidden") === "true")
+    return false;
+  const style = computedStyle(documentRef, node);
+  if (!style)
+    return true;
+  if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+    return false;
+  }
+  return true;
+};
+var computedColor = (documentRef, node) => {
+  const style = computedStyle(documentRef, node);
+  const color = normalized(style?.color);
+  return isUsableColor(color) ? color : null;
+};
+var firstHost = (documentRef) => {
+  for (const host of documentRef?.querySelectorAll?.(ROAM_HOST_SELECTOR) || []) {
+    if (!isPluginNode(host) && host.isConnected)
+      return host;
+  }
+  return documentRef?.body || documentRef?.documentElement || null;
+};
+var findVisiblePageRef = (documentRef) => {
+  for (const selector of PAGE_REF_SELECTORS) {
+    for (const node of documentRef?.querySelectorAll?.(selector) || []) {
+      if (!isVisibleRealNode(documentRef, node))
+        continue;
+      const color = computedColor(documentRef, node);
+      if (color)
+        return { color, source: "visible" };
+    }
+  }
+  return null;
+};
+var readCustomLinkColor = (documentRef, host) => {
+  const nodes = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let node = host; node; node = node.parentElement) {
+    if (seen.has(node))
+      break;
+    seen.add(node);
+    nodes.push(node);
+  }
+  for (const node of [documentRef?.body, documentRef?.documentElement]) {
+    if (node && !seen.has(node)) {
+      seen.add(node);
+      nodes.push(node);
+    }
+  }
+  for (const node of nodes) {
+    const style = computedStyle(documentRef, node);
+    for (const property of CUSTOM_LINK_PROPERTIES) {
+      const value = normalized(style?.getPropertyValue?.(property));
+      if (isUsableColor(value))
+        return { color: value, source: "custom-property" };
+    }
+  }
+  return null;
+};
+var isDarkTheme = (documentRef) => {
+  const root = documentRef?.documentElement;
+  const body = documentRef?.body;
+  const classDark = Boolean(
+    root?.classList?.contains("bp3-dark") || body?.classList?.contains("bp3-dark") || root?.classList?.contains("dark") || body?.classList?.contains("dark")
+  );
+  if (classDark)
+    return true;
+  return Boolean(getWindow(documentRef)?.matchMedia?.("(prefers-color-scheme: dark)")?.matches);
+};
+function readRoamPageLinkPalette(documentRef = document) {
+  const visible = findVisiblePageRef(documentRef);
+  if (visible)
+    return { color: visible.color, hoverColor: visible.color, source: visible.source };
+  const host = firstHost(documentRef);
+  if (host?.appendChild) {
+    const probe = documentRef.createElement("span");
+    probe.className = "rm-page-ref rm-page-ref--link rm-page-ref-link-color";
+    probe.textContent = "Roam Logbook palette probe";
+    probe.setAttribute("aria-hidden", "true");
+    probe.setAttribute("data-rlb-palette-probe", "true");
+    probe.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;visibility:hidden;pointer-events:none;contain:strict;";
+    try {
+      host.appendChild(probe);
+      const color2 = computedColor(documentRef, probe);
+      if (color2 && !isBrowserDefaultTextColor(color2)) {
+        return { color: color2, hoverColor: color2, source: "probe" };
+      }
+    } finally {
+      probe.remove();
+    }
+  }
+  const custom = readCustomLinkColor(documentRef, host);
+  if (custom)
+    return { color: custom.color, hoverColor: custom.color, source: custom.source };
+  const color = isDarkTheme(documentRef) ? DARK_PAGE_LINK : LIGHT_PAGE_LINK;
+  return { color, hoverColor: color, source: "fallback" };
+}
+var parseColor = (value) => {
+  const text = normalized(value).toLowerCase();
+  const hex = text.match(/^#([0-9a-f]{3,8})$/i);
+  if (hex) {
+    const raw = hex[1];
+    const expanded = raw.length <= 4 ? [...raw].map((char) => char + char).join("") : raw;
+    return {
+      r: Number.parseInt(expanded.slice(0, 2), 16),
+      g: Number.parseInt(expanded.slice(2, 4), 16),
+      b: Number.parseInt(expanded.slice(4, 6), 16)
+    };
+  }
+  const rgb = text.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  if (rgb)
+    return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) };
+  return null;
+};
+var isStableGreen = (color) => {
+  const rgb = parseColor(color);
+  if (!rgb)
+    return false;
+  return rgb.g >= 90 && rgb.g > rgb.r * 1.12 && rgb.g >= rgb.b * 0.9;
+};
+var semanticSyncCandidate = (node) => {
+  if (!node || isPluginNode(node))
+    return false;
+  const className = typeof node.className === "string" ? node.className : "";
+  const signal = [
+    className,
+    node.getAttribute?.("aria-label"),
+    node.getAttribute?.("title"),
+    node.getAttribute?.("data-state"),
+    node.getAttribute?.("data-status")
+  ].filter(Boolean).join(" ");
+  return /saving|saved|sync|synced|synchroniz/i.test(signal);
+};
+var candidateColors = (documentRef, node) => {
+  const values = [];
+  for (const pseudo of [void 0, "::before", "::after"]) {
+    const style = computedStyle(documentRef, node, pseudo);
+    for (const property of ["backgroundColor", "borderColor", "color", "fill", "stroke"]) {
+      const value = normalized(style?.[property]);
+      if (isUsableColor(value))
+        values.push(value);
+    }
+  }
+  return values;
+};
+var smallGeometry = (node) => {
+  try {
+    const rect = node.getBoundingClientRect?.();
+    return Boolean(
+      rect && rect.width >= 6 && rect.width <= 12 && rect.height >= 6 && rect.height <= 12
+    );
+  } catch {
+    return false;
+  }
+};
+function readRoamSyncPalette(documentRef = document) {
+  const topbar = documentRef?.querySelector?.(".rm-topbar") || documentRef?.body;
+  if (!topbar) {
+    return { color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN, source: "fallback" };
+  }
+  const all = [...topbar.querySelectorAll?.("*") || []];
+  const semantic = all.filter(semanticSyncCandidate);
+  for (const node of semantic) {
+    const color = candidateColors(documentRef, node).find(isStableGreen);
+    if (color)
+      return { color, source: "semantic" };
+  }
+  for (const node of all) {
+    if (isPluginNode(node) || !smallGeometry(node))
+      continue;
+    const color = candidateColors(documentRef, node).find(isStableGreen);
+    if (color)
+      return { color, source: "geometry" };
+  }
+  return { color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN, source: "fallback" };
+}
+var runtimeByDocument = /* @__PURE__ */ new WeakMap();
+var scheduleWith = (documentRef, callback) => {
+  const view = getWindow(documentRef);
+  if (typeof view?.requestAnimationFrame === "function") {
+    const id2 = view.requestAnimationFrame(callback);
+    return { kind: "raf", id: id2 };
+  }
+  const id = setTimeout(callback, 0);
+  return { kind: "timer", id };
+};
+var cancelScheduled = (documentRef, scheduled) => {
+  if (!scheduled)
+    return;
+  const view = getWindow(documentRef);
+  if (scheduled.kind === "raf")
+    view?.cancelAnimationFrame?.(scheduled.id);
+  else
+    clearTimeout(scheduled.id);
+};
+var isRelevantMutation = (record) => {
+  if (record.target?.closest?.("[data-rlb-palette-probe]"))
+    return false;
+  if (record.target?.closest?.(PLUGIN_ROOT_SELECTOR))
+    return false;
+  const allNodes = [...record.addedNodes || [], ...record.removedNodes || []];
+  const nodes = allNodes.filter(
+    (node) => !node?.matches?.("[data-rlb-palette-probe]")
+  );
+  if (allNodes.length > 0 && nodes.length === 0)
+    return false;
+  return nodes.length === 0 || nodes.some((node) => !node?.closest?.(PLUGIN_ROOT_SELECTOR));
+};
+var applyPalette = (root, palette) => {
+  if (!root?.style || !palette)
+    return;
+  root.style.setProperty("--rlb-surface-link", palette.link);
+  root.style.setProperty("--rlb-surface-link-hover", palette.linkHover);
+  root.style.setProperty("--rlb-session-running", palette.sync);
+};
+function acquireThemeRuntime({ documentRef = document, onChange = () => {
+} } = {}) {
+  let state = runtimeByDocument.get(documentRef);
+  if (!state) {
+    const page = readRoamPageLinkPalette(documentRef);
+    const sync = readRoamSyncPalette(documentRef);
+    state = {
+      refs: 0,
+      listeners: /* @__PURE__ */ new Set(),
+      page,
+      sync,
+      scheduled: null,
+      observer: null,
+      media: null,
+      mediaListener: null
+    };
+    runtimeByDocument.set(documentRef, state);
+  }
+  const palette = () => ({
+    link: state.page.color,
+    linkHover: state.page.hoverColor || state.page.color,
+    sync: state.sync.color
+  });
+  const notify3 = () => {
+    const current = palette();
+    for (const listener of state.listeners)
+      listener(current);
+  };
+  const refresh2 = () => {
+    const page = readRoamPageLinkPalette(documentRef);
+    const sync = readRoamSyncPalette(documentRef);
+    if (page.source !== "fallback" || state.page.source === "fallback")
+      state.page = page;
+    if (sync.source !== "fallback" || state.sync.source === "fallback")
+      state.sync = sync;
+    notify3();
+  };
+  const scheduleRefresh = () => {
+    if (state.scheduled)
+      return;
+    state.scheduled = scheduleWith(documentRef, () => {
+      state.scheduled = null;
+      refresh2();
+    });
+  };
+  if (state.refs === 0) {
+    const target = documentRef.documentElement || documentRef.body;
+    const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
+    if (MutationObserverCtor && target) {
+      state.observer = new MutationObserverCtor((records) => {
+        if (records.some(isRelevantMutation))
+          scheduleRefresh();
+      });
+      state.observer.observe(target, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: [
+          "class",
+          "style",
+          "aria-label",
+          "title",
+          "data-state",
+          "data-status",
+          "data-theme"
+        ]
+      });
+    }
+    const view = getWindow(documentRef);
+    state.media = view?.matchMedia?.("(prefers-color-scheme: dark)") || null;
+    state.mediaListener = () => scheduleRefresh();
+    if (state.media?.addEventListener)
+      state.media.addEventListener("change", state.mediaListener);
+    else
+      state.media?.addListener?.(state.mediaListener);
+  }
+  state.refs += 1;
+  state.listeners.add(onChange);
+  onChange(palette());
+  let released = false;
+  return {
+    getPalette: palette,
+    refresh: refresh2,
+    apply(root) {
+      applyPalette(root, palette());
+    },
+    release() {
+      if (released)
+        return;
+      released = true;
+      state.listeners.delete(onChange);
+      state.refs -= 1;
+      if (state.refs > 0)
+        return;
+      state.observer?.disconnect();
+      state.observer = null;
+      if (state.media?.removeEventListener)
+        state.media.removeEventListener("change", state.mediaListener);
+      else
+        state.media?.removeListener?.(state.mediaListener);
+      state.media = null;
+      state.mediaListener = null;
+      cancelScheduled(documentRef, state.scheduled);
+      state.scheduled = null;
+      runtimeByDocument.delete(documentRef);
+    }
+  };
+}
+function applyRoamThemePalette(root, palette) {
+  applyPalette(root, palette);
+}
+
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Roam Logbook";
+var VIEW_HOST_ID = "roam-logbook-dashboard-view";
+var SVG_NS = "http://www.w3.org/2000/svg";
 var documentScrollLocks = /* @__PURE__ */ new WeakMap();
 var restoreInlineStyle = (node, value) => {
   if (!node)
@@ -1599,6 +2008,13 @@ function createDashboard({
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
   let lastSnapshot = null;
+  let lastModel = null;
+  let lastHierarchy = null;
+  let lastTransientIssues = [];
+  let lastRefreshNotice = "";
+  let view = "overview";
+  let viewToggle = null;
+  let themeRuntime = null;
   let releaseScrollLock = null;
   const collapsed = /* @__PURE__ */ new Set();
   const clearLiveTicker = () => {
@@ -1612,21 +2028,102 @@ function createDashboard({
       clearTimeout(discardConfirmTimer);
     discardConfirmTimer = null;
   };
+  const focusWithoutScroll = (node) => {
+    if (!node?.focus)
+      return;
+    try {
+      node.focus({ preventScroll: true });
+    } catch {
+      node.focus();
+    }
+  };
+  const updateLiveMetricNodes = (now) => {
+    if (!lastModel)
+      return;
+    const metrics = summariseSessionMetrics(lastModel.entries, now);
+    const todayMinutes = filterByRange(lastSnapshot?.entries || [], "today", now).reduce(
+      (sum, entry) => sum + entryMinutes(entry, now),
+      0
+    );
+    const values = {
+      today: formatMinutesHuman(todayMinutes),
+      selected: formatMinutesHuman(metrics.focusMinutes),
+      sessions: String(metrics.sessions),
+      tasks: String(lastModel.tasks.length),
+      focus: formatMinutesHuman(metrics.focusMinutes),
+      average: formatMinutesHuman(metrics.averageMinutes),
+      longest: formatMinutesHuman(metrics.longestMinutes)
+    };
+    for (const node of bodyNode?.querySelectorAll("[data-live-metric]") || []) {
+      const value = values[node.dataset.liveMetric];
+      if (value !== void 0)
+        node.textContent = value;
+    }
+    for (const node of summaryNode?.querySelectorAll("[data-live-metric]") || []) {
+      const value = values[node.dataset.liveMetric];
+      if (value !== void 0)
+        node.textContent = value;
+    }
+  };
   const updateRunningElapsed = () => {
     if (!root?.classList.contains("rlb-root--open"))
       return;
-    const now = nowFn().getTime();
+    const nowDateValue = nowFn();
+    const now = nowDateValue.getTime();
     for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
       cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
     }
+    updateLiveMetricNodes(nowDateValue);
   };
   const startLiveTicker = () => {
     clearLiveTicker();
     if (!root?.classList.contains("rlb-root--open"))
       return;
-    if (!bodyNode?.querySelector('[data-running-elapsed="true"]'))
+    if (!bodyNode?.querySelector('[data-running-elapsed="true"]') && !lastModel?.running?.length) {
       return;
+    }
     liveTicker = setIntervalFn(updateRunningElapsed, 1e3);
+  };
+  const paint = (now) => {
+    if (!bodyNode || !lastModel)
+      return;
+    clearLiveTicker();
+    const model = lastModel;
+    const hierarchy = lastHierarchy || {};
+    const transientIssues = lastTransientIssues;
+    const refreshNotice = lastRefreshNotice;
+    summaryNode.replaceChildren(overviewBar(model, now));
+    bodyNode.replaceChildren();
+    if (refreshNotice) {
+      const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
+      notice4.setAttribute("role", "status");
+      bodyNode.appendChild(notice4);
+    }
+    const issues = [
+      ...model.issues,
+      ...(hierarchy.issues || []).map(issueRow),
+      ...transientIssues.map(issueRow)
+    ];
+    if (view === "analytics") {
+      bodyNode.appendChild(analyticsSection(model, now));
+      if (issues.length > 0)
+        bodyNode.appendChild(dataIssuesSection(issues));
+      startLiveTicker();
+      return;
+    }
+    if (model.running.length > 0)
+      bodyNode.appendChild(runningSection(model.running, now));
+    if (model.entries.length === 0) {
+      bodyNode.appendChild(el("div", "rlb-empty", "No clock entries in this range yet."));
+      if (issues.length > 0)
+        bodyNode.appendChild(dataIssuesSection(issues));
+      startLiveTicker();
+      return;
+    }
+    bodyNode.appendChild(tasksSection(model.tree));
+    if (issues.length > 0)
+      bodyNode.appendChild(dataIssuesSection(issues));
+    startLiveTicker();
   };
   const render = () => {
     if (!bodyNode)
@@ -1655,6 +2152,7 @@ function createDashboard({
           notice4,
           ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
         );
+        lastModel = null;
         return;
       }
       snapshot = lastSnapshot;
@@ -1663,50 +2161,11 @@ function createDashboard({
     const entries = snapshot.entries;
     const hierarchy = snapshot.hierarchy;
     refresh({ entries });
-    const model = buildDashboard(entries, { now, rangeId, hierarchy });
-    bodyNode.replaceChildren();
-    const rangeLabel = getRange(rangeId).label;
-    summaryNode.replaceChildren(
-      overviewBar({
-        today: formatMinutesHuman(model.todayMinutes),
-        todayContext: model.running.length > 0 ? `${model.running.length} active Session${model.running.length === 1 ? "" : "s"}` : "No active Sessions",
-        selected: formatMinutesHuman(model.totalMinutes),
-        selectedLabel: rangeLabel,
-        selectedContext: `${(model.activity || model.days || []).length} day${(model.activity || model.days || []).length === 1 ? "" : "s"} in range`,
-        activity: model.activity || model.days,
-        activityLabel: model.activityLabel || rangeLabel,
-        activityScope: model.activityScope || "selected-range",
-        tasks: String(model.tasks.length),
-        tasksContext: "in selected period",
-        now
-      })
-    );
-    if (refreshNotice) {
-      const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
-      notice4.setAttribute("role", "status");
-      bodyNode.appendChild(notice4);
-    }
-    if (model.running.length > 0) {
-      bodyNode.appendChild(runningSection(model.running, now));
-    }
-    const issues = [
-      ...model.issues,
-      ...(hierarchy.issues || []).map(issueRow),
-      ...transientIssues.map(issueRow)
-    ];
-    if (model.entries.length === 0) {
-      bodyNode.appendChild(
-        el("div", "rlb-empty", "No clock entries in this range yet.")
-      );
-      if (issues.length > 0)
-        bodyNode.appendChild(dataIssuesSection(issues));
-      startLiveTicker();
-      return;
-    }
-    bodyNode.appendChild(tasksSection(model.tree));
-    if (issues.length > 0)
-      bodyNode.appendChild(dataIssuesSection(issues));
-    startLiveTicker();
+    lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
+    lastHierarchy = hierarchy;
+    lastTransientIssues = transientIssues;
+    lastRefreshNotice = refreshNotice;
+    paint(now);
   };
   const issueRow = (issue) => ({
     title: issue.title || issue.parentUid || issue.affectedUid || "Unresolved graph data",
@@ -1751,78 +2210,190 @@ function createDashboard({
     details.appendChild(list);
     return details;
   };
-  const activityRail = (days, now, activityLabel, activityScope) => {
-    const series = days || [];
-    const peak = Math.max(1, ...series.map((day) => day.minutes));
-    const rail = el("div", "rlb-activity-rail");
-    rail.dataset.dayCount = String(series.length);
-    rail.style.setProperty("--rlb-activity-count", String(series.length));
-    rail.dataset.activityScope = activityScope;
-    rail.setAttribute("role", "group");
-    rail.setAttribute("aria-label", `${activityLabel} activity`);
-    for (const day of series) {
-      const level = day.minutes === 0 ? 0 : Math.max(1, Math.ceil(day.minutes / peak * 3));
-      const duration = formatMinutesHuman(day.minutes);
-      const label = formatDayLabel(day.date, now);
-      const bucket = button(
-        `rlb-activity__bucket rlb-activity__bucket--level-${level}${day.minutes === 0 ? " rlb-activity__bucket--empty" : ""}`,
-        "",
-        () => {
-        },
-        { title: `${day.key} \xB7 ${duration}` }
-      );
-      bucket.dataset.date = day.key;
-      bucket.dataset.minutes = String(day.minutes);
-      bucket.dataset.level = String(level);
-      bucket.setAttribute("aria-label", `${day.key}, ${label}, ${duration}`);
-      const fill = el("span", "rlb-activity__fill");
-      fill.style.height = `${day.minutes === 0 ? 0 : Math.max(8, Math.round(day.minutes / peak * 100))}%`;
-      bucket.appendChild(fill);
-      rail.appendChild(bucket);
-    }
-    return rail;
-  };
-  const overviewBar = ({
-    today,
-    todayContext,
-    selected,
-    selectedLabel,
-    selectedContext,
-    activity,
-    activityLabel,
-    activityScope,
-    tasks,
-    tasksContext,
-    now
-  }) => {
-    const wrapper = el("dl", "rlb-overview rlb-overview--strip");
+  const overviewBar = (model, now) => {
+    const wrapper = el("dl", "rlb-overview rlb-overview--compact");
     wrapper.setAttribute("aria-label", `${DASHBOARD_TITLE} overview`);
+    const rangeLabel = getRange(model.rangeId).label;
+    const todayContext = model.running.length > 0 ? `${model.running.length} active Session${model.running.length === 1 ? "" : "s"}` : "No active Sessions";
     const metrics = [
-      ["Today", today, todayContext],
-      [selectedLabel, selected, selectedContext],
-      ["Tasks tracked", tasks, tasksContext]
+      ["Today", formatMinutesHuman(model.todayMinutes), todayContext, "today"],
+      [rangeLabel, formatMinutesHuman(model.totalMinutes), "selected range", "selected"],
+      ["Sessions", String(model.sessionMetrics?.sessions || 0), "selected range", "sessions"],
+      ["Tasks tracked", String(model.tasks.length), "selected range", "tasks"]
     ];
-    for (const [index, [label, value, context]] of metrics.entries()) {
+    for (const [label, value, context, key] of metrics) {
       const item = el("div", "rlb-overview__item rlb-overview__panel");
-      if (index === 1)
-        item.classList.add("rlb-overview__item--selected");
       const heading = el("div", "rlb-overview__heading");
-      const valueNode = el(
-        "dd",
-        `rlb-overview__value${index === 0 && value === "0m" && /No active Sessions/i.test(context) ? " rlb-overview__value--quiet" : ""}`
-      );
-      valueNode.append(
-        el("span", "rlb-overview__number", value),
-        el("span", "rlb-overview__context", context)
-      );
+      const valueNode = el("dd", "rlb-overview__value");
+      const number = el("span", "rlb-overview__number", value);
+      number.dataset.liveMetric = key;
+      valueNode.append(number, el("span", "rlb-overview__context", context));
       heading.append(el("dt", "rlb-overview__label", label), valueNode);
-      item.append(heading);
-      if (index === 1) {
-        item.appendChild(activityRail(activity, now, activityLabel, activityScope));
-      }
+      item.appendChild(heading);
       wrapper.appendChild(item);
     }
     return wrapper;
+  };
+  const svgNode = (name, attributes = {}, textContent = "") => {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attributes))
+      node.setAttribute(key, String(value));
+    if (textContent)
+      node.textContent = textContent;
+    return node;
+  };
+  const activityChart = (model, now) => {
+    const section = el("section", "rlb-analytics__chart rlb-dashboard-panel");
+    const title = el("h3", "rlb-analytics__section-title", `Activity \xB7 ${model.activityLabel}`);
+    section.appendChild(title);
+    const series = model.activity || [];
+    const titleId = "roam-logbook-activity-title";
+    const descriptionId = "roam-logbook-activity-description";
+    const svg = svgNode("svg", {
+      class: "rlb-analytics__svg",
+      viewBox: "0 0 760 236",
+      role: "img",
+      "aria-labelledby": `${titleId} ${descriptionId}`,
+      preserveAspectRatio: "none"
+    });
+    svg.appendChild(svgNode("title", { id: titleId }, `Activity over time \xB7 ${model.activityLabel}`));
+    svg.appendChild(
+      svgNode(
+        "desc",
+        { id: descriptionId },
+        series.length > 0 ? `${series.length} daily activity bars. All time is shown as ${model.activityLabel}.` : "No activity data is available for this range."
+      )
+    );
+    const peak = Math.max(1, ...series.map((day) => day.minutes));
+    const left = 18;
+    const chartWidth = 724;
+    const chartHeight = 154;
+    const barWidth = series.length > 0 ? Math.min(28, Math.max(8, chartWidth / series.length - 8)) : 12;
+    const labelStep = series.length <= 7 ? 1 : series.length <= 14 ? 2 : 5;
+    svg.appendChild(
+      svgNode("line", {
+        class: "rlb-analytics__axis",
+        x1: left,
+        y1: chartHeight + 8,
+        x2: left + chartWidth,
+        y2: chartHeight + 8
+      })
+    );
+    series.forEach((day, index) => {
+      const slot = chartWidth / Math.max(1, series.length);
+      const x = left + slot * index + (slot - barWidth) / 2;
+      const height = day.minutes === 0 ? 3 : Math.max(8, day.minutes / peak * chartHeight);
+      const y = chartHeight + 8 - height;
+      const rect = svgNode("rect", {
+        class: day.minutes === 0 ? "rlb-analytics__bar rlb-analytics__bar--empty" : "rlb-analytics__bar",
+        x,
+        y,
+        width: barWidth,
+        height,
+        rx: 3,
+        "data-date": day.key,
+        "data-minutes": day.minutes
+      });
+      rect.appendChild(svgNode("title", {}, `${day.key} \xB7 ${formatMinutesHuman(day.minutes)}`));
+      svg.appendChild(rect);
+      if (index % labelStep === 0 || index === series.length - 1) {
+        svg.appendChild(
+          svgNode(
+            "text",
+            { class: "rlb-analytics__label", x: x + barWidth / 2, y: 206, "text-anchor": "middle" },
+            formatDayLabel(day.date, now)
+          )
+        );
+      }
+    });
+    section.appendChild(svg);
+    if (series.length === 0 || series.every((day) => day.minutes === 0)) {
+      section.appendChild(el("p", "rlb-analytics__empty-note", "No Sessions in this range yet."));
+    }
+    return section;
+  };
+  const analyticsMetric = (label, value, key, context = "") => {
+    const item = el("div", "rlb-analytics__metric");
+    item.appendChild(el("dt", "rlb-analytics__metric-label", label));
+    const valueNode = el("dd", "rlb-analytics__metric-value", value);
+    if (key)
+      valueNode.dataset.liveMetric = key;
+    item.append(valueNode, el("span", "rlb-analytics__metric-context", context));
+    return item;
+  };
+  const analyticsKpis = (model, metrics) => {
+    const list = el("dl", "rlb-analytics__kpis");
+    list.append(
+      analyticsMetric("Focus time", formatMinutesHuman(metrics.focusMinutes), "focus", "selected range"),
+      analyticsMetric("Sessions", String(metrics.sessions), "sessions", "selected range"),
+      analyticsMetric("Average session", formatMinutesHuman(metrics.averageMinutes), "average", "per Session"),
+      analyticsMetric("Longest session", formatMinutesHuman(metrics.longestMinutes), "longest", "single Session")
+    );
+    list.setAttribute("aria-label", `${DASHBOARD_TITLE} analytics summary`);
+    return list;
+  };
+  const taskDistribution = (model) => {
+    const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
+    panel.appendChild(el("h3", "rlb-analytics__section-title", "Task time distribution"));
+    const rows = model.tasks.filter((task) => task.minutes > 0);
+    const top = rows.slice(0, 6);
+    const otherMinutes = rows.slice(6).reduce((sum, task) => sum + task.minutes, 0);
+    if (otherMinutes > 0)
+      top.push({ taskUid: null, title: "Other", minutes: otherMinutes });
+    const total = rows.reduce((sum, task) => sum + task.minutes, 0);
+    if (top.length === 0) {
+      panel.appendChild(el("p", "rlb-analytics__empty-note", "No task time in this range yet."));
+      return panel;
+    }
+    const list = el("div", "rlb-analytics__distribution");
+    for (const task of top) {
+      const percentage = total > 0 ? task.minutes / total * 100 : 0;
+      const row = el("div", "rlb-analytics__distribution-row");
+      const header = el("div", "rlb-analytics__distribution-header");
+      if (task.taskUid)
+        header.appendChild(taskLink(task.title, task.taskUid));
+      else
+        header.appendChild(el("span", "rlb-analytics__other-label", task.title));
+      header.append(
+        el("span", "rlb-analytics__distribution-duration", `${Math.round(percentage)}% \xB7 ${formatMinutesHuman(task.minutes)}`)
+      );
+      const track = el("div", "rlb-analytics__distribution-track");
+      const fill = el("span", "rlb-analytics__distribution-fill");
+      fill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+      track.appendChild(fill);
+      row.append(header, track);
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+    return panel;
+  };
+  const profileMetric = (label, value) => {
+    const row = el("div", "rlb-analytics__profile-row");
+    row.append(el("span", "rlb-analytics__profile-label", label), el("strong", "", value));
+    return row;
+  };
+  const sessionProfile = (metrics) => {
+    const panel = el("section", "rlb-analytics__panel rlb-dashboard-panel");
+    panel.appendChild(el("h3", "rlb-analytics__section-title", "Session profile"));
+    const profile = el("div", "rlb-analytics__profile");
+    profile.append(
+      profileMetric("Completed", String(metrics.completedSessions)),
+      profileMetric("Running", String(metrics.runningSessions)),
+      profileMetric("Active days", String(metrics.activeDays)),
+      profileMetric("Median session", formatMinutesHuman(metrics.medianMinutes))
+    );
+    panel.appendChild(profile);
+    return panel;
+  };
+  const analyticsSection = (model, now) => {
+    const section = el("section", "rlb-analytics");
+    const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
+    section.appendChild(analyticsKpis(model, metrics));
+    section.appendChild(activityChart(model, now));
+    const panels = el("div", "rlb-analytics__panels");
+    panels.append(taskDistribution(model), sessionProfile(metrics));
+    section.appendChild(panels);
+    return section;
   };
   const runningSection = (running2, now) => {
     const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
@@ -1953,14 +2524,14 @@ function createDashboard({
           collapsed.add(uid);
       else
         collapsed.clear();
-      paint();
+      paint2();
     });
     if (parentUids.length > 0)
       heading.appendChild(toggleAll);
     section.appendChild(heading);
     const tableHost = el("div");
     section.appendChild(tableHost);
-    function paint() {
+    function paint2() {
       const rows = flattenForest(tree, { isCollapsed: (node) => collapsed.has(node.taskUid) });
       const anyExpanded = parentUids.some((uid) => !collapsed.has(uid));
       toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
@@ -2000,7 +2571,7 @@ function createDashboard({
                 collapsed.delete(node.taskUid);
               else
                 collapsed.add(node.taskUid);
-              paint();
+              paint2();
             },
             { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
           );
@@ -2042,7 +2613,7 @@ function createDashboard({
       table.appendChild(tbody);
       tableHost.replaceChildren(table);
     }
-    paint();
+    paint2();
     return section;
   };
   const countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
@@ -2133,6 +2704,29 @@ function createDashboard({
       focusables[index + 1].focus();
     }
   };
+  const syncViewToggle = () => {
+    if (!viewToggle)
+      return;
+    const analytics = view === "analytics";
+    viewToggle.className = `bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-${analytics ? "arrow-left" : "chart"}`;
+    const label = analytics ? "Back to Overview" : "Open Analytics";
+    viewToggle.title = label;
+    viewToggle.setAttribute("aria-label", label);
+    viewToggle.setAttribute("aria-pressed", String(analytics));
+    viewToggle.setAttribute("aria-controls", VIEW_HOST_ID);
+  };
+  const toggleView = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    view = view === "overview" ? "analytics" : "overview";
+    syncViewToggle();
+    if (bodyNode) {
+      bodyNode.dataset.dashboardView = view;
+      bodyNode.scrollTop = 0;
+    }
+    paint(nowFn());
+    focusWithoutScroll(viewToggle);
+  };
   const build = () => {
     const overlay = el("div", "rlb-root rlb-dashboard");
     overlay.id = ROOT_ID;
@@ -2159,6 +2753,15 @@ function createDashboard({
     heading.append(title, subtitle);
     dialog.setAttribute("aria-describedby", subtitle.id);
     header.appendChild(heading);
+    viewToggle = button(
+      "bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-chart",
+      "",
+      toggleView,
+      { title: "Open Analytics" }
+    );
+    viewToggle.dataset.action = "toggle-view";
+    viewToggle.setAttribute("aria-controls", VIEW_HOST_ID);
+    viewToggle.setAttribute("aria-pressed", "false");
     const selectWrapper = el("div", "bp3-select bp3-small");
     const select = el("select");
     select.setAttribute("aria-label", "Dashboard date range");
@@ -2175,6 +2778,7 @@ function createDashboard({
     });
     selectWrapper.appendChild(select);
     header.append(
+      viewToggle,
       selectWrapper,
       button("bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button", "", () => {
         render();
@@ -2188,12 +2792,22 @@ function createDashboard({
     );
     summaryNode = el("div", "rlb-summary");
     bodyNode = el("div", "rlb-body rlb-body__scroll");
+    bodyNode.id = VIEW_HOST_ID;
+    bodyNode.dataset.dashboardView = view;
     dialog.append(header, summaryNode, bodyNode);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
+    themeRuntime = acquireThemeRuntime({
+      documentRef: document,
+      onChange: (palette) => applyRoamThemePalette(overlay, palette)
+    });
+    themeRuntime.apply(overlay);
+    syncViewToggle();
     return overlay;
   };
   function close({ restoreFocus = true } = {}) {
+    view = "overview";
+    syncViewToggle();
     if (!root) {
       releaseScrollLock?.();
       releaseScrollLock = null;
@@ -2221,6 +2835,10 @@ function createDashboard({
       try {
         if (!root)
           root = build();
+        if (!alreadyOpen) {
+          view = "overview";
+          syncViewToggle();
+        }
         if (!alreadyOpen)
           releaseScrollLock = acquireDocumentScrollLock();
         root.classList.add("rlb-root--open");
@@ -2244,9 +2862,13 @@ function createDashboard({
     destroy() {
       close({ restoreFocus: false });
       root?.remove();
+      themeRuntime?.release();
+      themeRuntime = null;
       root = null;
       summaryNode = null;
       bodyNode = null;
+      viewToggle = null;
+      lastModel = null;
     }
   };
 }
@@ -3649,8 +4271,9 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
-    --rlb-surface-link: var(--page-link-color, var(--page-links, var(--page-reference-color, var(--page-ref-color, var(--link-color, var(--roam-link-color, var(--accent-color, var(--roam-accent-color, #2d72d2))))))));
-    --rlb-surface-link-hover: var(--links-hover, var(--page-link-hover-color, var(--link-hover-color, var(--rlb-surface-link))));
+    --rlb-surface-link: #316a9f;
+    --rlb-surface-link-hover: #2a5a8d;
+    --rlb-session-running: #7eb794;
     position: fixed;
     z-index: 30;
     width: min(340px, calc(100vw - 16px));
@@ -3891,6 +4514,9 @@ var STYLES = `
     --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-hover: rgba(167, 182, 194, 0.18);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
+    --rlb-surface-link: #7eb7d5;
+    --rlb-surface-link-hover: #9dcae2;
+    --rlb-session-running: #8ed0aa;
 }
 
 .rlb-run {
@@ -3925,12 +4551,14 @@ var STYLES = `
     grid-column: 1;
     grid-row: 1;
     align-self: center;
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     margin-top: 0;
     border-radius: 50%;
-    background: #7a9e87;
-    opacity: 0.75;
+    background: var(--rlb-session-running, #7eb794);
+    opacity: 1;
+    border: 0;
+    box-shadow: none;
 }
 
 .rlb-run__status--paused {
@@ -4419,8 +5047,11 @@ var STYLES = `
     --rlb-muted: var(--roam-muted-color, #5c7080);
     --rlb-border: rgba(16, 22, 26, 0.14);
     --rlb-border-light: rgba(16, 22, 26, 0.08);
-    --rlb-accent: var(--roam-accent-color, #2d72d2);
-    --rlb-accent-soft: rgba(45, 114, 210, 0.12);
+    --rlb-surface-link: #316a9f;
+    --rlb-surface-link-hover: #2a5a8d;
+    --rlb-session-running: #7eb794;
+    --rlb-accent: var(--roam-accent-color, #316a9f);
+    --rlb-accent-soft: rgba(49, 106, 159, 0.12);
     --rlb-activity-zero: rgba(167, 182, 194, 0.22);
     --rlb-activity-1: #a7d9b8;
     --rlb-activity-2: #57ad79;
@@ -4443,6 +5074,9 @@ var STYLES = `
     --rlb-muted: var(--roam-muted-color, #a7b6c2);
     --rlb-border: rgba(255, 255, 255, 0.17);
     --rlb-border-light: rgba(255, 255, 255, 0.09);
+    --rlb-surface-link: #7eb7d5;
+    --rlb-surface-link-hover: #9dcae2;
+    --rlb-session-running: #8ed0aa;
     --rlb-accent: #48aff0;
     --rlb-accent-soft: rgba(72, 175, 240, 0.14);
     --rlb-activity-zero: rgba(167, 182, 194, 0.22);
@@ -4968,6 +5602,265 @@ var STYLES = `
         padding: 10px 12px 20px;
     }
 }
+
+/* ---- beta.14 compact overview and opt-in analytics ---- */
+
+.rlb-dashboard__view-toggle {
+    flex: 0 0 34px;
+    width: 34px;
+    min-width: 34px;
+    height: 32px;
+    min-height: 32px;
+    color: var(--rlb-muted);
+}
+
+.rlb-dashboard__view-toggle:hover,
+.rlb-dashboard__view-toggle:focus-visible {
+    color: var(--rlb-text);
+}
+
+.rlb-overview--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: 68px;
+    min-height: 68px;
+}
+
+.rlb-overview--compact .rlb-overview__item {
+    justify-content: center;
+    padding: 8px 12px;
+}
+
+.rlb-overview--compact .rlb-overview__heading {
+    display: grid;
+    gap: 4px;
+    align-items: center;
+}
+
+.rlb-overview--compact .rlb-overview__value {
+    justify-content: flex-start;
+    font-size: 19px;
+}
+
+.rlb-overview--compact .rlb-overview__context {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rlb-analytics {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.rlb-analytics__kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+}
+
+.rlb-analytics__metric {
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--rlb-border);
+    border-radius: 7px;
+    background: var(--rlb-surface-subtle);
+}
+
+.rlb-analytics__metric-label,
+.rlb-analytics__metric-context {
+    display: block;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.35px;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.rlb-analytics__metric-value {
+    display: block;
+    margin: 8px 0 3px;
+    color: var(--rlb-text);
+    font-size: 20px;
+    font-weight: 650;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.rlb-analytics__metric-context {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.rlb-analytics__chart {
+    min-width: 0;
+    padding: 14px 16px 10px;
+}
+
+.rlb-analytics__section-title {
+    margin: 0 0 10px;
+    color: var(--rlb-text);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.15px;
+}
+
+.rlb-analytics__svg {
+    display: block;
+    width: 100%;
+    height: 220px;
+    overflow: visible;
+}
+
+.rlb-analytics__axis {
+    stroke: var(--rlb-border);
+    stroke-width: 1;
+}
+
+.rlb-analytics__bar {
+    fill: var(--rlb-activity-3, #16834a);
+}
+
+.rlb-analytics__bar--empty {
+    fill: var(--rlb-activity-zero, rgba(167, 182, 194, 0.22));
+}
+
+.rlb-analytics__label {
+    fill: var(--rlb-muted);
+    font-family: inherit;
+    font-size: 10px;
+}
+
+.rlb-analytics__empty-note {
+    margin: 4px 0 0;
+    color: var(--rlb-muted);
+    font-size: 11px;
+}
+
+.rlb-analytics__panels {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+    gap: 10px;
+    min-width: 0;
+}
+
+.rlb-analytics__panel {
+    min-width: 0;
+    padding: 14px 16px;
+}
+
+.rlb-analytics__distribution,
+.rlb-analytics__profile {
+    display: grid;
+    gap: 12px;
+}
+
+.rlb-analytics__distribution-row {
+    min-width: 0;
+}
+
+.rlb-analytics__distribution-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.rlb-analytics__distribution-header .rlb-task-link,
+.rlb-analytics__other-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-analytics__distribution-header .rlb-task-link {
+    color: var(--rlb-surface-link);
+    text-decoration: underline;
+    text-decoration-color: currentColor;
+    text-underline-offset: 2px;
+}
+
+.rlb-analytics__distribution-duration {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.rlb-analytics__distribution-track {
+    height: 5px;
+    margin-top: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--rlb-border-light);
+}
+
+.rlb-analytics__distribution-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--rlb-activity-2, #57ad79);
+}
+
+.rlb-analytics__profile-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rlb-border-light);
+    color: var(--rlb-muted);
+    font-size: 11px;
+}
+
+.rlb-analytics__profile-row:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.rlb-analytics__profile-row strong {
+    color: var(--rlb-text);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+    .rlb-overview--compact {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        height: 116px;
+        min-height: 116px;
+    }
+
+    .rlb-overview--compact .rlb-overview__item {
+        grid-column: auto;
+        grid-row: auto;
+        padding: 8px 10px;
+    }
+
+    .rlb-overview--compact .rlb-overview__item:nth-child(odd) {
+        border-left: 0;
+    }
+
+    .rlb-overview--compact .rlb-overview__item:nth-child(n + 3) {
+        border-top: 1px solid var(--rlb-border-light);
+    }
+
+    .rlb-analytics__kpis,
+    .rlb-analytics__panels {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .rlb-analytics__svg {
+        height: 190px;
+    }
+}
 `;
 
 // src/session-surface.js
@@ -5287,6 +6180,7 @@ function createTopbar({
   let refreshInFlight = null;
   let refreshClearTimer = null;
   let refreshState = { state: "idle", message: "" };
+  let themeRuntime = null;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
   const nowDate = () => {
@@ -5377,6 +6271,18 @@ function createTopbar({
   const renderSurfaces = () => {
     if (popover)
       renderPopover();
+  };
+  const ensureThemeRuntime = () => {
+    if (themeRuntime)
+      return themeRuntime;
+    themeRuntime = acquireThemeRuntime({
+      documentRef: document,
+      onChange: (palette) => {
+        if (popover)
+          applyRoamThemePalette(popover, palette);
+      }
+    });
+    return themeRuntime;
   };
   const renderRefreshState = () => {
     if (destroyed)
@@ -5514,11 +6420,13 @@ function createTopbar({
   function renderPopover() {
     if (!popover)
       return;
+    ensureThemeRuntime();
     const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
     const options = surfaceOptions();
     options.emptyMessage = refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
     renderSessionSurface(popover, model, options);
+    themeRuntime?.apply(popover);
   }
   const syncSurfaceAria = (expanded) => {
     buttonNode?.setAttribute("aria-expanded", expanded ? "true" : "false");
@@ -5541,6 +6449,7 @@ function createTopbar({
     popover.setAttribute("aria-modal", "true");
     popover.setAttribute("aria-labelledby", POPOVER_TITLE_ID);
     document.body.appendChild(popover);
+    ensureThemeRuntime().apply(popover);
     buttonNode?.setAttribute("aria-haspopup", "dialog");
     syncSurfaceAria(POPOVER_ID);
     renderPopover();
@@ -5675,20 +6584,20 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       placement.parent.insertBefore(container, placement.before);
     }
   };
-  const isPluginNode = (node) => Boolean(
+  const isPluginNode2 = (node) => Boolean(
     node && (node === container || node === popover || container?.contains(node) || popover?.contains(node))
   );
   const hasNonPluginMutation = (record) => {
-    if (isPluginNode(record.target))
+    if (isPluginNode2(record.target))
       return false;
     const nodes = [...record.addedNodes, ...record.removedNodes];
-    return nodes.length === 0 || nodes.some((node) => !isPluginNode(node));
+    return nodes.length === 0 || nodes.some((node) => !isPluginNode2(node));
   };
   const touchesTopbar = (record) => {
-    if (isPluginNode(record.target))
+    if (isPluginNode2(record.target))
       return false;
     const nodes = [...record.addedNodes, ...record.removedNodes];
-    if (nodes.length > 0 && nodes.every(isPluginNode))
+    if (nodes.length > 0 && nodes.every(isPluginNode2))
       return false;
     if (record.target?.closest?.(TOPBAR_SELECTOR))
       return true;
@@ -5828,6 +6737,7 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   };
   return {
     mount() {
+      ensureThemeRuntime();
       unsubscribe = subscribe(() => {
         renderButton();
         renderSurfaces();
@@ -5873,6 +6783,8 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       attachTimer = null;
       remove();
       container = null;
+      themeRuntime?.release();
+      themeRuntime = null;
     }
   };
 }

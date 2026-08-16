@@ -888,7 +888,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
     assert.equal(root.getAttribute('aria-hidden'), 'false');
     assert.equal(dialog.getAttribute('role'), 'dialog');
     assert.equal(dialog.getAttribute('aria-modal'), 'true');
-    assert.equal(document.activeElement, dialog.querySelector('select'));
+    assert.equal(document.activeElement, dialog.querySelector('[data-action="toggle-view"]'));
 
     const focusables = () => [...dialog.querySelectorAll('select, button, [href], [tabindex]:not([tabindex="-1"])')];
     const first = focusables()[0];
@@ -908,7 +908,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
 
     trigger.focus();
     paletteCommands.get('Logbook: Open dashboard')();
-    assert.equal(document.activeElement, root.querySelector('select'));
+    assert.equal(document.activeElement, root.querySelector('[data-action="toggle-view"]'));
     const dashboardDialog = root.querySelector('.rlb-dialog');
     root.querySelectorAll('select, button').forEach(control => control.remove());
     dashboardDialog.focus();

@@ -8,6 +8,7 @@ import {
     findStaleClocks,
     summariseByDay,
     summariseByTask,
+    summariseSessionMetrics,
 } from '../src/stats.js';
 
 const NOW = new Date(2026, 7, 5, 17, 0);
@@ -75,6 +76,32 @@ test('task rollups sum minutes and sort by weight', () => {
     assert.deepEqual(rows.map(row => row.title), ['big', 'small']);
     assert.equal(rows[1].minutes, 35);
     assert.equal(rows[1].sessions, 2);
+});
+
+test('session metrics count CLOCK entries once and expose profile statistics', () => {
+    const metrics = summariseSessionMetrics(
+        [
+            entry({ clockUid: 'short', minutes: 10 }),
+            entry({ clockUid: 'medium', minutes: 30, start: new Date(2026, 7, 4, 15, 0) }),
+            entry({
+                clockUid: 'running',
+                minutes: null,
+                end: null,
+                running: true,
+                start: new Date(2026, 7, 5, 15, 0),
+            }),
+        ],
+        NOW
+    );
+
+    assert.equal(metrics.sessions, 3);
+    assert.equal(metrics.completedSessions, 2);
+    assert.equal(metrics.runningSessions, 1);
+    assert.equal(metrics.focusMinutes, 160);
+    assert.equal(metrics.averageMinutes, 160 / 3);
+    assert.equal(metrics.longestMinutes, 120);
+    assert.equal(metrics.medianMinutes, 30);
+    assert.equal(metrics.activeDays, 2);
 });
 
 test('a task with a running clock is flagged as running', () => {

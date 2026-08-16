@@ -1,7 +1,7 @@
 /**
  * The dashboard dialog: a compact overview, running sessions, and a per-task
- * breakdown. Activity remains available as an accessible chart inside the
- * selected-range overview panel rather than as a separate chart section.
+ * breakdown. Analytics is an opt-in second view so opening the dashboard stays
+ * list-first and quiet.
  *
  * Reads the graph on open and on refresh only — there is no live subscription,
  * because a dialog that reshuffles under the cursor is worse than a stale one.
@@ -11,12 +11,24 @@ import * as clock from './clock.js';
 import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
 import { openBlock, openBlockInRightSidebar } from './roam.js';
-import { buildDashboard, findStaleClocks, flattenForest, getRange, RANGES } from './stats.js';
+import {
+    buildDashboard,
+    entryMinutes,
+    filterByRange,
+    findStaleClocks,
+    flattenForest,
+    getRange,
+    RANGES,
+    summariseSessionMetrics,
+} from './stats.js';
 import { staleHours } from './settings.js';
+import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
 import { formatDayLabel, formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Roam Logbook';
+const VIEW_HOST_ID = 'roam-logbook-dashboard-view';
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Dashboard overlays are allowed to outlive a single render, and hot reloads
 // can briefly create more than one controller. Keep the document lock shared
@@ -104,6 +116,13 @@ export function createDashboard({
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
     let lastSnapshot = null;
+    let lastModel = null;
+    let lastHierarchy = null;
+    let lastTransientIssues = [];
+    let lastRefreshNotice = '';
+    let view = 'overview';
+    let viewToggle = null;
+    let themeRuntime = null;
     let releaseScrollLock = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
@@ -120,19 +139,100 @@ export function createDashboard({
         discardConfirmTimer = null;
     };
 
+    const focusWithoutScroll = node => {
+        if (!node?.focus) return;
+        try {
+            node.focus({ preventScroll: true });
+        } catch {
+            node.focus();
+        }
+    };
+
+    const updateLiveMetricNodes = now => {
+        if (!lastModel) return;
+        const metrics = summariseSessionMetrics(lastModel.entries, now);
+        const todayMinutes = filterByRange(lastSnapshot?.entries || [], 'today', now).reduce(
+            (sum, entry) => sum + entryMinutes(entry, now),
+            0
+        );
+        const values = {
+            today: formatMinutesHuman(todayMinutes),
+            selected: formatMinutesHuman(metrics.focusMinutes),
+            sessions: String(metrics.sessions),
+            tasks: String(lastModel.tasks.length),
+            focus: formatMinutesHuman(metrics.focusMinutes),
+            average: formatMinutesHuman(metrics.averageMinutes),
+            longest: formatMinutesHuman(metrics.longestMinutes),
+        };
+        for (const node of bodyNode?.querySelectorAll('[data-live-metric]') || []) {
+            const value = values[node.dataset.liveMetric];
+            if (value !== undefined) node.textContent = value;
+        }
+        for (const node of summaryNode?.querySelectorAll('[data-live-metric]') || []) {
+            const value = values[node.dataset.liveMetric];
+            if (value !== undefined) node.textContent = value;
+        }
+    };
+
     const updateRunningElapsed = () => {
         if (!root?.classList.contains('rlb-root--open')) return;
-        const now = nowFn().getTime();
+        const nowDateValue = nowFn();
+        const now = nowDateValue.getTime();
         for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
             cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
         }
+        updateLiveMetricNodes(nowDateValue);
     };
 
     const startLiveTicker = () => {
         clearLiveTicker();
         if (!root?.classList.contains('rlb-root--open')) return;
-        if (!bodyNode?.querySelector('[data-running-elapsed="true"]')) return;
+        if (!bodyNode?.querySelector('[data-running-elapsed="true"]') && !lastModel?.running?.length) {
+            return;
+        }
         liveTicker = setIntervalFn(updateRunningElapsed, 1000);
+    };
+
+    const paint = now => {
+        if (!bodyNode || !lastModel) return;
+        clearLiveTicker();
+        const model = lastModel;
+        const hierarchy = lastHierarchy || {};
+        const transientIssues = lastTransientIssues;
+        const refreshNotice = lastRefreshNotice;
+        summaryNode.replaceChildren(overviewBar(model, now));
+        bodyNode.replaceChildren();
+
+        if (refreshNotice) {
+            const notice = el('div', 'rlb-dashboard__notice', refreshNotice);
+            notice.setAttribute('role', 'status');
+            bodyNode.appendChild(notice);
+        }
+
+        const issues = [
+            ...model.issues,
+            ...(hierarchy.issues || []).map(issueRow),
+            ...transientIssues.map(issueRow),
+        ];
+
+        if (view === 'analytics') {
+            bodyNode.appendChild(analyticsSection(model, now));
+            if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
+            startLiveTicker();
+            return;
+        }
+
+        if (model.running.length > 0) bodyNode.appendChild(runningSection(model.running, now));
+        if (model.entries.length === 0) {
+            bodyNode.appendChild(el('div', 'rlb-empty', 'No clock entries in this range yet.'));
+            if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
+            startLiveTicker();
+            return;
+        }
+
+        bodyNode.appendChild(tasksSection(model.tree));
+        if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
+        startLiveTicker();
     };
 
     const render = () => {
@@ -161,6 +261,7 @@ export function createDashboard({
                     notice,
                     ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
                 );
+                lastModel = null;
                 return;
             }
             snapshot = lastSnapshot;
@@ -172,57 +273,11 @@ export function createDashboard({
         // Publish the exact snapshot to the clock seam. This updates running
         // state without issuing the entries query a second time.
         clock.refresh({ entries });
-        const model = buildDashboard(entries, { now, rangeId, hierarchy });
-        bodyNode.replaceChildren();
-
-        const rangeLabel = getRange(rangeId).label;
-        summaryNode.replaceChildren(
-            overviewBar({
-                today: formatMinutesHuman(model.todayMinutes),
-                todayContext:
-                    model.running.length > 0
-                        ? `${model.running.length} active Session${model.running.length === 1 ? '' : 's'}`
-                        : 'No active Sessions',
-                selected: formatMinutesHuman(model.totalMinutes),
-                selectedLabel: rangeLabel,
-                selectedContext: `${(model.activity || model.days || []).length} day${(model.activity || model.days || []).length === 1 ? '' : 's'} in range`,
-                activity: model.activity || model.days,
-                activityLabel: model.activityLabel || rangeLabel,
-                activityScope: model.activityScope || 'selected-range',
-                tasks: String(model.tasks.length),
-                tasksContext: 'in selected period',
-                now,
-            })
-        );
-
-        if (refreshNotice) {
-            const notice = el('div', 'rlb-dashboard__notice', refreshNotice);
-            notice.setAttribute('role', 'status');
-            bodyNode.appendChild(notice);
-        }
-
-        if (model.running.length > 0) {
-            bodyNode.appendChild(runningSection(model.running, now));
-        }
-
-        const issues = [
-            ...model.issues,
-            ...(hierarchy.issues || []).map(issueRow),
-            ...transientIssues.map(issueRow),
-        ];
-
-        if (model.entries.length === 0) {
-            bodyNode.appendChild(
-                el('div', 'rlb-empty', 'No clock entries in this range yet.')
-            );
-            if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
-            startLiveTicker();
-            return;
-        }
-
-        bodyNode.appendChild(tasksSection(model.tree));
-        if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
-        startLiveTicker();
+        lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
+        lastHierarchy = hierarchy;
+        lastTransientIssues = transientIssues;
+        lastRefreshNotice = refreshNotice;
+        paint(now);
     };
 
     const issueRow = issue => ({
@@ -278,85 +333,197 @@ export function createDashboard({
         return details;
     };
 
-    const activityRail = (days, now, activityLabel, activityScope) => {
-        const series = days || [];
-        const peak = Math.max(1, ...series.map(day => day.minutes));
-        const rail = el('div', 'rlb-activity-rail');
-        rail.dataset.dayCount = String(series.length);
-        rail.style.setProperty('--rlb-activity-count', String(series.length));
-        rail.dataset.activityScope = activityScope;
-        rail.setAttribute('role', 'group');
-        rail.setAttribute('aria-label', `${activityLabel} activity`);
-
-        for (const day of series) {
-            const level =
-                day.minutes === 0 ? 0 : Math.max(1, Math.ceil((day.minutes / peak) * 3));
-            const duration = formatMinutesHuman(day.minutes);
-            const label = formatDayLabel(day.date, now);
-            const bucket = button(
-                `rlb-activity__bucket rlb-activity__bucket--level-${level}${
-                    day.minutes === 0 ? ' rlb-activity__bucket--empty' : ''
-                }`,
-                '',
-                () => {},
-                { title: `${day.key} · ${duration}` }
-            );
-            bucket.dataset.date = day.key;
-            bucket.dataset.minutes = String(day.minutes);
-            bucket.dataset.level = String(level);
-            bucket.setAttribute('aria-label', `${day.key}, ${label}, ${duration}`);
-            const fill = el('span', 'rlb-activity__fill');
-            fill.style.height = `${day.minutes === 0 ? 0 : Math.max(8, Math.round((day.minutes / peak) * 100))}%`;
-            bucket.appendChild(fill);
-            rail.appendChild(bucket);
-        }
-        return rail;
-    };
-
-    const overviewBar = ({
-        today,
-        todayContext,
-        selected,
-        selectedLabel,
-        selectedContext,
-        activity,
-        activityLabel,
-        activityScope,
-        tasks,
-        tasksContext,
-        now,
-    }) => {
-        const wrapper = el('dl', 'rlb-overview rlb-overview--strip');
+    const overviewBar = (model, now) => {
+        const wrapper = el('dl', 'rlb-overview rlb-overview--compact');
         wrapper.setAttribute('aria-label', `${DASHBOARD_TITLE} overview`);
+        const rangeLabel = getRange(model.rangeId).label;
+        const todayContext =
+            model.running.length > 0
+                ? `${model.running.length} active Session${model.running.length === 1 ? '' : 's'}`
+                : 'No active Sessions';
         const metrics = [
-            ['Today', today, todayContext],
-            [selectedLabel, selected, selectedContext],
-            ['Tasks tracked', tasks, tasksContext],
+            ['Today', formatMinutesHuman(model.todayMinutes), todayContext, 'today'],
+            [rangeLabel, formatMinutesHuman(model.totalMinutes), 'selected range', 'selected'],
+            ['Sessions', String(model.sessionMetrics?.sessions || 0), 'selected range', 'sessions'],
+            ['Tasks tracked', String(model.tasks.length), 'selected range', 'tasks'],
         ];
-        for (const [index, [label, value, context]] of metrics.entries()) {
+        for (const [label, value, context, key] of metrics) {
             const item = el('div', 'rlb-overview__item rlb-overview__panel');
-            if (index === 1) item.classList.add('rlb-overview__item--selected');
             const heading = el('div', 'rlb-overview__heading');
-            const valueNode = el(
-                'dd',
-                `rlb-overview__value${
-                    index === 0 && value === '0m' && /No active Sessions/i.test(context)
-                        ? ' rlb-overview__value--quiet'
-                        : ''
-                }`
-            );
-            valueNode.append(
-                el('span', 'rlb-overview__number', value),
-                el('span', 'rlb-overview__context', context)
-            );
+            const valueNode = el('dd', 'rlb-overview__value');
+            const number = el('span', 'rlb-overview__number', value);
+            number.dataset.liveMetric = key;
+            valueNode.append(number, el('span', 'rlb-overview__context', context));
             heading.append(el('dt', 'rlb-overview__label', label), valueNode);
-            item.append(heading);
-            if (index === 1) {
-                item.appendChild(activityRail(activity, now, activityLabel, activityScope));
-            }
+            item.appendChild(heading);
             wrapper.appendChild(item);
         }
         return wrapper;
+    };
+
+    const svgNode = (name, attributes = {}, textContent = '') => {
+        const node = document.createElementNS(SVG_NS, name);
+        for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+        if (textContent) node.textContent = textContent;
+        return node;
+    };
+
+    const activityChart = (model, now) => {
+        const section = el('section', 'rlb-analytics__chart rlb-dashboard-panel');
+        const title = el('h3', 'rlb-analytics__section-title', `Activity · ${model.activityLabel}`);
+        section.appendChild(title);
+        const series = model.activity || [];
+        const titleId = 'roam-logbook-activity-title';
+        const descriptionId = 'roam-logbook-activity-description';
+        const svg = svgNode('svg', {
+            class: 'rlb-analytics__svg',
+            viewBox: '0 0 760 236',
+            role: 'img',
+            'aria-labelledby': `${titleId} ${descriptionId}`,
+            preserveAspectRatio: 'none',
+        });
+        svg.appendChild(svgNode('title', { id: titleId }, `Activity over time · ${model.activityLabel}`));
+        svg.appendChild(
+            svgNode(
+                'desc',
+                { id: descriptionId },
+                series.length > 0
+                    ? `${series.length} daily activity bars. All time is shown as ${model.activityLabel}.`
+                    : 'No activity data is available for this range.'
+            )
+        );
+        const peak = Math.max(1, ...series.map(day => day.minutes));
+        const left = 18;
+        const chartWidth = 724;
+        const chartHeight = 154;
+        const barWidth = series.length > 0 ? Math.min(28, Math.max(8, chartWidth / series.length - 8)) : 12;
+        const labelStep = series.length <= 7 ? 1 : series.length <= 14 ? 2 : 5;
+        svg.appendChild(
+            svgNode('line', {
+                class: 'rlb-analytics__axis',
+                x1: left,
+                y1: chartHeight + 8,
+                x2: left + chartWidth,
+                y2: chartHeight + 8,
+            })
+        );
+        series.forEach((day, index) => {
+            const slot = chartWidth / Math.max(1, series.length);
+            const x = left + slot * index + (slot - barWidth) / 2;
+            const height = day.minutes === 0 ? 3 : Math.max(8, (day.minutes / peak) * chartHeight);
+            const y = chartHeight + 8 - height;
+            const rect = svgNode('rect', {
+                class: day.minutes === 0 ? 'rlb-analytics__bar rlb-analytics__bar--empty' : 'rlb-analytics__bar',
+                x,
+                y,
+                width: barWidth,
+                height,
+                rx: 3,
+                'data-date': day.key,
+                'data-minutes': day.minutes,
+            });
+            rect.appendChild(svgNode('title', {}, `${day.key} · ${formatMinutesHuman(day.minutes)}`));
+            svg.appendChild(rect);
+            if (index % labelStep === 0 || index === series.length - 1) {
+                svg.appendChild(
+                    svgNode(
+                        'text',
+                        { class: 'rlb-analytics__label', x: x + barWidth / 2, y: 206, 'text-anchor': 'middle' },
+                        formatDayLabel(day.date, now)
+                    )
+                );
+            }
+        });
+        section.appendChild(svg);
+        if (series.length === 0 || series.every(day => day.minutes === 0)) {
+            section.appendChild(el('p', 'rlb-analytics__empty-note', 'No Sessions in this range yet.'));
+        }
+        return section;
+    };
+
+    const analyticsMetric = (label, value, key, context = '') => {
+        const item = el('div', 'rlb-analytics__metric');
+        item.appendChild(el('dt', 'rlb-analytics__metric-label', label));
+        const valueNode = el('dd', 'rlb-analytics__metric-value', value);
+        if (key) valueNode.dataset.liveMetric = key;
+        item.append(valueNode, el('span', 'rlb-analytics__metric-context', context));
+        return item;
+    };
+
+    const analyticsKpis = (model, metrics) => {
+        const list = el('dl', 'rlb-analytics__kpis');
+        list.append(
+            analyticsMetric('Focus time', formatMinutesHuman(metrics.focusMinutes), 'focus', 'selected range'),
+            analyticsMetric('Sessions', String(metrics.sessions), 'sessions', 'selected range'),
+            analyticsMetric('Average session', formatMinutesHuman(metrics.averageMinutes), 'average', 'per Session'),
+            analyticsMetric('Longest session', formatMinutesHuman(metrics.longestMinutes), 'longest', 'single Session')
+        );
+        list.setAttribute('aria-label', `${DASHBOARD_TITLE} analytics summary`);
+        return list;
+    };
+
+    const taskDistribution = model => {
+        const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
+        panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Task time distribution'));
+        const rows = model.tasks.filter(task => task.minutes > 0);
+        const top = rows.slice(0, 6);
+        const otherMinutes = rows.slice(6).reduce((sum, task) => sum + task.minutes, 0);
+        if (otherMinutes > 0) top.push({ taskUid: null, title: 'Other', minutes: otherMinutes });
+        const total = rows.reduce((sum, task) => sum + task.minutes, 0);
+        if (top.length === 0) {
+            panel.appendChild(el('p', 'rlb-analytics__empty-note', 'No task time in this range yet.'));
+            return panel;
+        }
+        const list = el('div', 'rlb-analytics__distribution');
+        for (const task of top) {
+            const percentage = total > 0 ? (task.minutes / total) * 100 : 0;
+            const row = el('div', 'rlb-analytics__distribution-row');
+            const header = el('div', 'rlb-analytics__distribution-header');
+            if (task.taskUid) header.appendChild(taskLink(task.title, task.taskUid));
+            else header.appendChild(el('span', 'rlb-analytics__other-label', task.title));
+            header.append(
+                el('span', 'rlb-analytics__distribution-duration', `${Math.round(percentage)}% · ${formatMinutesHuman(task.minutes)}`)
+            );
+            const track = el('div', 'rlb-analytics__distribution-track');
+            const fill = el('span', 'rlb-analytics__distribution-fill');
+            fill.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
+            track.appendChild(fill);
+            row.append(header, track);
+            list.appendChild(row);
+        }
+        panel.appendChild(list);
+        return panel;
+    };
+
+    const profileMetric = (label, value) => {
+        const row = el('div', 'rlb-analytics__profile-row');
+        row.append(el('span', 'rlb-analytics__profile-label', label), el('strong', '', value));
+        return row;
+    };
+
+    const sessionProfile = metrics => {
+        const panel = el('section', 'rlb-analytics__panel rlb-dashboard-panel');
+        panel.appendChild(el('h3', 'rlb-analytics__section-title', 'Session profile'));
+        const profile = el('div', 'rlb-analytics__profile');
+        profile.append(
+            profileMetric('Completed', String(metrics.completedSessions)),
+            profileMetric('Running', String(metrics.runningSessions)),
+            profileMetric('Active days', String(metrics.activeDays)),
+            profileMetric('Median session', formatMinutesHuman(metrics.medianMinutes))
+        );
+        panel.appendChild(profile);
+        return panel;
+    };
+
+    const analyticsSection = (model, now) => {
+        const section = el('section', 'rlb-analytics');
+        const metrics = model.sessionMetrics || summariseSessionMetrics(model.entries, now);
+        section.appendChild(analyticsKpis(model, metrics));
+        section.appendChild(activityChart(model, now));
+        const panels = el('div', 'rlb-analytics__panels');
+        panels.append(taskDistribution(model), sessionProfile(metrics));
+        section.appendChild(panels);
+        return section;
     };
 
     const runningSection = (running, now) => {
@@ -692,6 +859,32 @@ export function createDashboard({
         }
     };
 
+    const syncViewToggle = () => {
+        if (!viewToggle) return;
+        const analytics = view === 'analytics';
+        viewToggle.className =
+            `bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle ` +
+            `bp3-icon-${analytics ? 'arrow-left' : 'chart'}`;
+        const label = analytics ? 'Back to Overview' : 'Open Analytics';
+        viewToggle.title = label;
+        viewToggle.setAttribute('aria-label', label);
+        viewToggle.setAttribute('aria-pressed', String(analytics));
+        viewToggle.setAttribute('aria-controls', VIEW_HOST_ID);
+    };
+
+    const toggleView = event => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        view = view === 'overview' ? 'analytics' : 'overview';
+        syncViewToggle();
+        if (bodyNode) {
+            bodyNode.dataset.dashboardView = view;
+            bodyNode.scrollTop = 0;
+        }
+        paint(nowFn());
+        focusWithoutScroll(viewToggle);
+    };
+
     const build = () => {
         const overlay = el('div', 'rlb-root rlb-dashboard');
         overlay.id = ROOT_ID;
@@ -720,6 +913,16 @@ export function createDashboard({
         dialog.setAttribute('aria-describedby', subtitle.id);
         header.appendChild(heading);
 
+        viewToggle = button(
+            'bp3-button bp3-minimal bp3-small rlb-icon-button rlb-dashboard__view-toggle bp3-icon-chart',
+            '',
+            toggleView,
+            { title: 'Open Analytics' }
+        );
+        viewToggle.dataset.action = 'toggle-view';
+        viewToggle.setAttribute('aria-controls', VIEW_HOST_ID);
+        viewToggle.setAttribute('aria-pressed', 'false');
+
         const selectWrapper = el('div', 'bp3-select bp3-small');
         const select = el('select');
         select.setAttribute('aria-label', 'Dashboard date range');
@@ -729,13 +932,14 @@ export function createDashboard({
             if (range.id === rangeId) option.selected = true;
             select.appendChild(option);
         }
-            select.addEventListener('change', event => {
-                rangeId = event.target.value;
-                render();
+        select.addEventListener('change', event => {
+            rangeId = event.target.value;
+            render();
         });
         selectWrapper.appendChild(select);
 
         header.append(
+            viewToggle,
             selectWrapper,
             button('bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-icon-button', '', () => {
                 render();
@@ -750,13 +954,23 @@ export function createDashboard({
 
         summaryNode = el('div', 'rlb-summary');
         bodyNode = el('div', 'rlb-body rlb-body__scroll');
+        bodyNode.id = VIEW_HOST_ID;
+        bodyNode.dataset.dashboardView = view;
         dialog.append(header, summaryNode, bodyNode);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        themeRuntime = acquireThemeRuntime({
+            documentRef: document,
+            onChange: palette => applyRoamThemePalette(overlay, palette),
+        });
+        themeRuntime.apply(overlay);
+        syncViewToggle();
         return overlay;
     };
 
     function close({ restoreFocus = true } = {}) {
+        view = 'overview';
+        syncViewToggle();
         if (!root) {
             releaseScrollLock?.();
             releaseScrollLock = null;
@@ -787,6 +1001,10 @@ export function createDashboard({
                   : null;
             try {
                 if (!root) root = build();
+                if (!alreadyOpen) {
+                    view = 'overview';
+                    syncViewToggle();
+                }
                 if (!alreadyOpen) releaseScrollLock = acquireDocumentScrollLock();
                 root.classList.add('rlb-root--open');
                 root.setAttribute('aria-hidden', 'false');
@@ -809,9 +1027,13 @@ export function createDashboard({
         destroy() {
             close({ restoreFocus: false });
             root?.remove();
+            themeRuntime?.release();
+            themeRuntime = null;
             root = null;
             summaryNode = null;
             bodyNode = null;
+            viewToggle = null;
+            lastModel = null;
         },
     };
 }

@@ -1,6 +1,6 @@
 {
   "name": "roam-logbook",
-  "version": "0.9.0-beta.13",
+  "version": "0.9.0-beta.14",
   "description": "org-mode style clock tracking (LOGBOOK / CLOCK) for Roam Research TODOs",
   "type": "module",
   "main": "extension.js",

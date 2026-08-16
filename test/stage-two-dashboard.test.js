@@ -344,7 +344,7 @@ test('Dashboard locks document scroll reversibly without moving the dialog root'
     }
 });
 
-test('Integrated summary owns the selected-range activity rail and keeps three metrics', () => {
+test('Overview keeps four compact metrics and contains no chart surface', () => {
     graph = installGraph([
         { uid: 'day-task', string: '{{[[TODO]]}} Activity task', parent: null },
         { uid: 'day-drawer', string: 'LOGBOOK::', parent: 'day-task' },
@@ -371,28 +371,14 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
 
     const summary = document.querySelector('.rlb-summary');
     const metrics = [...summary.querySelectorAll('.rlb-overview__item')];
-    assert.equal(metrics.length, 3, 'the summary has a stable three-metric contract');
+    assert.equal(metrics.length, 4, 'the overview has a stable four-metric contract');
     assert.deepEqual(
         metrics.map(metric => metric.querySelector('.rlb-overview__label')?.textContent),
-        ['Today', 'Last 7 days', 'Tasks tracked']
+        ['Today', 'Last 7 days', 'Sessions', 'Tasks tracked']
     );
-
-    const bars = summary.querySelector('.rlb-activity-rail');
-    assert.ok(bars, 'activity is embedded in the selected-range metric');
-    const cells = [...bars.querySelectorAll('.rlb-activity__bucket')];
-    assert.equal(bars.dataset.dayCount, '7');
-    assert.equal(bars.getAttribute('role'), 'group');
-    assert.equal(cells.length, 7);
-    assert.equal(document.querySelector('.rlb-by-day'), null, 'By Day is no longer a standalone section');
-    assert.equal(document.querySelector('.rlb-bars__range'), null, 'the range is not repeated below the summary');
-    assert.ok(cells.every(cell => cell.querySelector('.rlb-activity__fill')));
-    assert.ok(cells.every(cell => /2026-08-\d{2}/.test(cell.getAttribute('aria-label'))));
-    assert.ok(cells.every(cell => /\d+(?:h \d{2}m|m)/.test(cell.title)));
-    assert.ok(cells.every(cell => cell.tagName === 'BUTTON'));
-    assert.ok(cells.every(cell => cell.getAttribute('role') !== 'listitem'));
-    assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-0')));
-    assert.ok(cells.some(cell => cell.classList.contains('rlb-activity__bucket--level-3')));
-    assert.ok(cells.every(cell => cell.textContent === ''));
+    assert.equal(summary.querySelector('.rlb-activity-rail'), null);
+    assert.equal(summary.querySelector('svg'), null);
+    assert.equal(document.querySelector('.rlb-activity-rail'), null);
 
     const byTask = document.querySelector('.rlb-by-task');
     assert.ok(byTask, 'By Task remains the primary follow-up list');
@@ -403,7 +389,7 @@ test('Integrated summary owns the selected-range activity rail and keeps three m
     dashboard.destroy();
 });
 
-test('beta.12 exposes one semantic summary strip with three metrics and accessible activity buckets', () => {
+test('beta.14 exposes one semantic overview with four metrics and no activity buckets', () => {
     graph = installGraph([
         { uid: 'compact-task', string: '{{[[TODO]]}} Compact dashboard task', parent: null },
         { uid: 'compact-drawer', string: 'LOGBOOK::', parent: 'compact-task' },
@@ -419,52 +405,78 @@ test('beta.12 exposes one semantic summary strip with three metrics and accessib
     const overview = document.querySelector('.rlb-overview');
     assert.ok(overview, 'Dashboard exposes a single semantic overview bar');
     assert.equal(overview.tagName, 'DL');
-    assert.ok(overview.classList.contains('rlb-overview--strip'));
+    assert.ok(overview.classList.contains('rlb-overview--compact'));
     assert.equal(overview.getAttribute('aria-label'), 'Roam Logbook overview');
-    assert.equal(overview.querySelectorAll('.rlb-overview__item').length, 3);
-    assert.equal(overview.querySelectorAll('dt').length, 3);
-    assert.equal(overview.querySelectorAll('dd').length, 3);
+    assert.equal(overview.querySelectorAll('.rlb-overview__item').length, 4);
+    assert.equal(overview.querySelectorAll('dt').length, 4);
+    assert.equal(overview.querySelectorAll('dd').length, 4);
     assert.equal(document.querySelectorAll('.rlb-stat').length, 0);
-
-    const rail = overview.querySelector('.rlb-activity-rail');
-    assert.ok(rail, 'the selected-range metric owns the activity rail');
-    assert.equal(rail.querySelectorAll('.rlb-activity__bucket').length, 7);
-    assert.equal(rail.querySelectorAll('.rlb-activity__label').length, 0);
-    assert.ok(
-        [...rail.querySelectorAll('.rlb-activity__bucket')].every(
-            bucket =>
-                bucket.tagName === 'BUTTON' &&
-                bucket.tabIndex >= 0 &&
-                /2026-08-\d{2}/.test(bucket.title) &&
-                /\d+(?:h \d{2}m|m)/.test(bucket.getAttribute('aria-label'))
-        )
-    );
+    assert.equal(overview.querySelector('.rlb-activity-rail'), null);
+    assert.equal(overview.querySelector('svg'), null);
 
     dashboard.destroy();
 });
 
-test('beta.12 Dashboard keeps the activity rail in the compact summary strip', async () => {
+test('beta.14 Analytics toggle renders the chart and keeps Overview chart-free', async () => {
     graph.store.set('compact-dashboard-task', {
         uid: 'compact-dashboard-task',
         string: '{{[[TODO]]}} Compact dashboard task',
         parent: null,
     });
-    await clock.clockIn('compact-dashboard-task', { now: new Date('2026-08-15T09:00:00') });
+    graph.store.set('compact-dashboard-child', {
+        uid: 'compact-dashboard-child',
+        string: '{{[[TODO]]}} Compact dashboard child',
+        parent: 'compact-dashboard-task',
+    });
+    let queryCount = 0;
+    const graphQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        queryCount += 1;
+        return graphQuery(...args);
+    };
+    await clock.clockIn('compact-dashboard-child', { now: new Date('2026-08-15T09:00:00') });
     const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
     dashboard.open();
+    const queriesAfterOpen = queryCount;
 
-    const overview = document.querySelector('.rlb-overview');
-    const panels = [...overview.querySelectorAll('.rlb-overview__panel')];
-    const rangePanel = panels[1];
-    const chart = rangePanel.querySelector('.rlb-activity-rail');
-
-    assert.equal(panels.length, 3);
-    assert.ok(panels.every(panel => panel.querySelector('.rlb-overview__heading')));
-    assert.ok(panels.every(panel => panel.querySelector('.rlb-overview__value')));
-    assert.ok(rangePanel.querySelector('.rlb-overview__heading'));
-    assert.equal(rangePanel.querySelector('.rlb-overview__value > .rlb-activity-rail'), null);
-    assert.equal(chart.querySelectorAll('.rlb-activity__bucket').length, 7);
+    const toggle = document.querySelector('[data-action="toggle-view"]');
+    assert.equal(toggle.getAttribute('aria-label'), 'Open Analytics');
+    assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+    assert.equal(document.querySelector('.rlb-analytics'), null);
+    const before = document.querySelector('.rlb-body');
+    const collapsedParent = document.querySelector('.rlb-tree__toggle');
+    assert.ok(collapsedParent, 'the Analytics fixture has a collapsible parent');
+    collapsedParent.click();
+    assert.equal(document.querySelector('.rlb-tree__toggle')?.getAttribute('aria-expanded'), 'false');
+    before.scrollTop = 77;
+    toggle.click();
+    assert.equal(queryCount, queriesAfterOpen, 'view switching does not reread the graph');
+    assert.equal(document.activeElement, toggle, 'view switching restores focus to the same button');
+    assert.ok(document.querySelector('.rlb-analytics'));
+    assert.equal(toggle.getAttribute('aria-label'), 'Back to Overview');
+    assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+    assert.equal(document.querySelectorAll('.rlb-analytics__kpis .rlb-analytics__metric').length, 4);
+    assert.equal(document.querySelectorAll('.rlb-analytics__svg').length, 1);
+    assert.equal(document.querySelectorAll('.rlb-analytics__bar').length, 7);
+    assert.equal(before.scrollTop, 0);
+    assert.ok(document.querySelector('.rlb-overview'), 'the compact summary remains visible');
+    const range = document.querySelector('.rlb-header select');
+    range.value = 'month';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.ok(document.querySelector('.rlb-analytics'), 'range changes preserve Analytics view');
+    assert.ok(queryCount > queriesAfterOpen, 'range changes use the existing graph refresh path');
+    document.querySelector('.rlb-header .bp3-icon-refresh').click();
+    assert.ok(document.querySelector('.rlb-analytics'), 'Refresh preserves Analytics view');
+    toggle.click();
+    assert.equal(document.querySelector('.rlb-analytics'), null);
+    assert.ok(document.querySelector('.rlb-overview'));
     assert.ok(document.querySelector('.rlb-by-task'));
+    assert.equal(document.querySelector('.rlb-tree__toggle')?.getAttribute('aria-expanded'), 'false');
+
+    dashboard.close();
+    dashboard.open();
+    assert.equal(document.querySelector('[data-action="toggle-view"]').getAttribute('aria-pressed'), 'false');
+    assert.equal(document.querySelector('.rlb-analytics'), null, 'a new open starts in Overview');
 
     dashboard.destroy();
 });
@@ -475,13 +487,12 @@ test('beta.10 zero-time overview uses a quiet empty context instead of a primary
 
     const today = document.querySelector('.rlb-overview__item');
     assert.equal(today.querySelector('.rlb-overview__number').textContent, '0m');
-    assert.ok(today.querySelector('.rlb-overview__value--quiet'));
     assert.match(today.querySelector('.rlb-overview__context').textContent, /No active Sessions/);
 
     dashboard.destroy();
 });
 
-test('activity rail labels finite ranges and the All time fallback honestly', () => {
+test('Analytics chart labels finite ranges and the All time fallback honestly', () => {
     graph = installGraph([
         { uid: 'range-task', string: '{{[[TODO]]}} Range activity', parent: null },
         { uid: 'range-drawer', string: 'LOGBOOK::', parent: 'range-task' },
@@ -500,23 +511,23 @@ test('activity rail labels finite ranges and the All time fallback honestly', ()
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
 
+    document.querySelector('[data-action="toggle-view"]').click();
     const select = document.querySelector('.rlb-header select');
     select.value = 'month';
     select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    let rail = document.querySelector('.rlb-activity-rail');
-    assert.equal(rail.dataset.dayCount, '30');
-    assert.match(rail.getAttribute('aria-label'), /Last 30 days activity/i);
+    let chart = document.querySelector('.rlb-analytics__svg');
+    assert.equal(chart.querySelectorAll('rect').length, 30);
+    assert.match(document.querySelector('.rlb-analytics__section-title').textContent, /Last 30 days/i);
 
     select.value = 'all';
     select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    rail = document.querySelector('.rlb-activity-rail');
+    chart = document.querySelector('.rlb-analytics__svg');
     assert.equal(
         document.querySelectorAll('.rlb-overview__item')[1].querySelector('.rlb-overview__label').textContent,
         'All time'
     );
-    assert.equal(rail.dataset.activityScope, 'recent-30-days');
-    assert.match(rail.getAttribute('aria-label'), /Recent 30 days activity/i);
-    assert.equal(rail.querySelectorAll('.rlb-activity__bucket').length, 30);
+    assert.match(document.querySelector('.rlb-analytics__section-title').textContent, /Recent 30 days/i);
+    assert.equal(chart.querySelectorAll('rect').length, 30);
 
     dashboard.destroy();
 });
@@ -544,7 +555,8 @@ test('the Dashboard is list-first when idle and keeps rollup help accessible wit
     assert.equal(info.getAttribute('aria-label'), info.title);
     assert.equal(info.getAttribute('aria-describedby'), 'roam-logbook-task-rollup-help');
     assert.ok(document.getElementById('roam-logbook-task-rollup-help'));
-    assert.equal(document.querySelectorAll('.rlb-activity-rail').length, 1);
+    assert.equal(document.querySelectorAll('.rlb-activity-rail').length, 0);
+    assert.equal(document.querySelectorAll('.rlb-analytics__svg').length, 0);
 
     dashboard.destroy();
 });

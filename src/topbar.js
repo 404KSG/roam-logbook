@@ -20,6 +20,7 @@ import {
     renderSessionSurface,
     updateSessionSurfaceElapsed,
 } from './session-surface.js';
+import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
@@ -80,6 +81,7 @@ export function createTopbar({
     let refreshInFlight = null;
     let refreshClearTimer = null;
     let refreshState = { state: 'idle', message: '' };
+    let themeRuntime = null;
     const layoutHosts = new Set();
     const searchHosts = new Set();
 
@@ -186,6 +188,17 @@ export function createTopbar({
 
     const renderSurfaces = () => {
         if (popover) renderPopover();
+    };
+
+    const ensureThemeRuntime = () => {
+        if (themeRuntime) return themeRuntime;
+        themeRuntime = acquireThemeRuntime({
+            documentRef: document,
+            onChange: palette => {
+                if (popover) applyRoamThemePalette(popover, palette);
+            },
+        });
+        return themeRuntime;
     };
 
     const renderRefreshState = () => {
@@ -330,6 +343,7 @@ export function createTopbar({
 
     function renderPopover() {
         if (!popover) return;
+        ensureThemeRuntime();
         const model = sessionModel();
         const refreshStatus = clock.getLastRefreshStatus();
         const options = surfaceOptions();
@@ -337,6 +351,7 @@ export function createTopbar({
             ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
             : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
         renderSessionSurface(popover, model, options);
+        themeRuntime?.apply(popover);
     }
 
     const syncSurfaceAria = expanded => {
@@ -361,6 +376,7 @@ export function createTopbar({
         popover.setAttribute('aria-modal', 'true');
         popover.setAttribute('aria-labelledby', POPOVER_TITLE_ID);
         document.body.appendChild(popover);
+        ensureThemeRuntime().apply(popover);
         buttonNode?.setAttribute('aria-haspopup', 'dialog');
         syncSurfaceAria(POPOVER_ID);
         renderPopover();
@@ -740,6 +756,7 @@ export function createTopbar({
 
     return {
         mount() {
+            ensureThemeRuntime();
             unsubscribe = clock.subscribe(() => {
                 renderButton();
                 renderSurfaces();
@@ -782,6 +799,8 @@ export function createTopbar({
             attachTimer = null;
             remove();
             container = null;
+            themeRuntime?.release();
+            themeRuntime = null;
         },
     };
 }

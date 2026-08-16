@@ -71,6 +71,42 @@ export function summariseByTask(entries, now) {
     return [...byTask.values()].sort((a, b) => b.minutes - a.minutes);
 }
 
+/**
+ * Session-level metrics. Each CLOCK entry is counted exactly once; this is
+ * deliberately independent from the task forest because parent rollups may
+ * show a child in more than one branch.
+ */
+export function summariseSessionMetrics(entries, now) {
+    const durations = entries
+        .filter(entry => entry?.start)
+        .map(entry => entryMinutes(entry, now))
+        .map(minutes => Math.max(0, minutes));
+    const sorted = durations.slice().sort((a, b) => a - b);
+    const sessions = durations.length;
+    const focusMinutes = durations.reduce((sum, minutes) => sum + minutes, 0);
+    const middle = Math.floor(sorted.length / 2);
+    const medianMinutes =
+        sorted.length === 0
+            ? 0
+            : sorted.length % 2 === 1
+              ? sorted[middle]
+              : (sorted[middle - 1] + sorted[middle]) / 2;
+    const activeDays = new Set(
+        entries.filter(entry => entry?.start).map(entry => dateKey(entry.start))
+    );
+
+    return {
+        focusMinutes,
+        sessions,
+        completedSessions: entries.filter(entry => entry?.start && !entry.running).length,
+        runningSessions: entries.filter(entry => entry?.start && entry.running).length,
+        activeDays: activeDays.size,
+        averageMinutes: sessions === 0 ? 0 : focusMinutes / sessions,
+        longestMinutes: sorted.at(-1) || 0,
+        medianMinutes,
+    };
+}
+
 /** Contiguous per-day totals, oldest first — a gapless series to draw bars from. */
 export function summariseByDay(entries, now, days) {
     const buckets = new Map();
@@ -270,6 +306,7 @@ export function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERAR
         activityLabel: activity.label,
         activityScope: activity.scope,
         running: entries.filter(entry => entry.running),
+        sessionMetrics: summariseSessionMetrics(inRange, now),
         issues: entries.filter(entry => entry.issue),
     };
 }

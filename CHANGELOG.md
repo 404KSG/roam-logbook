@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0-beta.14 — 2026-08-16
+
+- Split the Dashboard into a chart-free four-metric Overview and a local-state Analytics view, with an accessible icon toggle, KPI summary, native SVG activity chart, Own-time task distribution, and session profile.
+- Kept view switching query-free and state-safe: range, Refresh, last valid snapshot, task collapse state, Shift+Click sidebar navigation, scroll lock, and the shared Pomodoro/Session model remain intact.
+- Added Roam-aware page-reference palette probing and synced/save-green detection with last-good theme retention, lifecycle cleanup, dark fallbacks, and isolated plugin CSS variables; running status dots are now 8px and visibly match Roam's stable green.
+- Added beta.14 unit, browser geometry, accessibility, responsive, data-correctness, query-count, theme-probe, and lifecycle coverage.
+
 ## 0.9.0-beta.13 — 2026-08-16
 
 - Restored reliable Session-title Shift+Click navigation to Roam's native right sidebar: `getWindows()` is authoritative, closed native windows can be reopened, old APIs retry after failed requests, and failed or unavailable sidebar calls leave the popover open with a concise notice.

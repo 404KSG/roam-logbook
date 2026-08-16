@@ -104,9 +104,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-root\s*\{[^}]*position: fixed[^}]*inset: 0[^}]*overflow: hidden[^}]*overscroll-behavior: none/s);
     assert.match(css, /\.rlb-dialog\s*\{[^}]*display: flex[^}]*flex-direction: column[^}]*min-height: 0[^}]*overflow: hidden/s);
     assert.match(css, /\.rlb-body,\s*\.rlb-body__scroll\s*\{[^}]*min-height: 0[^}]*max-height: none[^}]*overflow-y: auto[^}]*overscroll-behavior: contain/s);
-    assert.match(css, /--page-link-color, var\(--page-links, var\(--page-reference-color, var\(--page-ref-color/);
-    assert.match(css, /--links-hover, var\(--page-link-hover-color, var\(--link-hover-color/);
-    assert.doesNotMatch(css, /--rlb-surface-link-underline|rgba\(45, 114, 210, 0\.42\)/);
+    assert.match(css, /--rlb-surface-link:\s*#316a9f/);
+    assert.match(css, /--rlb-session-running:\s*#7eb794/);
+    assert.doesNotMatch(css, /#2d72d2|rgba\(45, 114, 210/);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:hover[\s\S]*?text-decoration-color: currentColor/);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
@@ -429,10 +429,15 @@ test('the dashboard renders totals and the task breakdown', () => {
         dialog().querySelector('.rlb-header__subtitle').getBoundingClientRect().width,
         0
     );
-    assert.equal(dialog().querySelector('.rlb-header .bp3-icon'), null, 'header has no decorative icon');
+    assert.equal(dialog().querySelector('.rlb-header__heading .bp3-icon'), null, 'header has no decorative icon');
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
     assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Roam Logbook overview');
-    assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 3);
+    assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 4);
+    const viewToggle = dialog().querySelector('[data-action="toggle-view"]');
+    assert.ok(viewToggle, 'Overview exposes the Analytics view toggle');
+    assert.equal(viewToggle.getAttribute('aria-label'), 'Open Analytics');
+    assert.equal(viewToggle.getAttribute('aria-pressed'), 'false');
+    assert.equal(viewToggle.getAttribute('aria-controls'), 'roam-logbook-dashboard-view');
     assert.ok(dialog().querySelector('.rlb-body__scroll'));
     for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {
         const action = dialog().querySelector(selector);
