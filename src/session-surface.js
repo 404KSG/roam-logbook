@@ -24,6 +24,17 @@ const rowFigures = (entry, now) => {
 const fullTaskLabel = title => `Open this block: ${title}`;
 const refreshLabel = 'Refresh Sessions from graph';
 
+const appendMetaNodes = (meta, nodes) => {
+    nodes.forEach((node, index) => {
+        if (index > 0) {
+            const separator = el('span', 'rlb-run__meta-separator', '·');
+            separator.setAttribute('aria-hidden', 'true');
+            meta.appendChild(separator);
+        }
+        meta.appendChild(node);
+    });
+};
+
 const renderTitle = (row, onOpenTask) => {
     const title = row.title || row.taskUid;
     const taskButton = button(
@@ -39,7 +50,7 @@ const renderTitle = (row, onOpenTask) => {
 const renderRunningRow = (row, now, options) => {
     const entry = row.entry;
     const overrun = pomodoro.isCycleOverrun(now);
-    const node = el('div', `rlb-run${overrun ? ' rlb-run--overrun' : ''}`);
+    const node = el('div', `rlb-run rlb-run--inline-meta${overrun ? ' rlb-run--overrun' : ''}`);
     node.dataset.sessionState = 'running';
     node.dataset.clockUid = entry.clockUid;
 
@@ -48,7 +59,7 @@ const renderRunningRow = (row, now, options) => {
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     meta.dataset.clockUid = entry.clockUid;
-    meta.appendChild(el('div', 'rlb-run__meta-line rlb-run__meta-primary', rowFigures(entry, now)));
+    const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', rowFigures(entry, now));
 
     const started = formatStarted(entry.start, now);
     const startedDetails =
@@ -61,7 +72,7 @@ const renderRunningRow = (row, now, options) => {
     startedNode.title = startedDetails;
     startedNode.setAttribute('aria-label', startedDetails);
     if (started.datetime) startedNode.dateTime = started.datetime;
-    meta.appendChild(startedNode);
+    appendMetaNodes(meta, [primary, startedNode]);
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');

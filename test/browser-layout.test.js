@@ -462,7 +462,7 @@ test('Session task title is the restrained link target without a leading open ic
     const longTitle = 'A long Session title that remains accessible while truncating cleanly';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:320px"><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div></div>`
+            `<div class="rlb-popover" style="width:320px"><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -547,7 +547,7 @@ test('paused icon-only topbar keeps clock identity with only a quiet background 
     assert.equal(geometry.square, true, JSON.stringify(geometry));
 });
 
-test('popover rows stay within 340px and 320px with two metadata lines and a two-row footer', async t => {
+test('popover rows stay within 340px and 320px with two metadata nodes and a two-row footer', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [340, 320]) {
         const expression = `(() => {
@@ -588,14 +588,14 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
         assert.ok(geometry.popover.width <= width + 0.5, JSON.stringify({ width, geometry }));
         assert.equal(geometry.lines, 2, JSON.stringify({ width, geometry }));
         assert.equal(geometry.titleClips, true, JSON.stringify({ width, geometry }));
-        assert.ok(geometry.meta.height <= 34, JSON.stringify({ width, geometry }));
+        assert.ok(geometry.meta.height <= 20, JSON.stringify({ width, geometry }));
         assert.ok(geometry.title.right <= geometry.actions.left + 0.5, JSON.stringify({ width, geometry }));
         assert.equal(geometry.rowHasDot, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.headerRefresh, false, JSON.stringify({ width, geometry }));
@@ -604,6 +604,144 @@ test('popover rows stay within 340px and 320px with two metadata lines and a two
         assert.equal(geometry.footerInside, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.footerOverlap, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
+    }
+});
+
+test('Session metadata stays on one inline row without crowding actions', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    for (const width of [340, 320]) {
+        const geometry = await withChromium(
+            htmlWithLateHost(`
+                <div class="rlb-popover" style="width:${width}px">
+                    <div class="rlb-surface__list" role="group" aria-label="Current Sessions">
+                        <div class="rlb-run rlb-run--inline-meta" data-session-state="running">
+                            <span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span>
+                            <div class="rlb-run__body">
+                                <button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: A long Session title" aria-label="Open this block: A long Session title">A long Session title</button>
+                                <div class="rlb-run__meta">
+                                    <div class="rlb-run__meta-line rlb-run__meta-primary">27:02 · 13h 33m total</div>
+                                    <span class="rlb-run__meta-separator" aria-hidden="true">·</span>
+                                    <time class="rlb-run__meta-line rlb-run__started" datetime="2026-08-15T15:05" title="Started [2026-08-15 Sat 15:05]" aria-label="Started [2026-08-15 Sat 15:05]">Today 15:05</time>
+                                </div>
+                            </div>
+                            <div class="rlb-run__actions">
+                                <button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button>
+                                <button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button>
+                            </div>
+                        </div>
+                        <div class="rlb-run rlb-run--paused" data-session-state="paused">
+                            <span class="rlb-run__status rlb-run__status--paused" aria-label="Paused Task"></span>
+                            <div class="rlb-run__body">
+                                <button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: Reading" aria-label="Open this block: Reading">Reading</button>
+                                <div class="rlb-run__meta">
+                                    <time class="rlb-run__meta-line rlb-run__started" datetime="2026-08-15T15:05" title="Paused since [2026-08-15 Sat 15:05]" aria-label="Paused since [2026-08-15 Sat 15:05]">Today 15:05</time>
+                                </div>
+                            </div>
+                            <div class="rlb-run__actions">
+                                <button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume" data-action="resume" title="Resume" aria-label="Resume"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `),
+            `(() => {
+                const rect = node => {
+                    const value = node.getBoundingClientRect();
+                    return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+                };
+                const running = document.querySelector('[data-session-state="running"]');
+                const paused = document.querySelector('[data-session-state="paused"]');
+                const meta = running.querySelector('.rlb-run__meta');
+                const primary = running.querySelector('.rlb-run__meta-primary');
+                const separator = running.querySelector('.rlb-run__meta-separator');
+                const started = running.querySelector('.rlb-run__started');
+                const actions = running.querySelector('.rlb-run__actions');
+                const title = running.querySelector('.rlb-run__title');
+                const pausedMeta = paused.querySelector('.rlb-run__meta');
+                const metaItems = [primary, started].map(rect);
+                const metaRect = rect(meta);
+                const actionRect = rect(actions);
+                const titleRect = rect(title);
+                const rowRect = rect(running);
+                const popoverRect = rect(document.querySelector('.rlb-popover'));
+                const status = running.querySelector('.rlb-run__status');
+                const statusRect = rect(status);
+                return {
+                    width: ${width},
+                    metaDisplay: getComputedStyle(meta).display,
+                    metaWrap: getComputedStyle(meta).flexWrap,
+                    runningInlineMeta: running.classList.contains('rlb-run--inline-meta'),
+                    metaGridColumn: getComputedStyle(meta).gridColumn,
+                    metaGridRow: getComputedStyle(meta).gridRow,
+                    statusGridRow: getComputedStyle(status).gridRow,
+                    statusTitleCenterDelta: Math.abs(
+                        (statusRect.top + statusRect.height / 2) - (titleRect.top + titleRect.height / 2)
+                    ),
+                    titleGridRow: getComputedStyle(title).gridRow,
+                    actionsGridRow: getComputedStyle(actions).gridRow,
+                    childOrder: [...meta.children].map(node => node.className),
+                    semanticNodeCount: meta.querySelectorAll('.rlb-run__meta-line').length,
+                    separatorText: separator.textContent,
+                    separatorHidden: separator.getAttribute('aria-hidden'),
+                    startedTag: started.tagName,
+                    startedDatetime: started.dateTime,
+                    startedTitle: started.title,
+                    startedAria: started.getAttribute('aria-label'),
+                    primaryText: primary.textContent,
+                    startedText: started.textContent,
+                    sameLine: Math.max(...metaItems.map(item => item.top)) < Math.min(...metaItems.map(item => item.bottom)),
+                    metaBelowTitle: metaRect.top >= titleRect.bottom - 0.5,
+                    metaExtendsUnderActions: metaRect.right >= actionRect.right - 0.5,
+                    titleInsideActions: titleRect.right <= actionRect.left + 0.5,
+                    metaInsideRow: metaRect.left >= rowRect.left - 0.5 && metaRect.right <= rowRect.right + 0.5 && metaRect.top >= rowRect.top - 0.5 && metaRect.bottom <= rowRect.bottom + 0.5,
+                    metaInsidePopover: metaRect.left >= popoverRect.left - 0.5 && metaRect.right <= popoverRect.right + 0.5 && metaRect.top >= popoverRect.top - 0.5 && metaRect.bottom <= popoverRect.bottom + 0.5,
+                    metaNoScrollOverflow: meta.scrollWidth <= meta.clientWidth + 0.5,
+                    primaryNoScrollOverflow: primary.scrollWidth <= primary.clientWidth + 0.5,
+                    startedNoScrollOverflow: started.scrollWidth <= started.clientWidth + 0.5,
+                    actionsRemainUsable: actionRect.width >= 64,
+                    pausedSemanticNodeCount: pausedMeta.querySelectorAll('.rlb-run__meta-line').length,
+                    pausedSeparatorCount: pausedMeta.querySelectorAll('.rlb-run__meta-separator').length,
+                    pausedSameLine: rect(pausedMeta).height <= 20,
+                };
+            })()`
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaDisplay, 'flex', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaWrap, 'nowrap', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.runningInlineMeta, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaGridColumn, '2 / 4', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaGridRow, '2', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.statusGridRow, '1', JSON.stringify({ width, geometry }));
+        assert.ok(geometry.statusTitleCenterDelta <= 1, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.titleGridRow, '1', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.actionsGridRow, '1', JSON.stringify({ width, geometry }));
+        assert.deepEqual(
+            geometry.childOrder,
+            ['rlb-run__meta-line rlb-run__meta-primary', 'rlb-run__meta-separator', 'rlb-run__meta-line rlb-run__started'],
+            JSON.stringify({ width, geometry })
+        );
+        assert.equal(geometry.semanticNodeCount, 2, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.separatorText, '·', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.separatorHidden, 'true', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.startedTag, 'TIME', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.startedDatetime, '2026-08-15T15:05', JSON.stringify({ width, geometry }));
+        assert.match(geometry.startedTitle, /^Started \[/, JSON.stringify({ width, geometry }));
+        assert.match(geometry.startedAria, /^Started \[/, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.primaryText, '27:02 · 13h 33m total', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.startedText, 'Today 15:05', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.sameLine, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaBelowTitle, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaExtendsUnderActions, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.titleInsideActions, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaInsideRow, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaInsidePopover, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.metaNoScrollOverflow, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.primaryNoScrollOverflow, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.startedNoScrollOverflow, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.actionsRemainUsable, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.pausedSemanticNodeCount, 1, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.pausedSeparatorCount, 0, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.pausedSameLine, true, JSON.stringify({ width, geometry }));
     }
 });
 
@@ -783,7 +921,7 @@ test('beta.10 Popover keeps two compact Sessions inside one low-contrast group',
     const longTitle = 'A long Session title that remains accessible while ellipsizing visually';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`
+            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run rlb-run--inline-meta"><span class="rlb-run__status rlb-run__status--running" aria-hidden="true"></span><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };

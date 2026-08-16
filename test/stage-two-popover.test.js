@@ -245,17 +245,30 @@ test('running rows expose compact cycle metadata without misleading per-session 
     assert.match(taskButton.title, /Open this block/i);
     assert.match(taskButton.getAttribute('aria-label'), /Graph Engineering: a deliberately long task title/);
     assert.match(taskButton.getAttribute('aria-label'), /Open this block/i);
+    assert.equal(row.classList.contains('rlb-run--inline-meta'), true);
 
-    assert.equal(row.querySelectorAll('.rlb-run__meta-line').length, 2);
+    const meta = row.querySelector('.rlb-run__meta');
+    const started = row.querySelector('.rlb-run__started');
+    assert.deepEqual([...meta.children].map(node => node.className), [
+        'rlb-run__meta-line rlb-run__meta-primary',
+        'rlb-run__meta-separator',
+        'rlb-run__meta-line rlb-run__started',
+    ]);
+    assert.equal(meta.querySelectorAll('.rlb-run__meta-line').length, 2);
+    assert.equal(meta.querySelector('.rlb-run__meta-separator').getAttribute('aria-hidden'), 'true');
     assert.match(
         row.querySelector('.rlb-run__meta-primary').textContent,
         /^\d+:\d{2} · \d+m total$/
     );
     assert.doesNotMatch(row.textContent, /target|Pomodoro/i);
     assert.match(
-        row.querySelector('.rlb-run__started').textContent,
+        started.textContent,
         /^(Today|[A-Z][a-z]{2} \d{1,2}) \d{2}:\d{2}$/
     );
+    assert.equal(started.tagName, 'TIME');
+    assert.equal(started.dateTime, '2026-08-15T09:00');
+    assert.match(started.title, /^Started \[/);
+    assert.match(started.getAttribute('aria-label'), /^Started \[/);
     assert.doesNotMatch(row.textContent, /Project Page|\[2026-08-15 Sat 09:00\]/);
 
     const checkout = row.querySelector('[data-action="clock-out"]');
@@ -669,6 +682,13 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
     );
     assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__state')));
     assert.ok(pausedRows.every(row => !/\bPaused\b/.test(row.textContent)));
+    assert.ok(
+        pausedRows.every(
+            row =>
+                row.querySelectorAll('.rlb-run__meta-line').length === 1 &&
+                row.querySelectorAll('.rlb-run__meta-separator').length === 0
+        )
+    );
 
     const firstTaskUid = pausedRows[0].dataset.taskUid;
     click(pausedRows[0].querySelector('[data-action="resume"]'));
@@ -736,7 +756,13 @@ test('pending Resume conflicts stay visible as retryable Recovery rows', async (
     const recovery = surface.querySelector('[data-session-state="recovery"]');
     assert.ok(recovery, 'a pending conflict is rendered instead of disappearing');
     assert.equal(recovery.dataset.recoveryState, 'conflict');
+    assert.equal(recovery.classList.contains('rlb-run--inline-meta'), false);
     assert.equal(recovery.querySelector('.rlb-run__status').getAttribute('aria-label'), 'Recovery');
+    assert.deepEqual([...recovery.querySelector('.rlb-run__meta').children].map(node => node.className), [
+        'rlb-run__meta-line rlb-run__meta-primary',
+        'rlb-run__meta-line rlb-run__started',
+    ]);
+    assert.equal(recovery.querySelectorAll('.rlb-run__meta-separator').length, 0);
     assert.match(recovery.textContent, /Recovery required|Exact Session association/i);
     const retry = recovery.querySelector('[data-action="recovery"]');
     assert.equal(retry.title, 'Retry Recovery');

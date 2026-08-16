@@ -5460,6 +5460,41 @@ var STYLES = `
     cursor: help;
 }
 
+.rlb-run--inline-meta .rlb-run__meta {
+    grid-column: 2 / 4;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: nowrap;
+    gap: 0;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+/* Keep the status dot visually centered on the title while actions stay in row 1. */
+.rlb-run--inline-meta .rlb-run__status {
+    transform: translateY(-6px);
+}
+
+.rlb-run--inline-meta .rlb-run__meta-line {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.rlb-run--inline-meta .rlb-run__meta-primary {
+    flex: 1 1 auto;
+}
+
+.rlb-run--inline-meta .rlb-run__meta-separator {
+    flex: 0 0 auto;
+    margin: 0 6px;
+    line-height: 1;
+}
+
+.rlb-run--inline-meta .rlb-run__started {
+    flex: 0 0 auto;
+    max-width: none;
+}
+
 .rlb-run__actions {
     grid-column: 3;
     grid-row: 1 / span 2;
@@ -5468,6 +5503,10 @@ var STYLES = `
     align-self: start;
     gap: 2px;
     flex: 0 0 auto;
+}
+
+.rlb-run--inline-meta .rlb-run__actions {
+    grid-row: 1;
 }
 
 .rlb-run__actions .rlb-run__checkout {
@@ -6458,6 +6497,16 @@ var rowFigures = (entry, now) => {
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var refreshLabel = "Refresh Sessions from graph";
+var appendMetaNodes = (meta, nodes) => {
+  nodes.forEach((node, index) => {
+    if (index > 0) {
+      const separator = el("span", "rlb-run__meta-separator", "\xB7");
+      separator.setAttribute("aria-hidden", "true");
+      meta.appendChild(separator);
+    }
+    meta.appendChild(node);
+  });
+};
 var renderTitle = (row, onOpenTask) => {
   const title = row.title || row.taskUid;
   const taskButton = button(
@@ -6472,7 +6521,7 @@ var renderTitle = (row, onOpenTask) => {
 var renderRunningRow = (row, now, options) => {
   const entry = row.entry;
   const overrun = isCycleOverrun(now);
-  const node = el("div", `rlb-run${overrun ? " rlb-run--overrun" : ""}`);
+  const node = el("div", `rlb-run rlb-run--inline-meta${overrun ? " rlb-run--overrun" : ""}`);
   node.dataset.sessionState = "running";
   node.dataset.clockUid = entry.clockUid;
   const status = el("span", "rlb-run__status rlb-run__status--running");
@@ -6480,7 +6529,7 @@ var renderRunningRow = (row, now, options) => {
   const body = el("div", "rlb-run__body");
   const meta = el("div", "rlb-run__meta");
   meta.dataset.clockUid = entry.clockUid;
-  meta.appendChild(el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now)));
+  const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now));
   const started = formatStarted(entry.start, now);
   const startedDetails = `Started ${started.raw}` + (entry.pageTitle ? ` \xB7 Page: ${entry.pageTitle}` : "");
   const startedNode = el(
@@ -6492,7 +6541,7 @@ var renderRunningRow = (row, now, options) => {
   startedNode.setAttribute("aria-label", startedDetails);
   if (started.datetime)
     startedNode.dateTime = started.datetime;
-  meta.appendChild(startedNode);
+  appendMetaNodes(meta, [primary, startedNode]);
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(

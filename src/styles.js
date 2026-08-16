@@ -684,6 +684,41 @@ export const STYLES = `
     cursor: help;
 }
 
+.rlb-run--inline-meta .rlb-run__meta {
+    grid-column: 2 / 4;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: nowrap;
+    gap: 0;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+/* Keep the status dot visually centered on the title while actions stay in row 1. */
+.rlb-run--inline-meta .rlb-run__status {
+    transform: translateY(-6px);
+}
+
+.rlb-run--inline-meta .rlb-run__meta-line {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.rlb-run--inline-meta .rlb-run__meta-primary {
+    flex: 1 1 auto;
+}
+
+.rlb-run--inline-meta .rlb-run__meta-separator {
+    flex: 0 0 auto;
+    margin: 0 6px;
+    line-height: 1;
+}
+
+.rlb-run--inline-meta .rlb-run__started {
+    flex: 0 0 auto;
+    max-width: none;
+}
+
 .rlb-run__actions {
     grid-column: 3;
     grid-row: 1 / span 2;
@@ -692,6 +727,10 @@ export const STYLES = `
     align-self: start;
     gap: 2px;
     flex: 0 0 auto;
+}
+
+.rlb-run--inline-meta .rlb-run__actions {
+    grid-row: 1;
 }
 
 .rlb-run__actions .rlb-run__checkout {
