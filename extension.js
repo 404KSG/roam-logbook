@@ -664,7 +664,7 @@ function resetMutationQueue() {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.16";
+var PLUGIN_VERSION = "0.9.0-beta.17";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -4041,6 +4041,9 @@ function presentMutationResult(result, notifyUser) {
 var STYLE_ID = "roam-logbook-styles";
 var STYLES = `
 .rlb-topbar {
+    --rlb-topbar-load-green: #7eb794;
+    --rlb-topbar-load-yellow: #b38600;
+    --rlb-topbar-load-red: #c23030;
     display: flex;
     align-items: center;
     position: relative;
@@ -4108,7 +4111,7 @@ var STYLES = `
 }
 
 .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: #b7791f !important;
+    color: var(--rlb-topbar-load-yellow) !important;
 }
 
 .rlb-topbar__button--paused:hover,
@@ -4117,7 +4120,13 @@ var STYLES = `
 }
 
 .bp3-dark .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: #d6a15d !important;
+    color: var(--rlb-topbar-load-yellow) !important;
+}
+
+.bp3-dark .rlb-topbar {
+    --rlb-topbar-load-green: #8ed0aa;
+    --rlb-topbar-load-yellow: #e6c35c;
+    --rlb-topbar-load-red: #ff7373;
 }
 
 /* The widget shares the left navigation row with Roam's expanding search.
@@ -4220,6 +4229,18 @@ var STYLES = `
     white-space: nowrap;
 }
 
+.rlb-topbar__parallel--load-green {
+    color: var(--rlb-topbar-load-green);
+}
+
+.rlb-topbar__parallel--load-yellow {
+    color: var(--rlb-topbar-load-yellow);
+}
+
+.rlb-topbar__parallel--load-red {
+    color: var(--rlb-topbar-load-red);
+}
+
 .rlb-topbar__separator {
     width: 3px !important;
     min-width: 3px !important;
@@ -4236,6 +4257,18 @@ var STYLES = `
 .bp3-dark .rlb-topbar__parallel,
 .bp3-dark .rlb-topbar__separator {
     color: #a7b6c2;
+}
+
+.bp3-dark .rlb-topbar__parallel--load-green {
+    color: var(--rlb-topbar-load-green);
+}
+
+.bp3-dark .rlb-topbar__parallel--load-yellow {
+    color: var(--rlb-topbar-load-yellow);
+}
+
+.bp3-dark .rlb-topbar__parallel--load-red {
+    color: var(--rlb-topbar-load-red);
 }
 
 .rlb-topbar__time {
@@ -6296,6 +6329,17 @@ var REFRESH_SUCCESS_DURATION = 1800;
 var REFRESH_LOADING_MESSAGE = "Refreshing Sessions from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE = "Updated just now";
 var REFRESH_ERROR_MESSAGE = "Refresh failed; last valid snapshot kept. Retry.";
+var sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var sessionLoadTone = (count) => {
+  const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
+  if (normalized2 >= 7)
+    return "red";
+  if (normalized2 >= 4)
+    return "yellow";
+  if (normalized2 >= 1)
+    return "green";
+  return "neutral";
+};
 var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
 var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
 var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
@@ -6345,7 +6389,6 @@ function createTopbar({
     const value = nowFn();
     return value instanceof Date ? value : new Date(value);
   };
-  const sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
   const resetClockOutConfirmation = () => {
     confirmation?.reset();
   };
@@ -6649,6 +6692,9 @@ function createTopbar({
     const cycleElapsed = cycleElapsedMs(now);
     const overrun = isCycleOverrun(now);
     const stale = findStaleClocks(entries, now, staleHours()).length > 0;
+    parallelNode.className = `rlb-topbar__parallel rlb-topbar__parallel--load-${sessionLoadTone(
+      running2 ? entries.length : 0
+    )}`;
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
       buttonNode.classList.remove("rlb-topbar__button--parallel");

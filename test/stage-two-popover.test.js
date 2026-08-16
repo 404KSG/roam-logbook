@@ -46,6 +46,7 @@ const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
 const paused = await import('../src/paused.js');
+const { sessionCount, sessionLoadTone } = await import('../src/topbar.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 const shiftClick = node => {
@@ -126,6 +127,98 @@ test('single running Session keeps Dashboard, Pause, and Refresh on one row', as
     await settle();
     assert.equal(clock.getRunning().length, 0);
     assert.equal(popover.querySelectorAll('[data-session-state="paused"]').length, 1);
+});
+
+test('Session count tones use exact neutral, green, yellow, and red boundaries', () => {
+    const cases = [
+        [0, 'neutral', '0 Sessions'],
+        [1, 'green', '1 Session'],
+        [2, 'green', '2 Sessions'],
+        [3, 'green', '3 Sessions'],
+        [4, 'yellow', '4 Sessions'],
+        [5, 'yellow', '5 Sessions'],
+        [6, 'yellow', '6 Sessions'],
+        [7, 'red', '7 Sessions'],
+        [99, 'red', '99 Sessions'],
+    ];
+
+    for (const [count, tone, label] of cases) {
+        assert.equal(sessionLoadTone(count), tone, `${count} Sessions should be ${tone}`);
+        assert.equal(sessionCount(count), label);
+    }
+});
+
+test('live Session count reclassifies only the count node without duplicate DOM', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    for (let index = 2; index <= 7; index += 1) {
+        const uid = `popover-load-${index}`;
+        graph.store.set(uid, {
+            uid,
+            string: `{{[[TODO]]}} Load task ${index}`,
+            parent: null,
+            page: 'Project Page',
+        });
+    }
+
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-load-2', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-load-3', { now: new Date('2026-08-15T09:00:00') });
+
+    const button = topbarButton();
+    const countNode = () => button.querySelector('.rlb-topbar__parallel');
+    const timeNode = () => button.querySelector('.rlb-topbar__time');
+    assert.equal(countNode().textContent, '3 Sessions');
+    assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-green'));
+    assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
+
+    await clock.clockIn('popover-load-4', { now: new Date('2026-08-15T09:00:00') });
+    assert.equal(countNode().textContent, '4 Sessions');
+    assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
+
+    await clock.clockIn('popover-load-5', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-load-6', { now: new Date('2026-08-15T09:00:00') });
+    assert.equal(countNode().textContent, '6 Sessions');
+    assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
+
+    await clock.clockIn('popover-load-7', { now: new Date('2026-08-15T09:00:00') });
+    assert.equal(countNode().textContent, '7 Sessions');
+    assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-red'));
+    assert.equal(button.querySelectorAll('.rlb-topbar__parallel').length, 1);
+    assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
+    assert.doesNotMatch(button.title, /normal|high|overloaded|limit/i);
+});
+
+test('Pomodoro overrun stays on the timer and remains independent of Session count tone', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:30:00') });
+    settingsStore.set('allowMultipleClocks', true);
+    for (let index = 2; index <= 4; index += 1) {
+        const uid = `popover-threshold-${index}`;
+        graph.store.set(uid, {
+            uid,
+            string: `{{[[TODO]]}} Threshold task ${index}`,
+            parent: null,
+            page: 'Project Page',
+        });
+    }
+
+    const start = new Date('2026-08-15T09:00:00');
+    await clock.clockIn('popover-task-01', { now: start });
+    await clock.clockIn('popover-threshold-2', { now: start });
+    await clock.clockIn('popover-threshold-3', { now: start });
+
+    const button = topbarButton();
+    const time = button.querySelector('.rlb-topbar__time');
+    const count = button.querySelector('.rlb-topbar__parallel');
+    assert.ok(time.classList.contains('rlb-topbar__time--overrun'));
+    assert.ok(count.classList.contains('rlb-topbar__parallel--load-green'));
+    assert.equal(count.classList.contains('rlb-topbar__parallel--load-red'), false);
+    assert.equal(button.querySelector('.rlb-topbar__separator').className, 'rlb-topbar__separator');
+
+    await clock.clockIn('popover-threshold-4', { now: start });
+    assert.ok(button.querySelector('.rlb-topbar__time--overrun'));
+    assert.ok(button.querySelector('.rlb-topbar__parallel--load-yellow'));
+    assert.equal(button.querySelector('.rlb-topbar__parallel--load-overrun'), null);
 });
 
 test('running rows expose compact cycle metadata without misleading per-session targets', async t => {

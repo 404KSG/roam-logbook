@@ -9,6 +9,9 @@ export const STYLE_ID = 'roam-logbook-styles';
 
 export const STYLES = `
 .rlb-topbar {
+    --rlb-topbar-load-green: #7eb794;
+    --rlb-topbar-load-yellow: #b38600;
+    --rlb-topbar-load-red: #c23030;
     display: flex;
     align-items: center;
     position: relative;
@@ -76,7 +79,7 @@ export const STYLES = `
 }
 
 .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: #b7791f !important;
+    color: var(--rlb-topbar-load-yellow) !important;
 }
 
 .rlb-topbar__button--paused:hover,
@@ -85,7 +88,13 @@ export const STYLES = `
 }
 
 .bp3-dark .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: #d6a15d !important;
+    color: var(--rlb-topbar-load-yellow) !important;
+}
+
+.bp3-dark .rlb-topbar {
+    --rlb-topbar-load-green: #8ed0aa;
+    --rlb-topbar-load-yellow: #e6c35c;
+    --rlb-topbar-load-red: #ff7373;
 }
 
 /* The widget shares the left navigation row with Roam's expanding search.
@@ -188,6 +197,18 @@ export const STYLES = `
     white-space: nowrap;
 }
 
+.rlb-topbar__parallel--load-green {
+    color: var(--rlb-topbar-load-green);
+}
+
+.rlb-topbar__parallel--load-yellow {
+    color: var(--rlb-topbar-load-yellow);
+}
+
+.rlb-topbar__parallel--load-red {
+    color: var(--rlb-topbar-load-red);
+}
+
 .rlb-topbar__separator {
     width: 3px !important;
     min-width: 3px !important;
@@ -204,6 +225,18 @@ export const STYLES = `
 .bp3-dark .rlb-topbar__parallel,
 .bp3-dark .rlb-topbar__separator {
     color: #a7b6c2;
+}
+
+.bp3-dark .rlb-topbar__parallel--load-green {
+    color: var(--rlb-topbar-load-green);
+}
+
+.bp3-dark .rlb-topbar__parallel--load-yellow {
+    color: var(--rlb-topbar-load-yellow);
+}
+
+.bp3-dark .rlb-topbar__parallel--load-red {
+    color: var(--rlb-topbar-load-red);
 }
 
 .rlb-topbar__time {

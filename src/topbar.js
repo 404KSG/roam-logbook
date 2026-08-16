@@ -31,6 +31,18 @@ const REFRESH_LOADING_MESSAGE = 'Refreshing Sessions from graph…';
 const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
 const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
 
+export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+
+export const sessionLoadTone = count => {
+    const normalized = Number.isFinite(Number(count))
+        ? Math.max(0, Math.floor(Number(count)))
+        : 0;
+    if (normalized >= 7) return 'red';
+    if (normalized >= 4) return 'yellow';
+    if (normalized >= 1) return 'green';
+    return 'neutral';
+};
+
 /**
  * Where Roam's own left-hand navigation ends.
  *
@@ -90,7 +102,6 @@ export function createTopbar({
         return value instanceof Date ? value : new Date(value);
     };
 
-    const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
     // ---- popover ----
 
     const resetClockOutConfirmation = () => {
@@ -419,6 +430,9 @@ export function createTopbar({
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
         const overrun = pomodoro.isCycleOverrun(now);
         const stale = findStaleClocks(entries, now, staleHours()).length > 0;
+        parallelNode.className = `rlb-topbar__parallel rlb-topbar__parallel--load-${sessionLoadTone(
+            running ? entries.length : 0
+        )}`;
 
         if (!running) {
             buttonNode.classList.add('rlb-topbar__button--icon-only');

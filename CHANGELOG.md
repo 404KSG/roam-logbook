@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0-beta.17 — 2026-08-16
+
+- Added visual-only topbar Session load tones: 1–3 Sessions use the existing sync green, 4–6 use a restrained yellow, and 7+ use the existing overrun red; zero and all separators remain neutral, with singular/plural text unchanged.
+- Changed the standalone paused/history clock icon from ochre orange to the same restrained yellow, while keeping normal idle gray and shared Pomodoro overrun behavior independent.
+- Added deterministic light/dark, threshold, live-reclassification, no-copy/no-limit, lifecycle, and Chromium geometry coverage.
+
 ## 0.9.0-beta.16 — 2026-08-16
 
 - Added an explicit navigation-cue contract to Dashboard task buttons: icon-bearing Running, By Task, and Analytics task entries keep neutral text, muted document icons, quiet hover feedback, and an accessible focus ring while preserving normal and Shift+Click navigation. Icon-less Current Session titles retain their Roam page-reference link treatment.
