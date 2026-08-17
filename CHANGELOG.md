@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0-beta.39 — 2026-08-18
+
+- Replaced the Active Threads Dashboard action's chart-like Dashboard glyph
+  with Blueprint's neutral Home glyph.
+- Preserved the action's label, behavior, 32px target, shared action rail,
+  keyboard semantics, and narrow light/dark geometry.
+
 ## 0.9.0-beta.38 — 2026-08-18
 
 - Renamed the Dashboard's live `RUNNING · 1 Session` section to the count-free

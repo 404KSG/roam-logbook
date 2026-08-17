@@ -492,7 +492,8 @@ test('Active Work header keeps Dashboard and Refresh together with no empty foot
         'dashboard',
         'refresh-cell',
     ]);
-    assert.ok(dashboard.classList.contains('bp3-icon-dashboard'));
+    assert.ok(dashboard.classList.contains('bp3-icon-home'));
+    assert.equal(dashboard.classList.contains('bp3-icon-dashboard'), false);
     assert.equal(dashboard.title, 'Open Roam Logbook Dashboard');
     assert.equal(dashboard.getAttribute('aria-label'), dashboard.title);
     assert.equal(dashboard.type, 'button');

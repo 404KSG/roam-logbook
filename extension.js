@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.38";
+var PLUGIN_VERSION = "0.9.0-beta.39";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -6164,7 +6164,7 @@ function renderSessionSurface(root, model, options = {}) {
   const headerActions = el("div", "rlb-surface__actions");
   if (options.onOpenDashboard) {
     const dashboard = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard",
+      "bp3-button bp3-minimal bp3-small bp3-icon-home rlb-surface__icon-button rlb-surface__dashboard",
       "",
       () => options.onOpenDashboard(),
       { title: dashboardLabel }

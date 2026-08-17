@@ -284,7 +284,7 @@ export function renderSessionSurface(root, model, options = {}) {
     const headerActions = el('div', 'rlb-surface__actions');
     if (options.onOpenDashboard) {
         const dashboard = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard',
+            'bp3-button bp3-minimal bp3-small bp3-icon-home rlb-surface__icon-button rlb-surface__dashboard',
             '',
             () => options.onOpenDashboard(),
             { title: dashboardLabel }
