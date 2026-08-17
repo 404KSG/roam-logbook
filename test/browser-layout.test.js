@@ -732,12 +732,12 @@ test('Session metadata stays on one inline row without crowding actions', async 
     }
 });
 
-test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', async t => {
+test('Active Work keeps Timing and Open Lines readable at narrow widths', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const longTitle = 'A long Focused task title that remains accessible while ellipsizing visually';
     const recentTitle = 'A recent task that can be focused again';
     const markup = (theme, width) =>
-        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE WORK</div><div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></header><div class="rlb-surface__list" role="group" aria-label="Active Work"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="FOCUSED"><div class="rlb-surface__section-label">FOCUSED</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--recent" aria-label="RECENT · 1"><div class="rlb-surface__section-label">RECENT · 1</div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="Last active [2026-08-15 Sat 09:09]" aria-label="30m total; last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · 4m ago</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div></div>`;
+        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE WORK · 2</div><div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></header><div class="rlb-surface__list" role="group" aria-label="Active Work"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="TIMING"><div class="rlb-surface__section-label">TIMING</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--open-lines rlb-surface__section--recent" aria-label="OPEN LINES · 1, 45m window"><div class="rlb-surface__section-label"><span class="rlb-surface__section-label-text">OPEN LINES · 1</span> <span class="rlb-surface__section-context">45m window</span></div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="30m total · 41m left; Last active [2026-08-15 Sat 09:09]" aria-label="30m total; 41m left; Last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · 41m left</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div></div>`;
 
     const expression = `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -763,6 +763,9 @@ test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', a
             const focusedActionsRect = rect(focused.querySelector('.rlb-run__actions'));
             const focusedRect = rect(focused);
             const recentMeta = recent.querySelector('.rlb-run__recent-meta');
+            const openLinesLabel = recentSection.querySelector('.rlb-surface__section-label');
+            const openLinesText = openLinesLabel.querySelector('.rlb-surface__section-label-text');
+            const openLinesContext = openLinesLabel.querySelector('.rlb-surface__section-context');
             return {
                 listBorder: listStyle.borderTopWidth,
                 listRadius: parseFloat(listStyle.borderTopLeftRadius),
@@ -782,6 +785,15 @@ test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', a
                 overrunStartedColor: focusedStartedStyle.color,
                 groupRole: list.getAttribute('role'),
                 groupLabel: list.getAttribute('aria-label'),
+                surfaceTitle: header.querySelector('.rlb-popover__title').textContent,
+                timingLabel: focusedSection.querySelector('.rlb-surface__section-label').textContent,
+                openLinesLabel: openLinesText.textContent,
+                openLinesContext: openLinesContext.textContent,
+                openLinesAria: recentSection.getAttribute('aria-label'),
+                openLinesTextRight: rect(openLinesText).right,
+                openLinesContextLeft: rect(openLinesContext).left,
+                openLinesContextRight: rect(openLinesContext).right,
+                openLinesLabelRight: rect(openLinesLabel).right,
                 focusedCount: focusedSection.querySelectorAll('.rlb-run').length,
                 recentCount: recentSection.querySelectorAll('.rlb-run').length,
                 statusCount: list.querySelectorAll('.rlb-run__status').length,
@@ -833,6 +845,18 @@ test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', a
             assert.equal(geometry.recentBackground, 'rgba(0, 0, 0, 0)', context);
             assert.equal(geometry.groupRole, 'group', context);
             assert.equal(geometry.groupLabel, 'Active Work', context);
+            assert.equal(geometry.surfaceTitle, 'ACTIVE WORK · 2', context);
+            assert.equal(geometry.timingLabel, 'TIMING', context);
+            assert.equal(geometry.openLinesLabel, 'OPEN LINES · 1', context);
+            assert.equal(geometry.openLinesContext, '45m window', context);
+            assert.equal(geometry.openLinesAria, 'OPEN LINES · 1, 45m window', context);
+            assert.ok(geometry.openLinesContextLeft >= geometry.openLinesTextRight, context);
+            assert.ok(geometry.openLinesContextRight <= geometry.openLinesLabelRight + 0.5, context);
+            assert.doesNotMatch(
+                `${geometry.surfaceTitle} ${geometry.timingLabel} ${geometry.openLinesLabel} ${geometry.openLinesAria}`,
+                /recent/i,
+                context
+            );
             assert.equal(geometry.focusedCount, 1, context);
             assert.equal(geometry.recentCount, 1, context);
             assert.equal(geometry.statusCount, 0, context);
@@ -843,9 +867,9 @@ test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', a
             assert.equal(geometry.overrunElapsedColor, theme === 'bp3-dark' ? 'rgb(255, 115, 115)' : 'rgb(205, 66, 70)', context);
             assert.notEqual(geometry.overrunElapsedColor, geometry.overrunTotalColor, context);
             assert.notEqual(geometry.overrunElapsedColor, geometry.overrunStartedColor, context);
-            assert.equal(geometry.recentMeta, '30m total · 4m ago', context);
-            assert.equal(geometry.recentMetaTitle, 'Last active [2026-08-15 Sat 09:09]', context);
-            assert.equal(geometry.recentMetaLabel, '30m total; last active [2026-08-15 Sat 09:09]', context);
+            assert.equal(geometry.recentMeta, '30m total · 41m left', context);
+            assert.equal(geometry.recentMetaTitle, '30m total · 41m left; Last active [2026-08-15 Sat 09:09]', context);
+            assert.equal(geometry.recentMetaLabel, '30m total; 41m left; Last active [2026-08-15 Sat 09:09]', context);
             assert.equal(geometry.recentMetaDateTime, '2026-08-15T09:09', context);
             assert.equal(geometry.headerActionCount, 2, context);
             assert.equal(geometry.headerTitleBeforeActions, true, context);

@@ -7,9 +7,10 @@
  */
 
 import { button, el } from './dom.js';
+import { ACTIVE_WORK_WINDOW_MINUTES, openLineMinutesLeft } from './active-work.js';
 import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
-import { formatElapsed, formatMinutesHuman, formatRelativeTime, formatStarted } from './time.js';
+import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE WORK';
@@ -136,15 +137,21 @@ const renderRecentRow = (row, now, options) => {
     const meta = el('div', 'rlb-run__meta');
     const ended = formatStarted(entry.end, now);
     const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+    const minutesLeft = Math.max(
+        1,
+        openLineMinutesLeft(entry, now, options.openLineWindowMinutes)
+    );
+    const metadata = `${total} total · ${minutesLeft}m left`;
     const lastActiveLabel = `Last active ${ended.raw}`;
     const endedNode = el(
         'time',
         'rlb-run__meta-line rlb-run__recent-meta',
-        `${total} total · ${formatRelativeTime(entry.end, now)}`
+        metadata
     );
-    endedNode.title = lastActiveLabel;
-    endedNode.setAttribute('aria-label', `${total} total; last active ${ended.raw}`);
+    endedNode.title = `${metadata}; ${lastActiveLabel}`;
+    endedNode.setAttribute('aria-label', `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
     if (ended.datetime) endedNode.dateTime = ended.datetime;
+    endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
     meta.appendChild(endedNode);
     body.append(renderTitle(row, options.onOpenTask), meta);
 
@@ -169,9 +176,13 @@ export function buildSessionSurfaceModel({
     entries = [],
     recentItems = [],
     now,
+    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
     staleHours = 8,
 }) {
     const currentNow = now instanceof Date ? now : new Date(now);
+    const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0
+        ? Number(windowMinutes)
+        : ACTIVE_WORK_WINDOW_MINUTES;
     const runningRows = entries.map(entry => ({
         kind: 'focused',
         key: `focused:${entry.clockUid}`,
@@ -195,17 +206,25 @@ export function buildSessionSurfaceModel({
         focusedCount: runningRows.length,
         activeCount: runningRows.length + recentRows.length,
         runningCount: runningRows.length,
+        openLineWindowMinutes: normalizedWindow,
         staleEntries: findStaleClocks(entries, currentNow, staleHours),
     };
 }
 
-const surfaceTitle = () => SURFACE_TITLE;
+const surfaceTitle = count => `${SURFACE_TITLE} · ${count}`;
 
-const appendSection = (list, label, rows, renderRow, modifier = '') => {
+const appendSection = (list, label, rows, renderRow, modifier = '', context = '') => {
     if (!rows.length) return;
     const section = el('section', `rlb-surface__section ${modifier}`.trim());
-    const labelNode = el('div', 'rlb-surface__section-label', label);
-    section.setAttribute('aria-label', label);
+    const labelNode = el('div', 'rlb-surface__section-label');
+    labelNode.appendChild(el('span', 'rlb-surface__section-label-text', label));
+    if (context) {
+        // Keep the separator in the DOM as well as in the visual gap so the
+        // accessible/text representation does not collapse to e.g. "145m".
+        labelNode.append(' ');
+        labelNode.appendChild(el('span', 'rlb-surface__section-context', context));
+    }
+    section.setAttribute('aria-label', context ? `${label}, ${context}` : label);
     section.appendChild(labelNode);
     for (const row of rows) section.appendChild(renderRow(row));
     list.appendChild(section);
@@ -243,7 +262,7 @@ const renderRefreshControl = options => {
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
 export function renderSessionSurface(root, model, options = {}) {
-    const title = el('div', 'rlb-popover__title', surfaceTitle(model));
+    const title = el('div', 'rlb-popover__title', surfaceTitle(model.activeCount ?? model.rows.length));
     if (options.titleId) title.id = options.titleId;
 
     const header = el('header', 'rlb-surface__header');
@@ -280,10 +299,10 @@ export function renderSessionSurface(root, model, options = {}) {
 
     if (model.rows.length === 0) {
         sessionList.appendChild(
-            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Focused Task is running.')
+            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Timing Line is active.')
         );
     } else {
-        if (model.staleEntries.length > 0) {
+        if (model.staleEntries?.length > 0) {
             sessionList.appendChild(
                 el(
                     'div',
@@ -296,17 +315,18 @@ export function renderSessionSurface(root, model, options = {}) {
         }
         appendSection(
             sessionList,
-            'FOCUSED',
+            'TIMING',
             model.focusedRows,
             row => renderRunningRow(row, model.now, options),
             `rlb-surface__section--focused${pomodoro.isCycleOverrun(model.now) ? ' rlb-surface__section--overrun' : ''}`
         );
         appendSection(
             sessionList,
-            `RECENT · ${model.recentRows.length}`,
+            `OPEN LINES · ${model.recentRows.length}`,
             model.recentRows,
             row => renderRecentRow(row, model.now, options),
-            'rlb-surface__section--recent'
+            'rlb-surface__section--open-lines rlb-surface__section--recent',
+            `${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m window`
         );
     }
 
@@ -340,7 +360,13 @@ export function renderSessionSurface(root, model, options = {}) {
 }
 
 /** Update only live elapsed handles; callers use this from their one-second tick. */
-export function updateSessionSurfaceElapsed(root, entries, now) {
+export function updateSessionSurfaceElapsed(
+    root,
+    entries,
+    now,
+    openLines = [],
+    openLineWindowMinutes = ACTIVE_WORK_WINDOW_MINUTES
+) {
     if (!root) return;
     const currentNow = now instanceof Date ? now : new Date(now);
     const byUid = new Map(entries.map(entry => [entry.clockUid, entry]));
@@ -366,5 +392,24 @@ export function updateSessionSurfaceElapsed(root, entries, now) {
             row.closest('.rlb-surface__section--focused')
                 ?.classList.toggle('rlb-surface__section--overrun', overrun);
         }
+    }
+
+    const openLinesByTask = new Map(openLines.map(entry => [entry.taskUid, entry]));
+    for (const meta of root.querySelectorAll('.rlb-run[data-session-state="recent"] .rlb-run__meta')) {
+        const row = meta.closest('.rlb-run');
+        const entry = openLinesByTask.get(row?.dataset.taskUid);
+        const recentMeta = meta.querySelector('.rlb-run__recent-meta');
+        if (!entry || !recentMeta) continue;
+        const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+        const minutesLeft = Math.max(
+            1,
+            openLineMinutesLeft(entry, currentNow, openLineWindowMinutes)
+        );
+        const metadata = `${total} total · ${minutesLeft}m left`;
+        const ended = formatStarted(entry.end, currentNow);
+        const lastActiveLabel = `Last active ${ended.raw}`;
+        recentMeta.textContent = metadata;
+        recentMeta.title = `${metadata}; ${lastActiveLabel}`;
+        recentMeta.setAttribute('aria-label', `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
     }
 }

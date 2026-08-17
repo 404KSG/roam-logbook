@@ -270,7 +270,7 @@ test('the shared overrun state takes priority over stale metadata', () => {
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
     assert.match(popover.textContent, /1 Session has been open for over 8h/);
     assert.doesNotMatch(popover.textContent, /clock has been open/i);
     click(topbarWidget().querySelector('button'));
@@ -346,7 +346,7 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
-        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 3');
         const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
         assert.deepEqual(headerActions.map(node => node.dataset.action || 'refresh-cell'), [
             'dashboard',
@@ -384,7 +384,7 @@ test('the popover lists the running clock', () => {
 
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
     const taskTitle = popover.querySelector('.rlb-run__title');
     assert.ok(taskTitle);
     assert.equal(taskTitle.tagName, 'BUTTON');
@@ -608,7 +608,7 @@ test('clocking out through the palette closes the entry', async () => {
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(topbarWidget().querySelector('button').title, /no Session is currently timing/);
+    assert.match(topbarWidget().querySelector('button').title, /0 timing lines · 2 open lines · 45m window/);
 });
 
 test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {

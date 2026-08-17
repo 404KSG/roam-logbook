@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     ACTIVE_WORK_WINDOW_MINUTES,
     buildActiveWork,
+    openLineMinutesLeft,
 } from '../src/active-work.js';
 
 const at = value => new Date(`2026-08-17T${value}:00`);
@@ -33,6 +34,7 @@ test('Active Work keeps one focused item and distinct recent tasks inside 45 min
     assert.deepEqual(model.recent.map(item => item.taskUid), ['recent']);
     assert.equal(model.count, 2);
     assert.equal(model.recent[0].end.toISOString(), at('10:10').toISOString());
+    assert.equal(model.recent[0].remainingMinutes, 35);
 });
 
 test('Active Work chooses the newest running entry as Focused during legacy overlap', () => {
@@ -55,10 +57,26 @@ test('Active Work keeps pure Recent history when there is no Focused CLOCK', () 
     assert.deepEqual(model.recent.map(item => item.taskUid), ['recent']);
     assert.deepEqual(model.items.map(item => item.taskUid), ['recent']);
     assert.equal(model.count, 1);
+    assert.equal(model.recent[0].remainingMinutes, 44);
 });
 
 test('pure Recent Active Work expires without a running clock', () => {
     const entries = [entry({ taskUid: 'recent', start: '09:00', end: '10:00' })];
     assert.equal(buildActiveWork(entries, { now: at('10:44') }).count, 1);
     assert.equal(buildActiveWork(entries, { now: at('10:45') }).count, 0);
+});
+
+test('Open Line minutes use ceiling semantics and disappear at the exact boundary', () => {
+    const ended = new Date('2026-08-17T10:00:00.000');
+    const line = { end: ended };
+    assert.equal(openLineMinutesLeft(line, new Date('2026-08-17T10:00:00.001')), 45);
+    assert.equal(openLineMinutesLeft(line, new Date('2026-08-17T10:44:59.999')), 1);
+    assert.equal(openLineMinutesLeft(line, new Date('2026-08-17T10:45:00.000')), 0);
+    assert.equal(
+        buildActiveWork(
+            [{ ...entry({ taskUid: 'boundary', start: '09:00', end: '10:00' }), end: ended }],
+            { now: new Date('2026-08-17T10:45:00.000') }
+        ).count,
+        0
+    );
 });

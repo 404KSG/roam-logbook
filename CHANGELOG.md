@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0-beta.29 — 2026-08-17
+
+- Clarified the Active Work model as one `TIMING` line plus switchable
+  `OPEN LINES`, replacing the ambiguous user-facing Focused/Recent vocabulary
+  without changing the single-timer or historical Session model.
+- Added the 45-minute window directly to the Open Lines heading and changed
+  each line's metadata to show its exact remaining eligibility, such as
+  `18h 21m total · 21m left`. Visible fractions round up to 1m and disappear
+  exactly at the existing 45-minute boundary.
+- Added `ACTIVE WORK · N` to the surface header and composition details to the
+  Top Bar tooltip while keeping its compact visible `N Active` label.
+- Preserved the existing stale-clock warning, Dashboard history, linear time
+  accounting, and continuous Pomodoro behavior across seamless line switches.
+
 ## 0.9.0-beta.28 — 2026-08-17
 
 - Removed the desktop Dashboard's sticky By Task toolbar and sticky column

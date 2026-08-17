@@ -16,6 +16,30 @@ const instantOf = value => {
     return Number.isFinite(timestamp) ? timestamp : null;
 };
 
+const normalizeWindowMinutes = value =>
+    Number.isFinite(Number(value)) && Number(value) > 0
+        ? Number(value)
+        : ACTIVE_WORK_WINDOW_MINUTES;
+
+/**
+ * Return the whole minutes left in an Open Line's activity window.
+ *
+ * Callers should filter out zero before rendering: an exact boundary is no
+ * longer Active Work, while any visible fraction is shown as at least 1m.
+ */
+export function openLineMinutesLeft(
+    entry,
+    now = Date.now(),
+    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
+) {
+    const endedAt = instantOf(entry?.end);
+    const nowMs = instantOf(now) ?? Date.now();
+    if (endedAt === null) return 0;
+    const remainingMs = normalizeWindowMinutes(windowMinutes) * 60_000 - (nowMs - endedAt);
+    if (remainingMs <= 0) return 0;
+    return Math.max(1, Math.ceil(remainingMs / 60_000));
+}
+
 const compareNewest = (left, right) =>
     (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
 
@@ -43,9 +67,7 @@ export function buildActiveWork(
 ) {
     const snapshot = Array.isArray(entries) ? entries : [];
     const nowMs = instantOf(now) ?? Date.now();
-    const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0
-        ? Number(windowMinutes)
-        : ACTIVE_WORK_WINDOW_MINUTES;
+    const normalizedWindow = normalizeWindowMinutes(windowMinutes);
     const windowMs = normalizedWindow * 60_000;
     const focusedEntry = chooseFocusedEntry(snapshot);
     const completedMinutesByTask = new Map();
@@ -85,6 +107,7 @@ export function buildActiveWork(
     const recentItems = recent.map(item => ({
         ...item,
         priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
+        remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
         activeKind: 'recent',
     }));
     const allItems = [focused, ...recentItems].filter(Boolean);

@@ -435,6 +435,22 @@ export const STYLES = `
     background: var(--rlb-surface-hover);
 }
 
+.rlb-surface__section--open-lines .rlb-surface__section-label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.rlb-surface__section-context {
+    margin-left: auto;
+    color: var(--rlb-muted, #7a8b99);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+}
+
 
 .rlb-surface__section-label {
     padding: 7px 6px 3px;

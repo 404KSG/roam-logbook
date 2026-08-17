@@ -6,6 +6,7 @@
  */
 
 import * as clock from './clock.js';
+import { ACTIVE_WORK_WINDOW_MINUTES } from './active-work.js';
 import { createConfirmationController } from './confirmation.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
@@ -33,6 +34,20 @@ const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.'
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 export const activeCount = count => `${count} Active`;
 export const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
+export const activeWorkDescription = (
+    timingCount,
+    openLineCount,
+    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
+) => {
+    const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
+    const openLines = Number.isFinite(Number(openLineCount))
+        ? Math.max(0, Math.floor(Number(openLineCount)))
+        : 0;
+    const window = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0
+        ? Number(windowMinutes)
+        : ACTIVE_WORK_WINDOW_MINUTES;
+    return `${timing} timing line${timing === 1 ? '' : 's'} · ${openLines} open line${openLines === 1 ? '' : 's'} · ${window}m window`;
+};
 
 export const sessionLoadTone = count => {
     const normalized = Number.isFinite(Number(count))
@@ -251,6 +266,7 @@ export function createTopbar({
             entries: activeWork.focused ? [activeWork.focused] : [],
             recentItems: activeWork.recent,
             now: nowDate(),
+            windowMinutes: activeWork.windowMinutes,
             staleHours: staleHours(),
         });
     };
@@ -465,11 +481,12 @@ export function createTopbar({
         const model = sessionModel();
         const refreshStatus = clock.getLastRefreshStatus();
         const options = surfaceOptions();
+        options.openLineWindowMinutes = model.openLineWindowMinutes;
         options.emptyMessage =
             refreshState.state === 'loading'
                 ? 'Refreshing Active Work state from graph…'
                 : refreshStatus.ok
-                  ? 'No Focused Task is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                  ? 'No Timing Line is active. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
                   : 'Active Work state could not be confirmed. Retry after Roam finishes syncing.';
         renderSessionSurface(popover, model, options);
         themeRuntime?.apply(popover);
@@ -542,6 +559,11 @@ export function createTopbar({
             : focused
               ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some(item => item.taskUid === focused.taskUid) ? 0 : 1) }
               : derived;
+        const composition = activeWorkDescription(
+            focused ? 1 : 0,
+            activeWork.recent.length,
+            activeWork.windowMinutes
+        );
         const focusedEntries = focused ? [focused] : [];
         const running = focusedEntries.length > 0;
         if (running && reconcile) pomodoro.reconcileCycle(focusedEntries, { now });
@@ -571,8 +593,8 @@ export function createTopbar({
             separatorNode.textContent = '';
             syncButtonLayout(hasActiveWork ? 'active' : 'idle');
             buttonNode.title = hasActiveWork
-                ? `${activeCount(activeWork.count)} — no Session is currently timing. Click for details.`
-                : 'Roam Logbook — no Session running. Click for details.';
+                ? `${activeCount(activeWork.count)}\n${composition}\nNo Timing Line is active. Click for details.`
+                : `${activeCount(0)}\n${composition}\nNo Active Work lines are open. Click for details.`;
             buttonNode.setAttribute('aria-label', buttonNode.title);
             if (activeChanged && popover) renderPopover();
             return;
@@ -598,6 +620,7 @@ export function createTopbar({
             const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
                 `${activeCount(activeWork.count)}\n` +
+                `${composition}\n` +
                 `Primary timer: ${first.title}\n` +
                 `Shared cycle ${formatElapsed(cycleElapsed)}` +
                 (threshold
@@ -615,6 +638,7 @@ export function createTopbar({
             const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
                 `${activeCount(activeWork.count)}\n` +
+                `${composition}\n` +
                 `Clocked in: ${first.title}\n` +
                 `Shared cycle ${formatElapsed(cycleElapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
                 (threshold
@@ -634,8 +658,15 @@ export function createTopbar({
         tickCount += 1;
         const entries = clock.getRunning();
         const now = nowDate();
+        const activeWork = clock.getActiveWork(now);
         renderButton(entries, now);
-        updateSessionSurfaceElapsed(popover, entries, now);
+        updateSessionSurfaceElapsed(
+            popover,
+            entries,
+            now,
+            activeWork.recent,
+            activeWork.windowMinutes
+        );
     };
 
     const stopTicker = () => {

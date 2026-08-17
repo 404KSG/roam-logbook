@@ -91,47 +91,6 @@ function formatMinutesHuman(minutes) {
     return `${safe}m`;
   return `${hours}h ${pad(safe % 60)}m`;
 }
-var asDate = (value) => {
-  if (isValidDate(value))
-    return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const candidate2 = new Date(value);
-    return isValidDate(candidate2) ? candidate2 : null;
-  }
-  if (typeof value !== "string" || !value.trim())
-    return null;
-  const text = value.trim();
-  const parsedStamp = parseTimestamp(text.replace(/^\[|\]$/g, ""));
-  if (parsedStamp)
-    return parsedStamp;
-  const candidate = new Date(text);
-  return isValidDate(candidate) ? candidate : null;
-};
-function formatRelativeTime(value, now = /* @__PURE__ */ new Date()) {
-  const date = asDate(value);
-  const reference = asDate(now);
-  if (!date || !reference)
-    return "time unavailable";
-  const seconds = Math.max(0, Math.floor((reference.getTime() - date.getTime()) / 1e3));
-  if (seconds < 60)
-    return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60)
-    return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24)
-    return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7)
-    return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5)
-    return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12)
-    return `${Math.max(1, months)}mo ago`;
-  return `${Math.max(1, Math.floor(days / 365))}y ago`;
-}
 function dateKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -816,6 +775,17 @@ var instantOf = (value) => {
   const timestamp = Number(value);
   return Number.isFinite(timestamp) ? timestamp : null;
 };
+var normalizeWindowMinutes = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : ACTIVE_WORK_WINDOW_MINUTES;
+function openLineMinutesLeft(entry, now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) {
+  const endedAt = instantOf(entry?.end);
+  const nowMs = instantOf(now) ?? Date.now();
+  if (endedAt === null)
+    return 0;
+  const remainingMs = normalizeWindowMinutes(windowMinutes) * 6e4 - (nowMs - endedAt);
+  if (remainingMs <= 0)
+    return 0;
+  return Math.max(1, Math.ceil(remainingMs / 6e4));
+}
 var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
 function chooseFocusedEntry(entries = []) {
   return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).slice().sort(compareNewest)[0] || null;
@@ -826,7 +796,7 @@ function buildActiveWork(entries = [], {
 } = {}) {
   const snapshot = Array.isArray(entries) ? entries : [];
   const nowMs = instantOf(now) ?? Date.now();
-  const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
+  const normalizedWindow = normalizeWindowMinutes(windowMinutes);
   const windowMs = normalizedWindow * 6e4;
   const focusedEntry = chooseFocusedEntry(snapshot);
   const completedMinutesByTask = /* @__PURE__ */ new Map();
@@ -863,6 +833,7 @@ function buildActiveWork(entries = [], {
   const recentItems = recent.map((item) => ({
     ...item,
     priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
+    remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
     activeKind: "recent"
   }));
   const allItems = [focused, ...recentItems].filter(Boolean);
@@ -2033,7 +2004,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.28";
+var PLUGIN_VERSION = "0.9.0-beta.29";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -4229,6 +4200,22 @@ var STYLES = `
     background: var(--rlb-surface-hover);
 }
 
+.rlb-surface__section--open-lines .rlb-surface__section-label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.rlb-surface__section-context {
+    margin-left: auto;
+    color: var(--rlb-muted, #7a8b99);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+}
+
 
 .rlb-surface__section-label {
     padding: 7px 6px 3px;
@@ -5769,16 +5756,22 @@ var renderRecentRow = (row, now, options) => {
   const meta = el("div", "rlb-run__meta");
   const ended = formatStarted(entry.end, now);
   const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+  const minutesLeft = Math.max(
+    1,
+    openLineMinutesLeft(entry, now, options.openLineWindowMinutes)
+  );
+  const metadata = `${total} total \xB7 ${minutesLeft}m left`;
   const lastActiveLabel = `Last active ${ended.raw}`;
   const endedNode = el(
     "time",
     "rlb-run__meta-line rlb-run__recent-meta",
-    `${total} total \xB7 ${formatRelativeTime(entry.end, now)}`
+    metadata
   );
-  endedNode.title = lastActiveLabel;
-  endedNode.setAttribute("aria-label", `${total} total; last active ${ended.raw}`);
+  endedNode.title = `${metadata}; ${lastActiveLabel}`;
+  endedNode.setAttribute("aria-label", `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
   if (ended.datetime)
     endedNode.dateTime = ended.datetime;
+  endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
   meta.appendChild(endedNode);
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
@@ -5800,9 +5793,11 @@ function buildSessionSurfaceModel({
   entries = [],
   recentItems = [],
   now,
+  windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
   staleHours: staleHours2 = 8
 }) {
   const currentNow = now instanceof Date ? now : new Date(now);
+  const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
   const runningRows = entries.map((entry) => ({
     kind: "focused",
     key: `focused:${entry.clockUid}`,
@@ -5826,16 +5821,22 @@ function buildSessionSurfaceModel({
     focusedCount: runningRows.length,
     activeCount: runningRows.length + recentRows.length,
     runningCount: runningRows.length,
+    openLineWindowMinutes: normalizedWindow,
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = () => SURFACE_TITLE;
-var appendSection = (list, label, rows, renderRow, modifier = "") => {
+var surfaceTitle = (count) => `${SURFACE_TITLE} \xB7 ${count}`;
+var appendSection = (list, label, rows, renderRow, modifier = "", context = "") => {
   if (!rows.length)
     return;
   const section = el("section", `rlb-surface__section ${modifier}`.trim());
-  const labelNode = el("div", "rlb-surface__section-label", label);
-  section.setAttribute("aria-label", label);
+  const labelNode = el("div", "rlb-surface__section-label");
+  labelNode.appendChild(el("span", "rlb-surface__section-label-text", label));
+  if (context) {
+    labelNode.append(" ");
+    labelNode.appendChild(el("span", "rlb-surface__section-context", context));
+  }
+  section.setAttribute("aria-label", context ? `${label}, ${context}` : label);
   section.appendChild(labelNode);
   for (const row of rows)
     section.appendChild(renderRow(row));
@@ -5869,7 +5870,7 @@ var renderRefreshControl = (options) => {
   return refreshCell;
 };
 function renderSessionSurface(root, model, options = {}) {
-  const title = el("div", "rlb-popover__title", surfaceTitle(model));
+  const title = el("div", "rlb-popover__title", surfaceTitle(model.activeCount ?? model.rows.length));
   if (options.titleId)
     title.id = options.titleId;
   const header = el("header", "rlb-surface__header");
@@ -5906,10 +5907,10 @@ function renderSessionSurface(root, model, options = {}) {
   root.appendChild(sessionList);
   if (model.rows.length === 0) {
     sessionList.appendChild(
-      el("div", "rlb-popover__empty", options.emptyMessage || "No Focused Task is running.")
+      el("div", "rlb-popover__empty", options.emptyMessage || "No Timing Line is active.")
     );
   } else {
-    if (model.staleEntries.length > 0) {
+    if (model.staleEntries?.length > 0) {
       sessionList.appendChild(
         el(
           "div",
@@ -5920,17 +5921,18 @@ function renderSessionSurface(root, model, options = {}) {
     }
     appendSection(
       sessionList,
-      "FOCUSED",
+      "TIMING",
       model.focusedRows,
       (row) => renderRunningRow(row, model.now, options),
       `rlb-surface__section--focused${isCycleOverrun(model.now) ? " rlb-surface__section--overrun" : ""}`
     );
     appendSection(
       sessionList,
-      `RECENT \xB7 ${model.recentRows.length}`,
+      `OPEN LINES \xB7 ${model.recentRows.length}`,
       model.recentRows,
       (row) => renderRecentRow(row, model.now, options),
-      "rlb-surface__section--recent"
+      "rlb-surface__section--open-lines rlb-surface__section--recent",
+      `${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m window`
     );
   }
   for (const notice3 of options.notices || []) {
@@ -5961,7 +5963,7 @@ function renderSessionSurface(root, model, options = {}) {
   }
   return root;
 }
-function updateSessionSurfaceElapsed(root, entries, now) {
+function updateSessionSurfaceElapsed(root, entries, now, openLines = [], openLineWindowMinutes = ACTIVE_WORK_WINDOW_MINUTES) {
   if (!root)
     return;
   const currentNow = now instanceof Date ? now : new Date(now);
@@ -5989,6 +5991,25 @@ function updateSessionSurfaceElapsed(root, entries, now) {
       row.closest(".rlb-surface__section--focused")?.classList.toggle("rlb-surface__section--overrun", overrun);
     }
   }
+  const openLinesByTask = new Map(openLines.map((entry) => [entry.taskUid, entry]));
+  for (const meta of root.querySelectorAll('.rlb-run[data-session-state="recent"] .rlb-run__meta')) {
+    const row = meta.closest(".rlb-run");
+    const entry = openLinesByTask.get(row?.dataset.taskUid);
+    const recentMeta = meta.querySelector(".rlb-run__recent-meta");
+    if (!entry || !recentMeta)
+      continue;
+    const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+    const minutesLeft = Math.max(
+      1,
+      openLineMinutesLeft(entry, currentNow, openLineWindowMinutes)
+    );
+    const metadata = `${total} total \xB7 ${minutesLeft}m left`;
+    const ended = formatStarted(entry.end, currentNow);
+    const lastActiveLabel = `Last active ${ended.raw}`;
+    recentMeta.textContent = metadata;
+    recentMeta.title = `${metadata}; ${lastActiveLabel}`;
+    recentMeta.setAttribute("aria-label", `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
+  }
 }
 
 // src/topbar.js
@@ -6001,6 +6022,12 @@ var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
 var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
 var activeCount = (count) => `${count} Active`;
+var activeWorkDescription = (timingCount, openLineCount, windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) => {
+  const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
+  const openLines = Number.isFinite(Number(openLineCount)) ? Math.max(0, Math.floor(Number(openLineCount))) : 0;
+  const window2 = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
+  return `${timing} timing line${timing === 1 ? "" : "s"} \xB7 ${openLines} open line${openLines === 1 ? "" : "s"} \xB7 ${window2}m window`;
+};
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   if (normalized2 >= 7)
@@ -6196,6 +6223,7 @@ function createTopbar({
       entries: activeWork.focused ? [activeWork.focused] : [],
       recentItems: activeWork.recent,
       now: nowDate(),
+      windowMinutes: activeWork.windowMinutes,
       staleHours: staleHours()
     });
   };
@@ -6397,7 +6425,8 @@ function createTopbar({
     const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
     const options = surfaceOptions();
-    options.emptyMessage = refreshState.state === "loading" ? "Refreshing Active Work state from graph\u2026" : refreshStatus.ok ? "No Focused Task is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
+    options.openLineWindowMinutes = model.openLineWindowMinutes;
+    options.emptyMessage = refreshState.state === "loading" ? "Refreshing Active Work state from graph\u2026" : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
     renderSessionSurface(popover, model, options);
     themeRuntime?.apply(popover);
   }
@@ -6461,6 +6490,11 @@ function createTopbar({
     const derived = getActiveWork(now);
     const focused = derived.focused || entries[0] || null;
     const activeWork = focused === derived.focused ? derived : focused ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some((item) => item.taskUid === focused.taskUid) ? 0 : 1) } : derived;
+    const composition = activeWorkDescription(
+      focused ? 1 : 0,
+      activeWork.recent.length,
+      activeWork.windowMinutes
+    );
     const focusedEntries = focused ? [focused] : [];
     const running2 = focusedEntries.length > 0;
     if (running2 && reconcile2)
@@ -6484,7 +6518,11 @@ function createTopbar({
       parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : "";
       separatorNode.textContent = "";
       syncButtonLayout(hasActiveWork ? "active" : "idle");
-      buttonNode.title = hasActiveWork ? `${activeCount(activeWork.count)} \u2014 no Session is currently timing. Click for details.` : "Roam Logbook \u2014 no Session running. Click for details.";
+      buttonNode.title = hasActiveWork ? `${activeCount(activeWork.count)}
+${composition}
+No Timing Line is active. Click for details.` : `${activeCount(0)}
+${composition}
+No Active Work lines are open. Click for details.`;
       buttonNode.setAttribute("aria-label", buttonNode.title);
       if (activeChanged && popover)
         renderPopover();
@@ -6503,6 +6541,7 @@ function createTopbar({
     if (activeWork.count > 1) {
       const threshold = cycleThresholdMinutes();
       buttonNode.title = `${activeCount(activeWork.count)}
+${composition}
 Primary timer: ${first.title}
 Shared cycle ${formatElapsed(cycleElapsed)}` + (threshold ? `
 Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
@@ -6510,6 +6549,7 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       const totalMinutes2 = (first.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 6e4);
       const threshold = cycleThresholdMinutes();
       buttonNode.title = `${activeCount(activeWork.count)}
+${composition}
 Clocked in: ${first.title}
 Shared cycle ${formatElapsed(cycleElapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (threshold ? `
 Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
@@ -6522,8 +6562,15 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     tickCount += 1;
     const entries = getRunning();
     const now = nowDate();
+    const activeWork = getActiveWork(now);
     renderButton(entries, now);
-    updateSessionSurfaceElapsed(popover, entries, now);
+    updateSessionSurfaceElapsed(
+      popover,
+      entries,
+      now,
+      activeWork.recent,
+      activeWork.windowMinutes
+    );
   };
   const stopTicker = () => {
     if (ticker !== null)

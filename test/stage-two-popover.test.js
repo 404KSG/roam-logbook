@@ -945,7 +945,7 @@ test('Refresh reconciles an external graph CLOCK into Recent Active Work without
 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
     assert.match(popover.textContent, /External graph task/);
 });
 
@@ -1055,7 +1055,7 @@ test('Refresh does not mutate CLOCK data or the shared Pomodoro cycle', async t 
     );
 });
 
-test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
+test('Active Work labels Timing and Open Lines without warning banners', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
@@ -1074,8 +1074,14 @@ test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
     assert.equal(list.getAttribute('aria-label'), 'Active Work');
     assert.deepEqual(
         [...list.querySelectorAll('.rlb-surface__section-label')].map(node => node.textContent),
-        ['FOCUSED', 'RECENT · 1']
+        ['TIMING', 'OPEN LINES · 1 45m window']
     );
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
+    assert.equal(
+        list.querySelector('.rlb-surface__section--open-lines').getAttribute('aria-label'),
+        'OPEN LINES · 1, 45m window'
+    );
+    assert.equal(surface.querySelector('.rlb-popover__notice'), null);
 
     const focusedSection = list.querySelector('.rlb-surface__section--focused');
     const recentSection = list.querySelector('.rlb-surface__section--recent');
@@ -1098,19 +1104,21 @@ test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
 
     const recentMeta = recent.querySelector('.rlb-run__recent-meta');
     assert.equal(recentMeta.tagName, 'TIME');
-    assert.equal(recentMeta.textContent, '2m total · 3m ago');
+    assert.equal(recentMeta.textContent, '2m total · 42m left');
     assert.equal(recentMeta.dateTime, '2026-08-15T09:02');
-    assert.equal(recentMeta.title, 'Last active [2026-08-15 Sat 09:02]');
+    assert.equal(recentMeta.title, '2m total · 42m left; Last active [2026-08-15 Sat 09:02]');
     assert.equal(
         recentMeta.getAttribute('aria-label'),
-        '2m total; last active [2026-08-15 Sat 09:02]'
+        '2m total; 42m left; Last active [2026-08-15 Sat 09:02]'
     );
-    assert.doesNotMatch(recentMeta.textContent, /Recent|Last active|Today/);
+    assert.doesNotMatch(surface.textContent, /Recent|RECENT|ago/);
     assert.equal(surface.querySelectorAll('.rlb-run__status').length, 0);
 
-    updateSessionSurfaceElapsed(surface, clock.getRunning(), new Date('2026-08-15T09:45:00'));
+    const atWindowEdge = new Date('2026-08-15T09:45:00');
+    updateSessionSurfaceElapsed(surface, clock.getRunning(), atWindowEdge, clock.getActiveWork(atWindowEdge).recent);
     assert.ok(focused.classList.contains('rlb-run--overrun'));
     assert.ok(focusedSection.classList.contains('rlb-surface__section--overrun'));
+    assert.equal(recentMeta.textContent, '2m total · 2m left');
     assert.match(focusedSection.querySelector('.rlb-run__elapsed').textContent, /^\d+:\d{2}$/);
     assert.match(focusedSection.querySelector('.rlb-run__total').textContent, /^\d+\w+ total$/);
 });
@@ -1498,7 +1506,7 @@ test('topbar shows a running Session for a confirmed open CLOCK', async () => {
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
     await settlePostPaint();
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
     assert.ok(popover.querySelector('.rlb-run'));
     assert.doesNotMatch(popover.textContent, /No Session is running/);
 });
@@ -1552,7 +1560,7 @@ test('popover is a labelled dialog and returns focus to its trigger on every clo
     assert.ok(popover.getAttribute('aria-labelledby'));
     assert.equal(
         document.getElementById(popover.getAttribute('aria-labelledby')).textContent,
-        'ACTIVE WORK'
+        'ACTIVE WORK · 1'
     );
     assert.equal(document.activeElement, popover.querySelector('button'));
 
