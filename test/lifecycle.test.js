@@ -243,7 +243,7 @@ test('command-palette Clock In fronts the confirmed Timing Line at order 0', asy
     }
 });
 
-test('clocking in shows elapsed time and a singular Active count in the topbar', async () => {
+test('clocking in shows elapsed time and a singular Thread count in the topbar', async () => {
     const sidebarCalls = [];
     const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
     window.roamAlphaAPI.ui.rightSidebar = {
@@ -269,8 +269,8 @@ test('clocking in shows elapsed time and a singular Active count in the topbar',
     const [running] = clock.getRunning();
     assert.equal(pomodoro.targetMinutes(running.clockUid), 45, 'Clock In assigns the global target');
 
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Active$/);
-    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '1 Active');
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '1 Thread');
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
@@ -278,7 +278,7 @@ test('clocking in shows elapsed time and a singular Active count in the topbar',
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
     assert.doesNotMatch(topbarWidget().textContent, /this is a test task|\/|clocks/);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
-    assert.match(topbarWidget().querySelector('button').title, /^1 Active\n/);
+    assert.match(topbarWidget().querySelector('button').title, /^1 Thread\n/);
     assert.equal(
         topbarWidget().querySelector('button').getAttribute('aria-label'),
         topbarWidget().querySelector('button').title
@@ -300,7 +300,7 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
     assert.equal(entry.priorMinutes, 120, 'banked time is derived on refresh, not queried per tick');
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
     assert.match(topbarWidget().querySelector('button').title, /2h 0\dm on this task in total/);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Active$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
 });
 
 test('the shared Pomodoro cycle stays overrun when a running CLOCK is edited', () => {
@@ -362,7 +362,7 @@ test('a long task name stays in the tooltip without entering visible topbar text
     clock.refresh();
 
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Active$/);
+    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
     assert.match(topbarWidget().querySelector('button').title, new RegExp(longName.slice(0, 20)));
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
@@ -408,7 +408,7 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
             'rlb-topbar__parallel',
         ]);
         assert.match(visible[0].textContent, /^\d+:\d{2}(?::\d{2})?$/);
-        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Active');
+        assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '3 Threads');
         assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').textContent, '');
         assert.equal(topbarWidget().querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
         assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
@@ -416,8 +416,12 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
         assert.doesNotMatch(topbarWidget().textContent, /parallel task|third parallel task|this is a test task|clocks|\//);
-        assert.match(topbarWidget().querySelector('button').title, /^3 Active\n/);
+        assert.match(topbarWidget().querySelector('button').title, /^3 Threads\n/);
         assert.doesNotMatch(topbarWidget().querySelector('button').title, /clocks running/i);
+        assert.equal(
+            topbarWidget().querySelector('button').getAttribute('aria-label'),
+            topbarWidget().querySelector('button').title
+        );
 
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
@@ -681,7 +685,7 @@ test('clocking out through the palette closes the entry', async () => {
     assert.ok(!topbarWidget().querySelector('.rlb-topbar__button--running'));
     // Clock Out removes the timer, but recent work remains visible for the
     // 45-minute Active Work window.
-    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '2 Threads');
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
@@ -705,7 +709,7 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
     assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 45:00/);
-    assert.match(topbarWidget().textContent.trim(), / Active$/);
+    assert.match(topbarWidget().textContent.trim(), / Threads?$/);
 
     duration.action.onChange({ target: { value: '20' } });
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45, 'an active Session keeps its captured target');

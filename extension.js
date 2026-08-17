@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.34";
+var PLUGIN_VERSION = "0.9.0-beta.35";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -6188,7 +6188,7 @@ var REFRESH_SUCCESS_DURATION = 1800;
 var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
 var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
-var activeCount = (count) => `${count} Active`;
+var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
 var activeWorkDescription = (timingCount, openLineCount, windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) => {
   const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
   const openLines = Number.isFinite(Number(openLineCount)) ? Math.max(0, Math.floor(Number(openLineCount))) : 0;

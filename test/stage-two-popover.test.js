@@ -419,7 +419,7 @@ test('closing after graph revalidation starts updates shared cache without reope
     assert.equal(graphReads, 2, 'one discovery read plus one post-reconciliation confirmation');
     assert.equal(clock.getRunning().length, 1);
     assert.equal(document.querySelector('body > .rlb-popover'), null);
-    assert.match(topbarButton().textContent, /2 Active/);
+    assert.match(topbarButton().textContent, /2 Threads/);
 });
 
 test('unmount cancels a pending open-time revalidation callback', async t => {
@@ -536,10 +536,12 @@ test('single Focused Task has no bulk footer while retaining header actions', as
     const topbar = topbarButton();
     const elapsed = topbar.querySelector('.rlb-topbar__time');
     const count = topbar.querySelector('.rlb-topbar__parallel');
-    assert.match(topbar.textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Active$/);
-    assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Active`);
+    assert.match(topbar.textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Thread$/);
+    assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Thread`);
     assert.equal(topbar.querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
-    assert.equal(count.textContent, '1 Active');
+    assert.equal(count.textContent, '1 Thread');
+    assert.match(topbar.title, /^1 Thread\n/);
+    assert.equal(topbar.getAttribute('aria-label'), topbar.title);
     assert.equal(
         [...count.classList].some(className =>
             className.startsWith('rlb-topbar__parallel--load-')
@@ -632,26 +634,26 @@ test('Refresh loading state is disabled in the header without changing live stat
     assert.equal(root.querySelector('.rlb-surface__footer'), null);
 });
 
-test('Active Work count tones keep 0–3 neutral and color only higher-load boundaries', () => {
+test('Thread count uses singular/plural grammar while keeping Active Work load tones', () => {
     const cases = [
-        [0, 'neutral', '0 Active'],
-        [1, 'neutral', '1 Active'],
-        [2, 'neutral', '2 Active'],
-        [3, 'neutral', '3 Active'],
-        [4, 'yellow', '4 Active'],
-        [5, 'yellow', '5 Active'],
-        [6, 'yellow', '6 Active'],
-        [7, 'red', '7 Active'],
-        [99, 'red', '99 Active'],
+        [0, 'neutral', '0 Threads'],
+        [1, 'neutral', '1 Thread'],
+        [2, 'neutral', '2 Threads'],
+        [3, 'neutral', '3 Threads'],
+        [4, 'yellow', '4 Threads'],
+        [5, 'yellow', '5 Threads'],
+        [6, 'yellow', '6 Threads'],
+        [7, 'red', '7 Threads'],
+        [99, 'red', '99 Threads'],
     ];
 
     for (const [count, tone, label] of cases) {
-        assert.equal(sessionLoadTone(count), tone, `${count} Active should be ${tone}`);
+        assert.equal(sessionLoadTone(count), tone, `${count} Threads should be ${tone}`);
         assert.equal(activeCount(count), label);
     }
 });
 
-test('live Active Work count reclassifies only the count node without duplicate DOM', async t => {
+test('live Thread count reclassifies only the count node without duplicate DOM', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     for (let index = 2; index <= 7; index += 1) {
@@ -671,7 +673,9 @@ test('live Active Work count reclassifies only the count node without duplicate 
     const button = topbarButton();
     const countNode = () => button.querySelector('.rlb-topbar__parallel');
     const timeNode = () => button.querySelector('.rlb-topbar__time');
-    assert.equal(countNode().textContent, '3 Active');
+    assert.equal(countNode().textContent, '3 Threads');
+    assert.match(button.title, /^3 Threads\n/);
+    assert.equal(button.getAttribute('aria-label'), button.title);
     assert.equal(
         [...countNode().classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
         false
@@ -679,16 +683,16 @@ test('live Active Work count reclassifies only the count node without duplicate 
     assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
 
     await clock.clockIn('popover-load-4', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '4 Active');
+    assert.equal(countNode().textContent, '4 Threads');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
 
     await clock.clockIn('popover-load-5', { now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-load-6', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '6 Active');
+    assert.equal(countNode().textContent, '6 Threads');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
 
     await clock.clockIn('popover-load-7', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '7 Active');
+    assert.equal(countNode().textContent, '7 Threads');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-red'));
     assert.equal(button.querySelectorAll('.rlb-topbar__parallel').length, 1);
     assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
@@ -1283,9 +1287,9 @@ test('Clock Out keeps the open popover and exposes the ended Focus plus prior Re
     );
     assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-03"]').length, 1);
     assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-02"]').length, 1);
-    assert.equal(topbarButton().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
+    assert.equal(topbarButton().querySelector('.rlb-topbar__parallel').textContent, '2 Threads');
     assert.equal(topbarButton().querySelector('.rlb-topbar__time'), null);
-    assert.equal(topbarButton().textContent, '2 Active');
+    assert.equal(topbarButton().textContent, '2 Threads');
 });
 
 test('pure Recent Active Work expires on the ticker without another graph read', async t => {

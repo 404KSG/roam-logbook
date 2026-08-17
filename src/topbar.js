@@ -32,7 +32,7 @@ const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
 const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
-export const activeCount = count => `${count} Active`;
+export const activeCount = count => `${count} Thread${count === 1 ? '' : 's'}`;
 export const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
 export const activeWorkDescription = (
     timingCount,
@@ -609,7 +609,7 @@ export function createTopbar({
         const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(cycleElapsed);
-        // Keep the Active count visible even for a single focused Task. The
+        // Keep the Thread count visible even for a single focused Task. The
         // icon-only state is reserved for zero focused Tasks.
         buttonNode.classList.add('rlb-topbar__button--parallel');
         parallelNode.textContent = activeCount(activeWork.count);

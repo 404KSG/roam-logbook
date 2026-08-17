@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.34**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.35**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -45,19 +45,19 @@ back to the top instead of duplicating it, while preserving every other sidebar
 window. Reload, Refresh, and graph reconciliation never move the sidebar. This
 behavior can be disabled in Settings without changing any Clock data.
 
-**Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. While work is focused, it shows the shared continuous work-cycle time and the Active Work count:
+**Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. While work is focused, it shows the shared continuous work-cycle time and the number of Threads in the Active Work working set:
 
 ```
-12:34 · 1 Active
+12:34 · 1 Thread
 ```
 
-There is always exactly one real running `CLOCK`: the Focused Task. Switching tasks closes the old interval at the switch instant and opens the new one, so recorded time never overlaps. Active Work is the Focused Task plus distinct tasks whose latest interval ended within the fixed 45-minute return window. Parallel Threads are navigation shortcuts only; they do not keep timing. The count keeps Roam's normal neutral color for 1–3 Active, uses yellow for 4–6, and red for 7+; this is only visual load context. When no Session is timing, the history-clock identity remains visible while Parallel Threads are still inside the 45-minute Active Work window:
+There is always exactly one real running `CLOCK`: the Focused Task. Switching tasks closes the old interval at the switch instant and opens the new one, so recorded time never overlaps. Active Work is the Focused Task plus distinct tasks whose latest interval ended within the fixed 45-minute return window. Parallel Threads are navigation shortcuts only; they do not keep timing. The Thread count represents that whole working set, keeps Roam's normal neutral color for 1–3 Threads, uses yellow for 4–6, and red for 7+; this is only visual load context. When no Session is timing, the history-clock identity remains visible while Parallel Threads are still inside the 45-minute Active Work window:
 
 ```
-0:28 · 2 Active
+0:28 · 2 Threads
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Timing Line as a compact neutral Linear-style card with a uniform hairline border, while Parallel Threads form a quiet flat list. Timing elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Parallel Threads show their total and the context **Leave after 45m without focus**. Active Work preserves visible Roam references such as `[[Roam Logbook]]` and `#[[Deep Work]]`; task titles use the graph's page-reference colour without an underline. Clicking a Parallel Thread title opens its block; its independent Focus action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Timing Line has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is an icon-only action with an icon-only loading state and hidden live status feedback. Current-work task titles remain single native keyboard-accessible buttons rather than nested page-reference links.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Thread count for the popover. The popover is titled **ACTIVE WORK** and presents the Timing Line as a compact neutral Linear-style card with a uniform hairline border, while Parallel Threads form a quiet flat list. Timing elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Parallel Threads show their total and the context **Leave after 45m without focus**. Active Work preserves visible Roam references such as `[[Roam Logbook]]` and `#[[Deep Work]]`; task titles use the graph's page-reference colour without an underline. Clicking a Parallel Thread title opens its block; its independent Focus action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Timing Line has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is an icon-only action with an icon-only loading state and hidden live status feedback. Current-work task titles remain single native keyboard-accessible buttons rather than nested page-reference links.
 
 **DONE completion** — changing a watched Task to `DONE` closes its confirmed
 running Focused CLOCK and the confirmed running CLOCKs of its descendants. A

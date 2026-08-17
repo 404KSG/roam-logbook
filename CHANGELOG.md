@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.35 — 2026-08-18
+
+- Changed the compact Top Bar working-set label from `N Active` to the
+  grammatically precise `1 Thread` / `N Threads`, so the count describes the
+  current Active Work set without implying that multiple lines are timed at
+  once.
+- Kept the count's Active Work meaning, neutral/yellow/red load thresholds,
+  tooltip and ARIA details, panel headings, timing behavior, and stored data
+  unchanged.
+
 ## 0.9.0-beta.34 — 2026-08-18
 
 - Renamed user-facing `OPEN LINES` to `PARALLEL THREADS` so untimed but
