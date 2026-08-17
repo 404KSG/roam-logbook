@@ -26,6 +26,7 @@ const rowFigures = (entry, now) => {
 const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
+const dashboardLabel = 'Open Roam Logbook Dashboard';
 
 const appendMetaNodes = (meta, nodes) => {
     nodes.forEach((node, index) => {
@@ -210,6 +211,36 @@ const appendSection = (list, label, rows, renderRow, modifier = '') => {
     list.appendChild(section);
 };
 
+const renderRefreshControl = options => {
+    const refreshState = options.refreshState || {};
+    const state = ['idle', 'loading', 'success', 'error'].includes(refreshState.state)
+        ? refreshState.state
+        : 'idle';
+    const refreshCell = el('div', 'rlb-surface__refresh-cell');
+    refreshCell.dataset.refreshState = state;
+    const refresh = button(
+        `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--${state}`,
+        '',
+        () => void options.onRefresh(),
+        { title: refreshLabel }
+    );
+    refresh.dataset.action = 'refresh';
+    if (state === 'loading') {
+        refresh.disabled = true;
+        refresh.setAttribute('aria-busy', 'true');
+    }
+    const refreshStatus = el(
+        'span',
+        `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
+        refreshState.message || ''
+    );
+    refreshStatus.setAttribute('role', 'status');
+    refreshStatus.setAttribute('aria-live', 'polite');
+    refreshStatus.setAttribute('aria-atomic', 'true');
+    refreshCell.append(refresh, refreshStatus);
+    return refreshCell;
+};
+
 /** Render one current-session surface into a supplied popover/sidebar shell. */
 export function renderSessionSurface(root, model, options = {}) {
     const title = el('div', 'rlb-popover__title', surfaceTitle(model));
@@ -217,17 +248,29 @@ export function renderSessionSurface(root, model, options = {}) {
 
     const header = el('header', 'rlb-surface__header');
     header.appendChild(title);
-    if (options.onClose) {
-        header.appendChild(
-            button(
-                'bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__close',
-                '',
-                () => options.onClose(),
-                { title: 'Close Current Sessions' }
-            )
+    const headerActions = el('div', 'rlb-surface__actions');
+    if (options.onOpenDashboard) {
+        const dashboard = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard',
+            '',
+            () => options.onOpenDashboard(),
+            { title: dashboardLabel }
         );
-        header.lastElementChild.dataset.action = 'close';
+        dashboard.dataset.action = 'dashboard';
+        headerActions.appendChild(dashboard);
     }
+    if (options.onRefresh) headerActions.appendChild(renderRefreshControl(options));
+    if (options.onClose) {
+        const close = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close',
+            '',
+            () => options.onClose(),
+            { title: 'Close Current Sessions' }
+        );
+        close.dataset.action = 'close';
+        headerActions.appendChild(close);
+    }
+    if (headerActions.childElementCount > 0) header.appendChild(headerActions);
     root.replaceChildren(header);
 
     const sessionList = el('div', 'rlb-surface__list');
@@ -278,60 +321,21 @@ export function renderSessionSurface(root, model, options = {}) {
         root.appendChild(node);
     }
 
-    const singleRunning = model.runningCount === 1;
-    const footerModifiers = [
-        model.rows.length === 0 ? 'rlb-popover__footer--empty' : '',
-        singleRunning ? 'rlb-popover__footer--single-running' : '',
-    ].filter(Boolean);
-    const footer = el('div', `rlb-popover__footer ${footerModifiers.join(' ')}`.trim());
-    footer.appendChild(
-        button('bp3-button bp3-small', 'Dashboard', () => options.onOpenDashboard?.(), {
-            title: 'Open Roam Logbook Dashboard',
-        })
-    );
-    if (model.runningCount > 1) {
+    if (model.runningCount > 1 && options.onClockOutAll) {
+        const footer = el('footer', 'rlb-surface__footer');
         const confirming = Boolean(options.clockOutAllConfirm);
         footer.appendChild(
             button(
                 `bp3-button bp3-small${confirming ? ' bp3-intent-danger' : ''}`,
                 confirming ? 'Confirm Clock Out All' : 'Clock Out All',
-                () => options.onClockOutAll?.(),
+                () => options.onClockOutAll(),
                 {
                     title: confirming ? 'Confirm permanent Clock Out All' : 'Close all running Sessions',
                 }
             )
         );
+        root.appendChild(footer);
     }
-    if (options.onRefresh) {
-        const refreshState = options.refreshState || {};
-        const state = ['idle', 'loading', 'success', 'error'].includes(refreshState.state)
-            ? refreshState.state
-            : 'idle';
-        const refreshCell = el('div', 'rlb-surface__refresh-cell');
-        refreshCell.dataset.refreshState = state;
-        const refresh = button(
-            `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--${state}`,
-            '',
-            () => void options.onRefresh(),
-            { title: refreshLabel }
-        );
-        refresh.dataset.action = 'refresh';
-        if (state === 'loading') {
-            refresh.disabled = true;
-            refresh.setAttribute('aria-busy', 'true');
-        }
-        const refreshStatus = el(
-            'span',
-            `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
-            refreshState.message || ''
-        );
-        refreshStatus.setAttribute('role', 'status');
-        refreshStatus.setAttribute('aria-live', 'polite');
-        refreshStatus.setAttribute('aria-atomic', 'true');
-        refreshCell.append(refresh, refreshStatus);
-        footer.appendChild(refreshCell);
-    }
-    root.appendChild(footer);
     return root;
 }
 

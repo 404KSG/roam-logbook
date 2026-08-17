@@ -147,12 +147,11 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     }
     assert.doesNotMatch(css, /\.rlb-topbar__button--running\s*{/);
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
-    assert.match(css, /\.rlb-surface__refresh-cell[^}]*grid-column: 2[^}]*grid-row: 2/s);
-    assert.match(css, /\.rlb-surface__refresh-cell \.rlb-surface__refresh[^}]*min-width: var\(--rlb-surface-action-height\)[^}]*min-height: var\(--rlb-surface-action-height\)/s);
-    assert.match(css, /\.rlb-popover__footer--empty\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) 40px[^}]*grid-template-rows: var\(--rlb-surface-action-height\)/s);
-    assert.match(css, /\.rlb-popover__footer--empty \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 2[^}]*grid-row: 1[^}]*width: 40px/s);
-    assert.match(css, /\.rlb-popover__footer--single-running\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) 40px[^}]*grid-template-rows: var\(--rlb-surface-action-height\)/s);
-    assert.match(css, /\.rlb-popover__footer--single-running \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 3[^}]*grid-row: 1[^}]*width: 40px/s);
+    assert.match(css, /\.rlb-surface__actions\s*\{[^}]*display: flex[^}]*gap: 2px/s);
+    assert.match(css, /\.rlb-surface__icon-button\s*\{[^}]*width: var\(--rlb-surface-action-height\)[^}]*height: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-surface__footer\s*\{[^}]*display: flex[^}]*border-top: 1px solid var\(--rlb-surface-border\)/s);
+    assert.doesNotMatch(css, /rlb-popover__footer|footer--empty|footer--single-running/);
+    assert.match(css, /\.rlb-surface__refresh-cell\s*\{[^}]*display: inline-flex[^}]*width: var\(--rlb-surface-action-height\)/s);
     assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
     assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
     const focusedSectionRule = css.match(/\.rlb-surface__section--focused\s*{([^}]*)}/)?.[1] ?? '';
@@ -348,17 +347,16 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
         assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
-        const footer = [...popover.querySelectorAll('.rlb-popover__footer button')];
-        assert.deepEqual(footer.map(node => node.textContent), [
-            'Dashboard',
-            '',
+        const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
+        assert.deepEqual(headerActions.map(node => node.dataset.action || 'refresh-cell'), [
+            'dashboard',
+            'refresh-cell',
         ]);
-        assert.ok(footer.slice(0, 1).every(node => !/\bbp3-icon-/.test(node.className)));
-        const footerRefresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
-        assert.match(footerRefresh.className, /\bbp3-icon-refresh\b/);
-        assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
-        assert.equal(footerRefresh.title, 'Refresh Active Work from graph');
-        assert.equal(footerRefresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+        const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+        assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
+        assert.equal(headerRefresh.title, 'Refresh Active Work from graph');
+        assert.equal(headerRefresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+        assert.equal(popover.querySelector('.rlb-surface__footer'), null);
         click(topbarWidget().querySelector('button'));
     } finally {
         if (document.querySelector('body > .rlb-popover')) click(topbarWidget().querySelector('button'));
@@ -403,19 +401,16 @@ test('the popover lists the running clock', () => {
     assert.ok(discard, 'discard action should be present');
     assert.ok(discard.title);
     assert.equal(discard.getAttribute('aria-label'), discard.title);
-    const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
-    assert.deepEqual(footerActions.map(action => action.textContent), [
-        'Dashboard',
-        '',
+    const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
+    assert.deepEqual(headerActions.map(action => action.dataset.action || 'refresh-cell'), [
+        'dashboard',
+        'refresh-cell',
     ]);
-    for (const action of footerActions.slice(0, 1)) {
-        assert.doesNotMatch(action.className, /\bbp3-icon-/);
-    }
-    const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
     assert.equal(refresh.title, 'Refresh Active Work from graph');
     assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+    assert.equal(popover.querySelector('.rlb-surface__footer'), null);
 
     click(topbarWidget().querySelector('button'));
     assert.equal(document.querySelector('.rlb-popover'), null, 'second click closes it');

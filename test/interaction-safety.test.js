@@ -85,7 +85,7 @@ const openPopover = () => {
     return document.querySelector('body > .rlb-popover');
 };
 const footerAction = label =>
-    [...document.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === label);
+    [...document.querySelectorAll('.rlb-surface__footer button')].find(node => node.textContent === label);
 
 const failNextPostWriteReads = () => {
     const originalQuery = graph.api.data.q;

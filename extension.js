@@ -2033,7 +2033,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.26";
+var PLUGIN_VERSION = "0.9.0-beta.27";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -4094,14 +4094,23 @@ var STYLES = `
     display: grid;
     grid-template-columns: minmax(0, 1fr) max-content;
     align-items: center;
-    column-gap: 4px;
+    column-gap: 6px;
     min-width: 0;
+    padding: 0 2px;
 }
 
 .rlb-surface__header .rlb-popover__title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.rlb-surface__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    min-width: 0;
 }
 
 .rlb-surface__header .bp3-button {
@@ -4111,6 +4120,50 @@ var STYLES = `
 
 .bp3-dark .rlb-surface__header .bp3-button {
     color: #a7b6c2;
+}
+
+.rlb-surface__icon-button {
+    box-sizing: border-box;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--rlb-surface-action-height);
+    width: var(--rlb-surface-action-height);
+    min-width: var(--rlb-surface-action-height) !important;
+    max-width: var(--rlb-surface-action-height);
+    height: var(--rlb-surface-action-height);
+    min-height: var(--rlb-surface-action-height) !important;
+    max-height: var(--rlb-surface-action-height);
+    margin: 0;
+    padding: 0 !important;
+    border-radius: 4px;
+}
+
+.rlb-surface__icon-button::before {
+    margin: 0 !important;
+}
+
+.rlb-surface__icon-button:hover,
+.rlb-surface__icon-button:focus-visible {
+    background: var(--rlb-surface-hover);
+}
+
+.rlb-surface__refresh-cell {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--rlb-surface-action-height);
+    width: var(--rlb-surface-action-height);
+    min-width: var(--rlb-surface-action-height);
+    max-width: var(--rlb-surface-action-height);
+    height: var(--rlb-surface-action-height);
+    min-height: var(--rlb-surface-action-height);
+    max-height: var(--rlb-surface-action-height);
+}
+
+.rlb-surface__refresh-cell .rlb-surface__refresh {
+    flex: 0 0 var(--rlb-surface-action-height);
 }
 
 .rlb-popover__empty {
@@ -4231,17 +4284,17 @@ var STYLES = `
     line-height: 1.4;
 }
 
-.rlb-popover__footer {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, var(--rlb-surface-action-height));
+.rlb-surface__footer {
+    display: flex;
+    min-width: 0;
     gap: 5px;
+    margin: 6px 2px 0;
     padding-top: 6px;
-    margin-top: 6px;
     border-top: 1px solid var(--rlb-surface-border);
 }
 
-.rlb-popover__footer .bp3-button {
+.rlb-surface__footer .bp3-button {
+    flex: 1 1 auto;
     min-width: 0;
     width: 100%;
     height: var(--rlb-surface-action-height);
@@ -4257,7 +4310,7 @@ var STYLES = `
     padding: 0 8px;
 }
 
-.rlb-popover__footer .bp3-button:not(.bp3-minimal) {
+.rlb-surface__footer .bp3-button:not(.bp3-minimal) {
     border: 1px solid var(--rlb-surface-border);
     border-radius: 4px;
     background: transparent;
@@ -4265,117 +4318,15 @@ var STYLES = `
     color: #5c7080;
 }
 
-.rlb-popover__footer .bp3-button:not(.bp3-minimal):hover,
-.rlb-popover__footer .bp3-button:not(.bp3-minimal):focus-visible {
+.rlb-surface__footer .bp3-button:not(.bp3-minimal):hover,
+.rlb-surface__footer .bp3-button:not(.bp3-minimal):focus-visible {
     background: var(--rlb-surface-hover);
-}
-
-.rlb-popover__footer .rlb-surface__refresh {
-    grid-column: 2;
-    grid-row: 2;
-    width: 100%;
-    min-width: var(--rlb-surface-action-height);
-    max-width: none;
-    justify-self: stretch;
-    padding: 0 !important;
-    align-items: center;
-    justify-content: center;
-    color: #5c7080;
 }
 
 @keyframes rlb-surface-refresh-spin {
     to {
         transform: rotate(360deg);
     }
-}
-
-.rlb-popover__footer .rlb-surface__refresh-cell {
-    display: flex;
-    align-items: stretch;
-    justify-content: stretch;
-    grid-column: 2;
-    grid-row: 2;
-    position: relative;
-    min-width: 0;
-    width: 100%;
-    height: var(--rlb-surface-action-height);
-    min-height: var(--rlb-surface-action-height);
-    max-height: var(--rlb-surface-action-height);
-}
-
-.rlb-popover__footer .rlb-surface__refresh-cell .rlb-surface__refresh {
-    grid-column: auto;
-    grid-row: auto;
-    box-sizing: border-box;
-    flex: 1 1 auto;
-    width: 100%;
-    min-width: var(--rlb-surface-action-height);
-    height: var(--rlb-surface-action-height);
-    min-height: var(--rlb-surface-action-height);
-    max-height: var(--rlb-surface-action-height);
-    max-width: none;
-    justify-self: stretch;
-}
-
-.rlb-popover__footer--empty {
-    grid-template-columns: minmax(0, 1fr) 40px;
-    grid-template-rows: var(--rlb-surface-action-height);
-    align-items: stretch;
-}
-
-.rlb-popover__footer--empty > .bp3-button:first-child {
-    grid-column: 1;
-    grid-row: 1;
-}
-
-.rlb-popover__footer--empty .rlb-surface__refresh-cell {
-    grid-column: 2;
-    grid-row: 1;
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
-    align-items: center;
-    justify-content: center;
-}
-
-.rlb-popover__footer--empty .rlb-surface__refresh-cell .rlb-surface__refresh {
-    flex: 0 0 var(--rlb-surface-action-height);
-    width: var(--rlb-surface-action-height);
-    min-width: var(--rlb-surface-action-height);
-    max-width: var(--rlb-surface-action-height);
-}
-
-.rlb-popover__footer--single-running {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
-    grid-template-rows: var(--rlb-surface-action-height);
-    align-items: stretch;
-}
-
-.rlb-popover__footer--single-running > .bp3-button:first-child {
-    grid-column: 1;
-    grid-row: 1;
-}
-
-.rlb-popover__footer--single-running > .bp3-button:nth-child(2) {
-    grid-column: 2;
-    grid-row: 1;
-}
-
-.rlb-popover__footer--single-running .rlb-surface__refresh-cell {
-    grid-column: 3;
-    grid-row: 1;
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
-    align-items: center;
-    justify-content: center;
-}
-
-.rlb-popover__footer--single-running .rlb-surface__refresh-cell .rlb-surface__refresh {
-    flex: 0 0 var(--rlb-surface-action-height);
-    width: var(--rlb-surface-action-height);
-    min-width: var(--rlb-surface-action-height);
-    max-width: var(--rlb-surface-action-height);
 }
 
 .rlb-surface__refresh--loading::before {
@@ -4388,13 +4339,13 @@ var STYLES = `
     }
 }
 
-.rlb-popover__footer .rlb-surface__refresh:hover,
-.rlb-popover__footer .rlb-surface__refresh:focus-visible {
+.rlb-surface__refresh:hover,
+.rlb-surface__refresh:focus-visible {
     color: #3f596b;
     background: rgba(167, 182, 194, 0.24);
 }
 
-.bp3-dark .rlb-popover__footer {
+.bp3-dark .rlb-surface__footer {
     border-top-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -5735,6 +5686,7 @@ var rowFigures = (entry, now) => {
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
+var dashboardLabel = "Open Roam Logbook Dashboard";
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
     if (index > 0) {
@@ -5904,23 +5856,64 @@ var appendSection = (list, label, rows, renderRow, modifier = "") => {
     section.appendChild(renderRow(row));
   list.appendChild(section);
 };
+var renderRefreshControl = (options) => {
+  const refreshState = options.refreshState || {};
+  const state = ["idle", "loading", "success", "error"].includes(refreshState.state) ? refreshState.state : "idle";
+  const refreshCell = el("div", "rlb-surface__refresh-cell");
+  refreshCell.dataset.refreshState = state;
+  const refresh2 = button(
+    `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--${state}`,
+    "",
+    () => void options.onRefresh(),
+    { title: refreshLabel }
+  );
+  refresh2.dataset.action = "refresh";
+  if (state === "loading") {
+    refresh2.disabled = true;
+    refresh2.setAttribute("aria-busy", "true");
+  }
+  const refreshStatus = el(
+    "span",
+    `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
+    refreshState.message || ""
+  );
+  refreshStatus.setAttribute("role", "status");
+  refreshStatus.setAttribute("aria-live", "polite");
+  refreshStatus.setAttribute("aria-atomic", "true");
+  refreshCell.append(refresh2, refreshStatus);
+  return refreshCell;
+};
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
   if (options.titleId)
     title.id = options.titleId;
   const header = el("header", "rlb-surface__header");
   header.appendChild(title);
-  if (options.onClose) {
-    header.appendChild(
-      button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__close",
-        "",
-        () => options.onClose(),
-        { title: "Close Current Sessions" }
-      )
+  const headerActions = el("div", "rlb-surface__actions");
+  if (options.onOpenDashboard) {
+    const dashboard = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard",
+      "",
+      () => options.onOpenDashboard(),
+      { title: dashboardLabel }
     );
-    header.lastElementChild.dataset.action = "close";
+    dashboard.dataset.action = "dashboard";
+    headerActions.appendChild(dashboard);
   }
+  if (options.onRefresh)
+    headerActions.appendChild(renderRefreshControl(options));
+  if (options.onClose) {
+    const close = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close",
+      "",
+      () => options.onClose(),
+      { title: "Close Current Sessions" }
+    );
+    close.dataset.action = "close";
+    headerActions.appendChild(close);
+  }
+  if (headerActions.childElementCount > 0)
+    header.appendChild(headerActions);
   root.replaceChildren(header);
   const sessionList = el("div", "rlb-surface__list");
   sessionList.setAttribute("role", "group");
@@ -5966,58 +5959,21 @@ function renderSessionSurface(root, model, options = {}) {
     node.setAttribute("aria-atomic", "true");
     root.appendChild(node);
   }
-  const singleRunning = model.runningCount === 1;
-  const footerModifiers = [
-    model.rows.length === 0 ? "rlb-popover__footer--empty" : "",
-    singleRunning ? "rlb-popover__footer--single-running" : ""
-  ].filter(Boolean);
-  const footer = el("div", `rlb-popover__footer ${footerModifiers.join(" ")}`.trim());
-  footer.appendChild(
-    button("bp3-button bp3-small", "Dashboard", () => options.onOpenDashboard?.(), {
-      title: "Open Roam Logbook Dashboard"
-    })
-  );
-  if (model.runningCount > 1) {
+  if (model.runningCount > 1 && options.onClockOutAll) {
+    const footer = el("footer", "rlb-surface__footer");
     const confirming = Boolean(options.clockOutAllConfirm);
     footer.appendChild(
       button(
         `bp3-button bp3-small${confirming ? " bp3-intent-danger" : ""}`,
         confirming ? "Confirm Clock Out All" : "Clock Out All",
-        () => options.onClockOutAll?.(),
+        () => options.onClockOutAll(),
         {
           title: confirming ? "Confirm permanent Clock Out All" : "Close all running Sessions"
         }
       )
     );
+    root.appendChild(footer);
   }
-  if (options.onRefresh) {
-    const refreshState = options.refreshState || {};
-    const state = ["idle", "loading", "success", "error"].includes(refreshState.state) ? refreshState.state : "idle";
-    const refreshCell = el("div", "rlb-surface__refresh-cell");
-    refreshCell.dataset.refreshState = state;
-    const refresh2 = button(
-      `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--${state}`,
-      "",
-      () => void options.onRefresh(),
-      { title: refreshLabel }
-    );
-    refresh2.dataset.action = "refresh";
-    if (state === "loading") {
-      refresh2.disabled = true;
-      refresh2.setAttribute("aria-busy", "true");
-    }
-    const refreshStatus = el(
-      "span",
-      `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
-      refreshState.message || ""
-    );
-    refreshStatus.setAttribute("role", "status");
-    refreshStatus.setAttribute("aria-live", "polite");
-    refreshStatus.setAttribute("aria-atomic", "true");
-    refreshCell.append(refresh2, refreshStatus);
-    footer.appendChild(refreshCell);
-  }
-  root.appendChild(footer);
   return root;
 }
 function updateSessionSurfaceElapsed(root, entries, now) {

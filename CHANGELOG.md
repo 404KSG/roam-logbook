@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.27 — 2026-08-17
+
+- Moved the Active Work Dashboard and Refresh actions from the footer into a
+  compact icon-only header group with stable 32px targets, accessible labels,
+  and unchanged Refresh status semantics.
+- Removed the empty footer from idle, Recent-only, and single-Focused states.
+  The footer now exists only when multiple running Sessions need the explicit
+  Clock Out All confirmation path.
+- Added 320px/340px Chromium geometry coverage for header actions, loading
+  stability, sidebar Close coexistence, overflow, and the simplified bulk
+  action footer.
+
 ## 0.9.0-beta.26 — 2026-08-17
 
 - Removed the Pause/Resume state machine and Pause Batch runtime completely.

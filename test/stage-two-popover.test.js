@@ -458,21 +458,61 @@ test('manual Refresh during pending and in-flight open revalidation reuses one g
     );
 });
 
-test('empty Session surface keeps Dashboard and Refresh on one row', () => {
-    const popover = openPopover();
-    const footer = popover.querySelector('.rlb-popover__footer');
-    const actions = [...footer.querySelectorAll('button')];
-    const refreshCell = footer.querySelector('.rlb-surface__refresh-cell');
+test('Active Work header keeps Dashboard and Refresh together with no empty footer', () => {
+    const root = document.createElement('div');
+    renderSessionSurface(
+        root,
+        { rows: [], focusedRows: [], recentRows: [], runningCount: 0, staleEntries: [], now: Date.now() },
+        { onOpenDashboard: () => {}, onRefresh: () => {}, refreshState: { state: 'loading' } }
+    );
 
-    assert.ok(footer.classList.contains('rlb-popover__footer--empty'));
-    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
-    assert.equal(refreshCell.dataset.refreshState, 'loading');
-    assert.equal(refreshCell.querySelector('[data-action="refresh"]').getAttribute('aria-label'), 'Refresh Active Work from graph');
-    assert.equal(footer.querySelectorAll('.bp3-button').length, 2);
-    assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
+    const header = root.querySelector('.rlb-surface__header');
+    const actions = [...header.querySelectorAll('.rlb-surface__actions > *')];
+    const dashboard = header.querySelector('[data-action="dashboard"]');
+    const refresh = header.querySelector('[data-action="refresh"]');
+
+    assert.deepEqual(actions.map(action => action.dataset.action || 'refresh-cell'), [
+        'dashboard',
+        'refresh-cell',
+    ]);
+    assert.ok(dashboard.classList.contains('bp3-icon-dashboard'));
+    assert.equal(dashboard.title, 'Open Roam Logbook Dashboard');
+    assert.equal(dashboard.getAttribute('aria-label'), dashboard.title);
+    assert.equal(dashboard.type, 'button');
+    assert.ok(refresh.classList.contains('bp3-icon-refresh'));
+    assert.equal(refresh.title, 'Refresh Active Work from graph');
+    assert.equal(refresh.getAttribute('aria-label'), refresh.title);
+    assert.equal(refresh.disabled, true);
+    assert.equal(refresh.getAttribute('aria-busy'), 'true');
+    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
+    assert.equal(root.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
+    assert.equal(root.querySelector('.rlb-surface__footer'), null);
 });
 
-test('single Focused Task keeps Dashboard and Refresh on one row', async t => {
+test('shared Active Work header orders Dashboard, Refresh, and Close actions', () => {
+    const root = document.createElement('div');
+    renderSessionSurface(
+        root,
+        { rows: [], focusedRows: [], recentRows: [], runningCount: 1, staleEntries: [], now: Date.now() },
+        { onOpenDashboard: () => {}, onRefresh: () => {}, onClose: () => {} }
+    );
+
+    const actions = [...root.querySelectorAll('.rlb-surface__actions > *')];
+    assert.deepEqual(actions.map(action => action.dataset.action || 'refresh-cell'), [
+        'dashboard',
+        'refresh-cell',
+        'close',
+    ]);
+    assert.equal(root.querySelector('.rlb-surface__footer'), null);
+    for (const action of root.querySelectorAll('.rlb-surface__actions button')) {
+        assert.equal(action.type, 'button');
+        assert.equal(action.tabIndex, 0);
+        assert.ok(action.title);
+        assert.equal(action.getAttribute('aria-label'), action.title);
+    }
+});
+
+test('single Focused Task has no bulk footer while retaining header actions', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
@@ -491,18 +531,14 @@ test('single Focused Task keeps Dashboard and Refresh on one row', async t => {
     );
 
     const popover = openPopover();
-    const footer = popover.querySelector('.rlb-popover__footer');
-    const actions = [...footer.querySelectorAll('button')];
-
-    assert.ok(footer.classList.contains('rlb-popover__footer--single-running'));
-    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
-    assert.equal(
-        [...footer.querySelectorAll('button')].some(action => /Clock Out All/i.test(action.textContent)),
-        false
+    assert.deepEqual(
+        [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')].map(
+            action => action.dataset.action || 'refresh-cell'
+        ),
+        ['dashboard', 'refresh-cell']
     );
+    assert.equal(popover.querySelector('.rlb-surface__footer'), null);
     assert.ok(popover.querySelector('[data-action="clock-out"]'), 'individual Check Out remains available');
-    assert.equal(actions.every(action => action.tabIndex === 0), true);
-
 });
 
 test('multi-Active Work footer retains the explicit Clock Out All confirmation path', () => {
@@ -524,7 +560,7 @@ test('multi-Active Work footer retains the explicit Clock Out All confirmation p
         onRefresh: () => {},
     });
 
-    const footer = root.querySelector('.rlb-popover__footer');
+    const footer = root.querySelector('.rlb-surface__footer');
     const bulk = [...footer.querySelectorAll('button')].find(button =>
         /Clock Out All/i.test(button.textContent)
     );
@@ -540,7 +576,7 @@ test('multi-Active Work footer retains the explicit Clock Out All confirmation p
     assert.match(root.textContent, /Confirm Clock Out All/);
 });
 
-test('multi-Active Work footer keeps Dashboard, bulk action, and Refresh controls distinct', () => {
+test('multi-Active Work keeps header icons distinct from the Clock Out All footer', () => {
     const root = document.createElement('div');
     renderSessionSurface(
         root,
@@ -548,18 +584,23 @@ test('multi-Active Work footer keeps Dashboard, bulk action, and Refresh control
         { onOpenDashboard: () => {}, onClockOutAll: () => {}, onRefresh: () => {} }
     );
 
-    const footer = root.querySelector('.rlb-popover__footer');
+    const footer = root.querySelector('.rlb-surface__footer');
+    assert.deepEqual([...footer.querySelectorAll('button')].map(button => button.textContent.trim()), [
+        'Clock Out All',
+    ]);
     assert.deepEqual(
-        [...footer.querySelectorAll('button')].map(button => button.textContent.trim()),
-        ['Dashboard', 'Clock Out All', '']
+        [...root.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')].map(
+            action => action.dataset.action || 'refresh-cell'
+        ),
+        ['dashboard', 'refresh-cell']
     );
     assert.equal(
-        footer.querySelector('[data-action="refresh"]')?.title,
+        root.querySelector('[data-action="refresh"]')?.title,
         'Refresh Active Work from graph'
     );
 });
 
-test('Refresh loading state is disabled without changing the footer action contract', () => {
+test('Refresh loading state is disabled in the header without changing live status semantics', () => {
     const root = document.createElement('div');
     renderSessionSurface(
         root,
@@ -571,6 +612,7 @@ test('Refresh loading state is disabled without changing the footer action contr
     assert.ok(refresh?.disabled);
     assert.equal(refresh?.getAttribute('aria-busy'), 'true');
     assert.equal(root.querySelector('.rlb-surface__refresh-cell')?.dataset.refreshState, 'loading');
+    assert.equal(root.querySelector('.rlb-surface__footer'), null);
 });
 
 test('Active Work count tones keep 0–3 neutral and color only higher-load boundaries', () => {
@@ -795,7 +837,7 @@ test('topbar keeps one shared Work Cycle across task switches and ignores Roam s
     assert.equal(pomodoro.getCycle(), null);
 });
 
-test('Active Work surfaces keep Refresh copy hidden while preserving accessible state feedback', async t => {
+test('Active Work header keeps Refresh copy hidden while preserving accessible state feedback', async t => {
     t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -808,12 +850,11 @@ test('Active Work surfaces keep Refresh copy hidden while preserving accessible 
     await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
 
     const popover = openPopover();
-    const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     const checkout = popover.querySelector('[data-action="clock-out"]');
 
-    assert.ok(refresh, 'Refresh belongs in the surface footer');
+    assert.ok(refresh, 'Refresh belongs in the surface header');
     assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
-    assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
     assert.equal(refresh.title, 'Refresh Active Work from graph');
     assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
     assert.ok(refresh.classList.contains('bp3-icon-refresh'));
@@ -823,17 +864,14 @@ test('Active Work surfaces keep Refresh copy hidden while preserving accessible 
     assert.equal(live.getAttribute('aria-live'), 'polite');
     assert.equal(live.getAttribute('aria-atomic'), 'true');
     assert.ok(live.classList.contains('rlb-visually-hidden'));
-    assert.deepEqual(
-        [...popover.querySelectorAll('.rlb-popover__footer button')].map(node => node.textContent),
-        ['Dashboard', '']
-    );
+    assert.equal(popover.querySelector('.rlb-surface__footer'), null);
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.title, 'Check Out');
     assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
 
     click(refresh);
-    const loading = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+    const loading = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.equal(loading.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
     assert.equal(loading.disabled, true);
     assert.equal(loading.getAttribute('aria-busy'), 'true');
@@ -852,7 +890,7 @@ test('Active Work surfaces keep Refresh copy hidden while preserving accessible 
     await settle();
     assert.equal(popover.parentElement, document.body);
     assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
-    const success = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+    const success = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.equal(success.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'success');
     assert.equal(success.getAttribute('aria-busy'), null);
     assert.ok(
@@ -868,7 +906,7 @@ test('Active Work surfaces keep Refresh copy hidden while preserving accessible 
 
     t.mock.timers.tick(2_000);
     await settle();
-    const idle = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
+    const idle = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.equal(idle.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'idle');
     assert.equal(
         idle.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
@@ -1287,7 +1325,7 @@ test('Pause removal regression keeps commands and footer clean while Clock Out l
     const surface = openPopover();
     assert.doesNotMatch(surface.textContent, /\b(?:Pause|Resume)\b/i);
     assert.doesNotMatch(
-        [...surface.querySelectorAll('.rlb-popover__footer button')].map(button => button.textContent).join(' '),
+        [...surface.querySelectorAll('.rlb-surface__footer button')].map(button => button.textContent).join(' '),
         /\b(?:Pause|Resume)\b/i
     );
     const recent = surface.querySelector('[data-session-state="recent"]');
@@ -1571,9 +1609,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
 
     const trigger = topbarButton();
     click(trigger);
-    const dashboardButton = [...document.querySelectorAll('.rlb-popover__footer button')].find(
-        node => node.textContent === 'Dashboard'
-    );
+    const dashboardButton = document.querySelector('.rlb-surface__header [data-action="dashboard"]');
     click(dashboardButton);
 
     const root = document.getElementById('roam-logbook-dashboard');
