@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0-beta.26 — 2026-08-17
 
 - Removed the Pause/Resume state machine and Pause Batch runtime completely.
   Clock Out is now the only stop action; ended work remains in the 45-minute
