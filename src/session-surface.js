@@ -146,7 +146,7 @@ const renderRecentRow = (row, now, options) => {
         1,
         openLineMinutesLeft(entry, now, options.openLineWindowMinutes)
     );
-    const metadata = `${total} total · ${minutesLeft}m left`;
+    const metadata = `${total} total · leaves in ${minutesLeft}m`;
     const lastActiveLabel = `Last active ${ended.raw}`;
     const endedNode = el(
         'time',
@@ -154,7 +154,7 @@ const renderRecentRow = (row, now, options) => {
         metadata
     );
     endedNode.title = `${metadata}; ${lastActiveLabel}`;
-    endedNode.setAttribute('aria-label', `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
+    endedNode.setAttribute('aria-label', `${total} total; leaves in ${minutesLeft}m; ${lastActiveLabel}`);
     if (ended.datetime) endedNode.dateTime = ended.datetime;
     endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
     meta.appendChild(endedNode);
@@ -339,11 +339,11 @@ export function renderSessionSurface(root, model, options = {}) {
         );
         appendSection(
             sessionList,
-            `OPEN LINES · ${model.recentRows.length}`,
+            `PARALLEL THREADS · ${model.recentRows.length}`,
             model.recentRows,
             row => renderRecentRow(row, model.now, options),
             'rlb-surface__section--open-lines rlb-surface__section--recent',
-            `${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m window`
+            `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
         );
     }
 
@@ -422,11 +422,11 @@ export function updateSessionSurfaceElapsed(
             1,
             openLineMinutesLeft(entry, currentNow, openLineWindowMinutes)
         );
-        const metadata = `${total} total · ${minutesLeft}m left`;
+        const metadata = `${total} total · leaves in ${minutesLeft}m`;
         const ended = formatStarted(entry.end, currentNow);
         const lastActiveLabel = `Last active ${ended.raw}`;
         recentMeta.textContent = metadata;
         recentMeta.title = `${metadata}; ${lastActiveLabel}`;
-        recentMeta.setAttribute('aria-label', `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
+        recentMeta.setAttribute('aria-label', `${total} total; leaves in ${minutesLeft}m; ${lastActiveLabel}`);
     }
 }

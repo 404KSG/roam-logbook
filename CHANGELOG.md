@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.34 — 2026-08-18
+
+- Renamed user-facing `OPEN LINES` to `PARALLEL THREADS` so untimed but
+  switchable work reads as part of the current parallel working set rather
+  than as an unexplained open state.
+- Replaced the abstract `45m window` with `Leave after 45m without focus`, and
+  changed each row from `Nm left` to `leaves in Nm`. Top Bar tooltip and ARIA
+  descriptions use the same terminology.
+- Preserved one real timer, exact 45-minute ceiling/expiry semantics, continuous
+  Pomodoro switching, task state, navigation, Dashboard history, and CLOCK data.
+
 ## 0.9.0-beta.33 — 2026-08-17
 
 - Replaced the invalid play action on completed Open Lines with a

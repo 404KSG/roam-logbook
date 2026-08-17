@@ -31,7 +31,7 @@ test('Active Work display titles use the existing normalized title and UID fallb
     );
 });
 
-test('Timing and Open Line buttons expose the same bracket-preserving visible and accessible titles', () => {
+test('Timing and Parallel Thread buttons expose the same bracket-preserving visible and accessible titles', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="surface"></div></body></html>');
     globalThis.document = dom.window.document;
     const now = new Date('2026-08-17T10:10:00');
@@ -80,7 +80,7 @@ test('Timing and Open Line buttons expose the same bracket-preserving visible an
     assert.ok(titles.every(node => node.tagName === 'BUTTON'));
 
     const completed = root.querySelector('.rlb-run--recent .rlb-run__completed');
-    assert.ok(completed, 'a DONE Open Line exposes a completed status indicator');
+    assert.ok(completed, 'a DONE Parallel Thread exposes a completed status indicator');
     assert.equal(completed.tagName, 'SPAN');
     assert.equal(completed.getAttribute('role'), 'img');
     assert.equal(completed.title, 'Completed');
@@ -92,7 +92,7 @@ test('Timing and Open Line buttons expose the same bracket-preserving visible an
     delete globalThis.document;
 });
 
-test('TODO Open Lines keep an interactive focus action while DONE Open Lines do not', () => {
+test('TODO Parallel Threads keep an interactive focus action while DONE ones do not', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="surface"></div></body></html>');
     globalThis.document = dom.window.document;
     const root = document.getElementById('surface');
@@ -115,7 +115,7 @@ test('TODO Open Lines keep an interactive focus action while DONE Open Lines do 
     );
 
     const focus = root.querySelector('[data-action="focus-recent"]');
-    assert.ok(focus, 'a TODO Open Line keeps the focus action');
+    assert.ok(focus, 'a TODO Parallel Thread keeps the focus action');
     focus.click();
     assert.equal(focusCalls, 1);
     assert.equal(root.querySelector('.rlb-run__completed'), null);

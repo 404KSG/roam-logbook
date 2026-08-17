@@ -45,7 +45,13 @@ install([]);
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
-const { createPostPaintScheduler, createTopbar, activeCount, sessionLoadTone } =
+const {
+    createPostPaintScheduler,
+    createTopbar,
+    activeCount,
+    activeWorkDescription,
+    sessionLoadTone,
+} =
     await import('../src/topbar.js');
 const { renderSessionSurface, updateSessionSurfaceElapsed } = await import('../src/session-surface.js');
 const { setExtensionAPI } = await import('../src/settings.js');
@@ -75,6 +81,17 @@ const openPopover = () => {
     click(topbarButton());
     return document.querySelector('body > .rlb-popover');
 };
+
+test('Active Work accessibility copy names Parallel Threads and explains dynamic expiry', () => {
+    assert.equal(
+        activeWorkDescription(1, 2, 45),
+        '1 timing line · 2 parallel threads · Leave after 45m without focus'
+    );
+    assert.equal(
+        activeWorkDescription(0, 1, 30),
+        '0 timing lines · 1 parallel thread · Leave after 30m without focus'
+    );
+});
 
 const createManualPostPaintScheduler = () => {
     let nextId = 0;
@@ -1055,7 +1072,7 @@ test('Refresh does not mutate CLOCK data or the shared Pomodoro cycle', async t 
     );
 });
 
-test('Active Work labels Timing and Open Lines without warning banners', async t => {
+test('Active Work labels Timing and Parallel Threads without warning banners', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
@@ -1074,12 +1091,12 @@ test('Active Work labels Timing and Open Lines without warning banners', async t
     assert.equal(list.getAttribute('aria-label'), 'Active Work');
     assert.deepEqual(
         [...list.querySelectorAll('.rlb-surface__section-label')].map(node => node.textContent),
-        ['TIMING', 'OPEN LINES · 1 45m window']
+        ['TIMING', 'PARALLEL THREADS · 1 Leave after 45m without focus']
     );
     assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
     assert.equal(
         list.querySelector('.rlb-surface__section--open-lines').getAttribute('aria-label'),
-        'OPEN LINES · 1, 45m window'
+        'PARALLEL THREADS · 1, Leave after 45m without focus'
     );
     assert.equal(surface.querySelector('.rlb-popover__notice'), null);
 
@@ -1104,12 +1121,12 @@ test('Active Work labels Timing and Open Lines without warning banners', async t
 
     const recentMeta = recent.querySelector('.rlb-run__recent-meta');
     assert.equal(recentMeta.tagName, 'TIME');
-    assert.equal(recentMeta.textContent, '2m total · 42m left');
+    assert.equal(recentMeta.textContent, '2m total · leaves in 42m');
     assert.equal(recentMeta.dateTime, '2026-08-15T09:02');
-    assert.equal(recentMeta.title, '2m total · 42m left; Last active [2026-08-15 Sat 09:02]');
+    assert.equal(recentMeta.title, '2m total · leaves in 42m; Last active [2026-08-15 Sat 09:02]');
     assert.equal(
         recentMeta.getAttribute('aria-label'),
-        '2m total; 42m left; Last active [2026-08-15 Sat 09:02]'
+        '2m total; leaves in 42m; Last active [2026-08-15 Sat 09:02]'
     );
     assert.doesNotMatch(surface.textContent, /Recent|RECENT|ago/);
     assert.equal(surface.querySelectorAll('.rlb-run__status').length, 0);
@@ -1118,7 +1135,7 @@ test('Active Work labels Timing and Open Lines without warning banners', async t
     updateSessionSurfaceElapsed(surface, clock.getRunning(), atWindowEdge, clock.getActiveWork(atWindowEdge).recent);
     assert.ok(focused.classList.contains('rlb-run--overrun'));
     assert.ok(focusedSection.classList.contains('rlb-surface__section--overrun'));
-    assert.equal(recentMeta.textContent, '2m total · 2m left');
+    assert.equal(recentMeta.textContent, '2m total · leaves in 2m');
     assert.match(focusedSection.querySelector('.rlb-run__elapsed').textContent, /^\d+:\d{2}$/);
     assert.match(focusedSection.querySelector('.rlb-run__total').textContent, /^\d+\w+ total$/);
 });

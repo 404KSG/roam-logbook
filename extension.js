@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.33";
+var PLUGIN_VERSION = "0.9.0-beta.34";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -5915,7 +5915,7 @@ var renderRecentRow = (row, now, options) => {
     1,
     openLineMinutesLeft(entry, now, options.openLineWindowMinutes)
   );
-  const metadata = `${total} total \xB7 ${minutesLeft}m left`;
+  const metadata = `${total} total \xB7 leaves in ${minutesLeft}m`;
   const lastActiveLabel = `Last active ${ended.raw}`;
   const endedNode = el(
     "time",
@@ -5923,7 +5923,7 @@ var renderRecentRow = (row, now, options) => {
     metadata
   );
   endedNode.title = `${metadata}; ${lastActiveLabel}`;
-  endedNode.setAttribute("aria-label", `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
+  endedNode.setAttribute("aria-label", `${total} total; leaves in ${minutesLeft}m; ${lastActiveLabel}`);
   if (ended.datetime)
     endedNode.dateTime = ended.datetime;
   endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
@@ -6095,11 +6095,11 @@ function renderSessionSurface(root, model, options = {}) {
     );
     appendSection(
       sessionList,
-      `OPEN LINES \xB7 ${model.recentRows.length}`,
+      `PARALLEL THREADS \xB7 ${model.recentRows.length}`,
       model.recentRows,
       (row) => renderRecentRow(row, model.now, options),
       "rlb-surface__section--open-lines rlb-surface__section--recent",
-      `${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m window`
+      `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
     );
   }
   for (const notice3 of options.notices || []) {
@@ -6170,12 +6170,12 @@ function updateSessionSurfaceElapsed(root, entries, now, openLines = [], openLin
       1,
       openLineMinutesLeft(entry, currentNow, openLineWindowMinutes)
     );
-    const metadata = `${total} total \xB7 ${minutesLeft}m left`;
+    const metadata = `${total} total \xB7 leaves in ${minutesLeft}m`;
     const ended = formatStarted(entry.end, currentNow);
     const lastActiveLabel = `Last active ${ended.raw}`;
     recentMeta.textContent = metadata;
     recentMeta.title = `${metadata}; ${lastActiveLabel}`;
-    recentMeta.setAttribute("aria-label", `${total} total; ${minutesLeft}m left; ${lastActiveLabel}`);
+    recentMeta.setAttribute("aria-label", `${total} total; leaves in ${minutesLeft}m; ${lastActiveLabel}`);
   }
 }
 
@@ -6193,7 +6193,7 @@ var activeWorkDescription = (timingCount, openLineCount, windowMinutes = ACTIVE_
   const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
   const openLines = Number.isFinite(Number(openLineCount)) ? Math.max(0, Math.floor(Number(openLineCount))) : 0;
   const window2 = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
-  return `${timing} timing line${timing === 1 ? "" : "s"} \xB7 ${openLines} open line${openLines === 1 ? "" : "s"} \xB7 ${window2}m window`;
+  return `${timing} timing line${timing === 1 ? "" : "s"} \xB7 ${openLines} parallel thread${openLines === 1 ? "" : "s"} \xB7 Leave after ${window2}m without focus`;
 };
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
@@ -6689,7 +6689,7 @@ function createTopbar({
 ${composition}
 No Timing Line is active. Click for details.` : `${activeCount(0)}
 ${composition}
-No Active Work lines are open. Click for details.`;
+No Active Work is available. Click for details.`;
       buttonNode.setAttribute("aria-label", buttonNode.title);
       if (activeChanged && popover)
         renderPopover();

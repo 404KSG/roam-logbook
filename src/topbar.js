@@ -46,7 +46,7 @@ export const activeWorkDescription = (
     const window = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0
         ? Number(windowMinutes)
         : ACTIVE_WORK_WINDOW_MINUTES;
-    return `${timing} timing line${timing === 1 ? '' : 's'} · ${openLines} open line${openLines === 1 ? '' : 's'} · ${window}m window`;
+    return `${timing} timing line${timing === 1 ? '' : 's'} · ${openLines} parallel thread${openLines === 1 ? '' : 's'} · Leave after ${window}m without focus`;
 };
 
 export const sessionLoadTone = count => {
@@ -594,7 +594,7 @@ export function createTopbar({
             syncButtonLayout(hasActiveWork ? 'active' : 'idle');
             buttonNode.title = hasActiveWork
                 ? `${activeCount(activeWork.count)}\n${composition}\nNo Timing Line is active. Click for details.`
-                : `${activeCount(0)}\n${composition}\nNo Active Work lines are open. Click for details.`;
+                : `${activeCount(0)}\n${composition}\nNo Active Work is available. Click for details.`;
             buttonNode.setAttribute('aria-label', buttonNode.title);
             if (activeChanged && popover) renderPopover();
             return;

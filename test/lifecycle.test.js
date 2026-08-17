@@ -685,7 +685,14 @@ test('clocking out through the palette closes the entry', async () => {
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(topbarWidget().querySelector('button').title, /0 timing lines · 2 open lines · 45m window/);
+    assert.match(
+        topbarWidget().querySelector('button').title,
+        /0 timing lines · 2 parallel threads · Leave after 45m without focus/
+    );
+    assert.equal(
+        topbarWidget().querySelector('button').getAttribute('aria-label'),
+        topbarWidget().querySelector('button').title
+    );
 });
 
 test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {
