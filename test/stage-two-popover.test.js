@@ -944,7 +944,7 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
     );
 });
 
-test('Active Work renders a distinct Focused card and a compact flat Recent list', async t => {
+test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
@@ -993,6 +993,8 @@ test('Active Work renders a distinct Focused card and a compact flat Recent list
     updateSessionSurfaceElapsed(surface, clock.getRunning(), new Date('2026-08-15T09:45:00'));
     assert.ok(focused.classList.contains('rlb-run--overrun'));
     assert.ok(focusedSection.classList.contains('rlb-surface__section--overrun'));
+    assert.match(focusedSection.querySelector('.rlb-run__elapsed').textContent, /^\d+:\d{2}$/);
+    assert.match(focusedSection.querySelector('.rlb-run__total').textContent, /^\d+\w+ total$/);
 });
 
 test('clicking a Recent row switches it to the one Focused CLOCK', async t => {

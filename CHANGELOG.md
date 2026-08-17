@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.24 — 2026-08-17
+
+- Refined the Active Work popover toward a restrained Linear-style hierarchy:
+  Focused keeps its own compact card, but now uses only a uniform 1px neutral
+  border and a very light neutral surface; the green left accent is gone.
+- Kept Pomodoro overrun visual-only on the live elapsed value. The Focused card
+  and all four of its borders remain neutral in both light and dark themes.
+- Preserved Recent as a quiet flat list with no resting card border or
+  background, and added narrow 320px/340px geometry assertions for the revised
+  card and overrun contract.
+
 ## 0.9.0-beta.23 — 2026-08-17
 
 - Refined the Active Work popover into a distinct Focused card and a flat

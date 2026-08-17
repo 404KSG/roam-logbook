@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.23**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.24**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.23 refines the Active Work popover hierarchy; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.24 refines the Active Work popover toward a neutral Linear-style hierarchy; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -51,7 +51,7 @@ There is always exactly one real running `CLOCK`: the Focused Task. Switching ta
 0:28 · 2 Active
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Focused Task as a compact tinted card, while Recent Tasks form a quiet flat list headed **RECENT · N**. Focused elapsed time is the strongest metadata; Recent rows show `<total> total · <relative time>` and retain the exact last-active timestamp in their title and accessible name. Clicking a Recent task switches focus atomically. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Focused row has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard, Pause/Pause All, Resume All, and Clock Out All remain available where applicable. Refresh is one icon-only footer action with an icon-only loading state and hidden live status feedback. Current-work task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Focused Task as a compact neutral Linear-style card with a uniform hairline border, while Recent Tasks form a quiet flat list headed **RECENT · N**. Focused elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Recent rows show `<total> total · <relative time>` and retain the exact last-active timestamp in their title and accessible name. Clicking a Recent task switches focus atomically. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Focused row has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard, Pause/Pause All, Resume All, and Clock Out All remain available where applicable. Refresh is one icon-only footer action with an icon-only loading state and hidden live status feedback. Current-work task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue.
 
 **Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK:` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume preserves the batch workflow while applying the single-Focused boundary: only the last resumed Task can remain timed, and earlier resumed Tasks are historical/recent rather than concurrent clocks. Historical `CLOCK::` entries remain readable.
 
@@ -173,7 +173,7 @@ check; GitHub Actions additionally runs the real pinned Docker image
 `src/roam.js` is the adapter boundary for `window.roamAlphaAPI`: it validates
 graph reads and exposes graph writes, Pull Watch lifecycle, and native block
 navigation to the other modules. UI and mutation modules do not call Roam's
-global API directly. The beta.23 source is fully implemented, the checked-in
+global API directly. The beta.24 source is fully implemented, the checked-in
 root `extension.js` has been rebuilt, and `npm run check` plus
 `npm run verify:bundle` passed. The existing esbuild advisory is dev-only build
 maintenance, not a runtime extension dependency exposure, and no dependency
