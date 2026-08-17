@@ -988,56 +988,87 @@ test('beta.16 single-running footer keeps Pause and Refresh aligned at narrow wi
     }
 });
 
-test('beta.10 Popover keeps two compact Sessions inside one low-contrast group', async t => {
+test('beta.23 Active Work separates a Focused card from a flat Recent list', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    const longTitle = 'A long Session title that remains accessible while ellipsizing visually';
+    const longTitle = 'A long Focused task title that remains accessible while ellipsizing visually';
+    const recentTitle = 'A recent task that can be focused again';
     const geometry = await withChromium(
         htmlWithLateHost(
-            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">2 Sessions Running</div></header><div class="rlb-surface__list" role="group" aria-label="Current Sessions"><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">12:34 · 2h 05m total</div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Another Session" aria-label="Open this block: Another Session">Another Session</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">1:02 · 30m total</div><time class="rlb-run__meta-line">Today 09:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`
+            `<div class="rlb-popover" style="width:340px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE WORK</div></header><div class="rlb-surface__list" role="group" aria-label="Active Work"><section class="rlb-surface__section rlb-surface__section--focused" aria-label="FOCUSED"><div class="rlb-surface__section-label">FOCUSED</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--recent" aria-label="RECENT · 1"><div class="rlb-surface__section-label">RECENT · 1</div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Focus this recent Task: ${recentTitle}" aria-label="Focus this recent Task: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="Last active [2026-08-15 Sat 09:09]" aria-label="30m total; last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · 4m ago</time></div></div></div></section></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button></div></div>`
         ),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
             const surface = document.querySelector('.rlb-popover');
             const list = surface.querySelector('.rlb-surface__list');
-            const rows = [...list.querySelectorAll('.rlb-run')];
+            const focusedSection = list.querySelector('.rlb-surface__section--focused');
+            const recentSection = list.querySelector('.rlb-surface__section--recent');
+            const focused = focusedSection.querySelector('.rlb-run');
+            const recent = recentSection.querySelector('.rlb-run');
             const footer = surface.querySelector('.rlb-popover__footer');
-            const rowRects = rows.map(rect);
             const footerRects = [...footer.querySelectorAll('button')].map(rect);
-            const first = rows[0];
-            const title = rect(first.querySelector('.rlb-run__title'));
-            const firstRow = rect(first);
             const listStyle = getComputedStyle(list);
+            const focusedStyle = getComputedStyle(focusedSection);
+            const recentStyle = getComputedStyle(recentSection);
+            const focusedTitle = focused.querySelector('.rlb-run__title');
+            const focusedTitleRect = rect(focusedTitle);
+            const focusedActionsRect = rect(focused.querySelector('.rlb-run__actions'));
+            const focusedRect = rect(focused);
+            const recentMeta = recent.querySelector('.rlb-run__recent-meta');
             const footerStyle = getComputedStyle(footer);
             return {
                 listBorder: listStyle.borderTopWidth,
                 listRadius: parseFloat(listStyle.borderTopLeftRadius),
+                focusedBorder: focusedStyle.borderTopWidth,
+                focusedAccent: focusedStyle.borderLeftWidth,
+                focusedBackground: focusedStyle.backgroundColor,
+                recentBorder: recentStyle.borderTopWidth,
                 groupRole: list.getAttribute('role'),
                 groupLabel: list.getAttribute('aria-label'),
-                rowCount: rows.length,
-                rowHeights: rowRects.map(item => item.height),
-                rowGap: parseFloat(listStyle.rowGap) || 0,
+                focusedCount: focusedSection.querySelectorAll('.rlb-run').length,
+                recentCount: recentSection.querySelectorAll('.rlb-run').length,
                 statusCount: list.querySelectorAll('.rlb-run__status').length,
-                titleStartsAtRowContent: Math.abs(title.left - (firstRow.left + 6)) <= 1,
+                titleStartsAtRowContent: focusedTitleRect.left >= focusedRect.left,
+                titleBeforeActions: focusedTitleRect.right <= focusedActionsRect.left + .5,
+                focusedElapsedWeight: getComputedStyle(focused.querySelector('.rlb-run__elapsed')).fontWeight,
+                recentTitleWeight: getComputedStyle(recent.querySelector('.rlb-run__title')).fontWeight,
+                recentMeta: recentMeta.textContent,
+                recentMetaTitle: recentMeta.title,
+                recentMetaLabel: recentMeta.getAttribute('aria-label'),
+                recentMetaDateTime: recentMeta.dateTime,
+                recentHasRestingBackground: recentStyle.backgroundColor,
                 footerListGap: rect(footer).top - rect(list).bottom,
                 footerHeights: footerRects.map(item => item.height),
                 footerHeightDelta: Math.max(...footerRects.map(item => item.height)) - Math.min(...footerRects.map(item => item.height)),
-                footerRows: footerStyle.gridTemplateRows
+                footerRows: footerStyle.gridTemplateRows,
+                overflow: surface.scrollWidth > surface.clientWidth + .5,
             };
         })()`
     );
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
-    assert.equal(geometry.listBorder, '1px', JSON.stringify(geometry));
-    assert.ok(geometry.listRadius >= 5, JSON.stringify(geometry));
+    assert.equal(geometry.listBorder, '0px', JSON.stringify(geometry));
+    assert.equal(geometry.listRadius, 0, JSON.stringify(geometry));
+    assert.equal(geometry.focusedBorder, '1px', JSON.stringify(geometry));
+    assert.equal(geometry.focusedAccent, '3px', JSON.stringify(geometry));
+    assert.notEqual(geometry.focusedBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
+    assert.equal(geometry.recentBorder, '0px', JSON.stringify(geometry));
     assert.equal(geometry.groupRole, 'group', JSON.stringify(geometry));
-    assert.equal(geometry.groupLabel, 'Current Sessions', JSON.stringify(geometry));
-    assert.equal(geometry.rowCount, 2, JSON.stringify(geometry));
-    assert.ok(geometry.rowHeights.every(height => height >= 42 && height <= 76), JSON.stringify(geometry));
-    assert.ok(geometry.rowGap <= 8, JSON.stringify(geometry));
+    assert.equal(geometry.groupLabel, 'Active Work', JSON.stringify(geometry));
+    assert.equal(geometry.focusedCount, 1, JSON.stringify(geometry));
+    assert.equal(geometry.recentCount, 1, JSON.stringify(geometry));
     assert.equal(geometry.statusCount, 0, JSON.stringify(geometry));
     assert.equal(geometry.titleStartsAtRowContent, true, JSON.stringify(geometry));
+    assert.equal(geometry.titleBeforeActions, true, JSON.stringify(geometry));
+    assert.ok(Number(geometry.focusedElapsedWeight) >= 600, JSON.stringify(geometry));
+    assert.ok(Number(geometry.recentTitleWeight) < Number(geometry.focusedElapsedWeight), JSON.stringify(geometry));
+    assert.equal(geometry.recentMeta, '30m total · 4m ago', JSON.stringify(geometry));
+    assert.equal(geometry.recentMetaTitle, 'Last active [2026-08-15 Sat 09:09]', JSON.stringify(geometry));
+    assert.equal(geometry.recentMetaLabel, '30m total; last active [2026-08-15 Sat 09:09]', JSON.stringify(geometry));
+    assert.equal(geometry.recentMetaDateTime, '2026-08-15T09:09', JSON.stringify(geometry));
+    assert.equal(geometry.recentHasRestingBackground, 'rgba(0, 0, 0, 0)', JSON.stringify(geometry));
     assert.ok(geometry.footerListGap <= 14, JSON.stringify(geometry));
     assert.ok(geometry.footerHeightDelta <= 1, JSON.stringify(geometry));
     assert.match(geometry.footerRows, /32px/);
+    assert.equal(geometry.overflow, false, JSON.stringify(geometry));
 });
 
 test('Dashboard overlay keeps background and dialog chrome fixed while body content scrolls', async t => {

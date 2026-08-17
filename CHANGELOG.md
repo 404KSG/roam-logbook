@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.23 — 2026-08-17
+
+- Refined the Active Work popover into a distinct Focused card and a flat
+  Recent list, making the currently timed Task visually unmistakable without
+  adding a new status dot, badge, or timer behavior.
+- Strengthened the Focused live elapsed value, preserved the Pomodoro-overrun
+  red semantics, and kept action alignment, click/Shift+Click behavior, and
+  light/dark theme safety intact.
+- Replaced repeated Recent metadata with compact `<total> total · <relative
+  time>` text while retaining the exact last-active org timestamp in titles and
+  accessible labels.
+- Added jsdom and Chromium coverage for the hierarchy, accessibility labels,
+  relative metadata, flat/card separation, narrow-layout overflow, and action
+  alignment. The Roam Depot submission remains a Draft preview.
+
 ## 0.9.0-beta.22 — 2026-08-17
 
 - Replaced overlapping parallel CLOCKs with one Focused CLOCK. Switching Tasks

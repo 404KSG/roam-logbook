@@ -48,6 +48,7 @@ const pomodoro = await import('../src/pomodoro.js');
 const paused = await import('../src/paused.js');
 const { createPostPaintScheduler, createTopbar, activeCount, sessionLoadTone } =
     await import('../src/topbar.js');
+const { updateSessionSurfaceElapsed } = await import('../src/session-surface.js');
 const { setExtensionAPI } = await import('../src/settings.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
@@ -943,9 +944,8 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
     );
 });
 
-test('shared Active Work surfaces use one compact accessible list group for task rows', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    settingsStore.set('allowMultipleClocks', true);
+test('Active Work renders a distinct Focused card and a compact flat Recent list', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
         string: '{{[[TODO]]}} A second task',
@@ -953,21 +953,78 @@ test('shared Active Work surfaces use one compact accessible list group for task
         page: 'Project Page',
     });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
 
     const surface = openPopover();
     const list = surface.querySelector('.rlb-surface__list');
-    assert.ok(list, 'session rows are grouped in a shared surface list');
+    assert.ok(list, 'Active Work rows share one accessible surface');
     assert.equal(surface.querySelectorAll('.rlb-surface__list').length, 1);
     assert.equal(list.getAttribute('role'), 'group');
     assert.equal(list.getAttribute('aria-label'), 'Active Work');
-    const rows = [...list.querySelectorAll('.rlb-run')];
-    assert.equal(rows.length, 2);
-    assert.ok(rows.every(row => !row.querySelector('.rlb-run__status')));
-    assert.ok(rows.every(row => row.querySelector('.rlb-run__title') && row.querySelector('.rlb-run__meta')));
-    assert.ok(rows.find(row => row.dataset.sessionState === 'running')?.querySelector('.rlb-run__actions'));
-    assert.equal(rows.find(row => row.dataset.sessionState === 'recent')?.querySelector('.rlb-run__actions'), null);
-    assert.equal(surface.querySelectorAll('.bp3-card.rlb-run').length, 0);
+    assert.deepEqual(
+        [...list.querySelectorAll('.rlb-surface__section-label')].map(node => node.textContent),
+        ['FOCUSED', 'RECENT · 1']
+    );
+
+    const focusedSection = list.querySelector('.rlb-surface__section--focused');
+    const recentSection = list.querySelector('.rlb-surface__section--recent');
+    const focused = focusedSection.querySelector('[data-session-state="running"]');
+    const recent = recentSection.querySelector('[data-session-state="recent"]');
+    assert.ok(focused.classList.contains('rlb-run--focused'));
+    assert.ok(recent.classList.contains('rlb-run--recent'));
+    assert.equal(focusedSection.querySelectorAll('.rlb-run').length, 1);
+    assert.equal(recentSection.querySelectorAll('.rlb-run').length, 1);
+    assert.ok(focused.querySelector('.rlb-run__actions'));
+    assert.equal(recent.querySelector('.rlb-run__actions'), null);
+    assert.equal(focused.querySelector('.rlb-run__elapsed').textContent, '3:00');
+
+    const recentMeta = recent.querySelector('.rlb-run__recent-meta');
+    assert.equal(recentMeta.tagName, 'TIME');
+    assert.equal(recentMeta.textContent, '2m total · 3m ago');
+    assert.equal(recentMeta.dateTime, '2026-08-15T09:02');
+    assert.equal(recentMeta.title, 'Last active [2026-08-15 Sat 09:02]');
+    assert.equal(
+        recentMeta.getAttribute('aria-label'),
+        '2m total; last active [2026-08-15 Sat 09:02]'
+    );
+    assert.doesNotMatch(recentMeta.textContent, /Recent|Last active|Today/);
+    assert.equal(surface.querySelectorAll('.rlb-run__status').length, 0);
+
+    updateSessionSurfaceElapsed(surface, clock.getRunning(), new Date('2026-08-15T09:45:00'));
+    assert.ok(focused.classList.contains('rlb-run--overrun'));
+    assert.ok(focusedSection.classList.contains('rlb-surface__section--overrun'));
+});
+
+test('clicking a Recent row switches it to the one Focused CLOCK', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second task',
+        parent: null,
+        page: 'Project Page',
+    });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
+
+    const surface = openPopover();
+    const recentTitle = surface.querySelector(
+        '.rlb-surface__section--recent [data-action="focus-recent"]'
+    );
+    assert.equal(recentTitle.textContent, 'Graph Engineering: a deliberately long task title that must remain accessible');
+    click(recentTitle);
+    await settle();
+
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, 'popover-task-01');
+    assert.equal(
+        clock.getEntriesSnapshot().filter(entry => entry.running).length,
+        1,
+        'Recent switching never creates overlapping CLOCKs'
+    );
+    assert.equal(
+        surface.querySelector('.rlb-surface__section--focused .rlb-run').dataset.taskUid,
+        'popover-task-01'
+    );
 });
 
 test('Check Out icon ends only the clicked Focused Task; Recent Tasks have no timer to close', async t => {

@@ -9,7 +9,7 @@
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
-import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { formatElapsed, formatMinutesHuman, formatRelativeTime, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE WORK';
@@ -17,7 +17,10 @@ const SURFACE_TITLE = 'ACTIVE WORK';
 const rowFigures = (entry, now) => {
     const elapsed = now.getTime() - entry.start.getTime();
     const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 60_000);
-    return `${formatElapsed(elapsed)} · ${formatMinutesHuman(total)} total`;
+    return {
+        elapsed: formatElapsed(elapsed),
+        total: formatMinutesHuman(total),
+    };
 };
 
 const fullTaskLabel = title => `Open this block: ${title}`;
@@ -33,6 +36,18 @@ const appendMetaNodes = (meta, nodes) => {
         }
         meta.appendChild(node);
     });
+};
+
+const renderRunningFigures = (entry, now) => {
+    const figures = rowFigures(entry, now);
+    const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary');
+    primary.append(
+        el('span', 'rlb-run__elapsed', figures.elapsed),
+        el('span', 'rlb-run__meta-separator', ' · '),
+        el('span', 'rlb-run__total', `${figures.total} total`)
+    );
+    primary.querySelector('.rlb-run__meta-separator').setAttribute('aria-hidden', 'true');
+    return primary;
 };
 
 const renderTitle = (row, onOpenTask, onFocusRecent) => {
@@ -59,14 +74,18 @@ const renderTitle = (row, onOpenTask, onFocusRecent) => {
 const renderRunningRow = (row, now, options) => {
     const entry = row.entry;
     const overrun = pomodoro.isCycleOverrun(now);
-    const node = el('div', `rlb-run rlb-run--inline-meta${overrun ? ' rlb-run--overrun' : ''}`);
+    const node = el(
+        'div',
+        `rlb-run rlb-run--focused rlb-run--inline-meta${overrun ? ' rlb-run--overrun' : ''}`
+    );
     node.dataset.sessionState = 'running';
     node.dataset.clockUid = entry.clockUid;
+    node.dataset.taskUid = entry.taskUid;
 
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     meta.dataset.clockUid = entry.clockUid;
-    const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', rowFigures(entry, now));
+    const primary = renderRunningFigures(entry, now);
 
     const started = formatStarted(entry.start, now);
     const startedDetails =
@@ -123,14 +142,17 @@ const renderRecentRow = (row, now, options) => {
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
     const ended = formatStarted(entry.end, now);
-    const lastActive = ended.valid ? `${ended.dateLabel} ${ended.timeLabel}` : ended.raw;
     const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
-    const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', `Recent · ${total} total`);
-    const endedNode = el('time', 'rlb-run__meta-line rlb-run__started', `Last active ${lastActive}`);
-    endedNode.title = `Last active ${ended.raw}`;
-    endedNode.setAttribute('aria-label', endedNode.title);
+    const lastActiveLabel = `Last active ${ended.raw}`;
+    const endedNode = el(
+        'time',
+        'rlb-run__meta-line rlb-run__recent-meta',
+        `${total} total · ${formatRelativeTime(entry.end, now)}`
+    );
+    endedNode.title = lastActiveLabel;
+    endedNode.setAttribute('aria-label', `${total} total; last active ${ended.raw}`);
     if (ended.datetime) endedNode.dateTime = ended.datetime;
-    appendMetaNodes(meta, [primary, endedNode]);
+    meta.appendChild(endedNode);
     body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
     node.appendChild(body);
     return node;
@@ -270,10 +292,14 @@ export function buildSessionSurfaceModel({
 
 const surfaceTitle = () => SURFACE_TITLE;
 
-const appendSection = (list, label, rows, renderRow) => {
+const appendSection = (list, label, rows, renderRow, modifier = '') => {
     if (!rows.length) return;
-    list.appendChild(el('div', 'rlb-surface__section-label', label));
-    for (const row of rows) list.appendChild(renderRow(row));
+    const section = el('section', `rlb-surface__section ${modifier}`.trim());
+    const labelNode = el('div', 'rlb-surface__section-label', label);
+    section.setAttribute('aria-label', label);
+    section.appendChild(labelNode);
+    for (const row of rows) section.appendChild(renderRow(row));
+    list.appendChild(section);
 };
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
@@ -317,17 +343,33 @@ export function renderSessionSurface(root, model, options = {}) {
                 )
             );
         }
-        appendSection(sessionList, 'FOCUSED', model.focusedRows, row =>
-            renderRunningRow(row, model.now, options)
+        appendSection(
+            sessionList,
+            'FOCUSED',
+            model.focusedRows,
+            row => renderRunningRow(row, model.now, options),
+            `rlb-surface__section--focused${pomodoro.isCycleOverrun(model.now) ? ' rlb-surface__section--overrun' : ''}`
         );
-        appendSection(sessionList, 'RECENT', model.recentRows, row =>
-            renderRecentRow(row, model.now, options)
+        appendSection(
+            sessionList,
+            `RECENT · ${model.recentRows.length}`,
+            model.recentRows,
+            row => renderRecentRow(row, model.now, options),
+            'rlb-surface__section--recent'
         );
-        appendSection(sessionList, 'PAUSED', model.pausedRows, row =>
-            renderPausedRow(row, model.now, options)
+        appendSection(
+            sessionList,
+            'PAUSED',
+            model.pausedRows,
+            row => renderPausedRow(row, model.now, options),
+            'rlb-surface__section--paused'
         );
-        appendSection(sessionList, 'RECOVERY', model.recoveryRows, row =>
-            renderRecoveryRow(row, options)
+        appendSection(
+            sessionList,
+            'RECOVERY',
+            model.recoveryRows,
+            row => renderRecoveryRow(row, options),
+            'rlb-surface__section--recovery'
         );
     }
 
@@ -444,8 +486,23 @@ export function updateSessionSurfaceElapsed(root, entries, now) {
         const entry = byUid.get(meta.dataset.clockUid);
         if (!entry) continue;
         const primary = meta.querySelector('.rlb-run__meta-primary');
-        if (primary) primary.textContent = rowFigures(entry, currentNow);
+        if (primary) {
+            const figures = rowFigures(entry, currentNow);
+            const elapsed = primary.querySelector('.rlb-run__elapsed');
+            const total = primary.querySelector('.rlb-run__total');
+            if (elapsed && total) {
+                elapsed.textContent = figures.elapsed;
+                total.textContent = `${figures.total} total`;
+            } else {
+                primary.textContent = `${figures.elapsed} · ${figures.total} total`;
+            }
+        }
         const row = meta.closest('.rlb-run');
-        if (row) row.classList.toggle('rlb-run--overrun', pomodoro.isCycleOverrun(currentNow));
+        if (row) {
+            const overrun = pomodoro.isCycleOverrun(currentNow);
+            row.classList.toggle('rlb-run--overrun', overrun);
+            row.closest('.rlb-surface__section--focused')
+                ?.classList.toggle('rlb-surface__section--overrun', overrun);
+        }
     }
 }

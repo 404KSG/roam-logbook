@@ -65,6 +65,18 @@ low-saturation ochre icon color on the normal transparent surface for a
 compact, non-alarming distinction from idle. It has no additional pause badge
 or glyph.
 
+## Active Work surface hierarchy
+
+The current-session surface is intentionally hierarchical without adding new
+state. **Focused** is a separate compact card with a restrained running-colour
+tint, a 2–3px left accent, a stronger task title, and the live elapsed value as
+the primary visual. **Recent** is a flat, separator-based list headed
+`RECENT · N`; its rows have no resting card or background and use subtle
+hover/focus feedback only. Recent metadata is `<total> total · <relative time>`;
+the exact org timestamp remains in the title and accessible name. Recent rows
+still switch focus when activated. No graph reads, polling, settings, state, or
+new dependencies are introduced by this presentation layer.
+
 ## Mutation boundary
 
 Graph mutations are serialized only within one loaded plugin instance. Each queued

@@ -97,6 +97,47 @@ function formatMinutesHuman(minutes) {
     return `${safe}m`;
   return `${hours}h ${pad(safe % 60)}m`;
 }
+var asDate = (value) => {
+  if (isValidDate(value))
+    return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const candidate2 = new Date(value);
+    return isValidDate(candidate2) ? candidate2 : null;
+  }
+  if (typeof value !== "string" || !value.trim())
+    return null;
+  const text = value.trim();
+  const parsedStamp = parseTimestamp(text.replace(/^\[|\]$/g, ""));
+  if (parsedStamp)
+    return parsedStamp;
+  const candidate = new Date(text);
+  return isValidDate(candidate) ? candidate : null;
+};
+function formatRelativeTime(value, now = /* @__PURE__ */ new Date()) {
+  const date = asDate(value);
+  const reference = asDate(now);
+  if (!date || !reference)
+    return "time unavailable";
+  const seconds = Math.max(0, Math.floor((reference.getTime() - date.getTime()) / 1e3));
+  if (seconds < 60)
+    return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60)
+    return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24)
+    return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7)
+    return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5)
+    return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12)
+    return `${Math.max(1, months)}mo ago`;
+  return `${Math.max(1, Math.floor(days / 365))}y ago`;
+}
 function dateKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -2067,7 +2108,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.22";
+var PLUGIN_VERSION = "0.9.0-beta.23";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -5375,6 +5416,7 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
+    --rlb-surface-focused: rgba(126, 183, 148, 0.08);
     --rlb-surface-link: #316a9f;
     --rlb-surface-link-hover: #2a5a8d;
     --rlb-session-running: #7eb794;
@@ -5431,27 +5473,80 @@ var STYLES = `
     gap: 0;
     min-width: 0;
     margin: 0 2px;
-    padding: 2px;
+    padding: 0;
+}
+
+.rlb-surface__section {
+    min-width: 0;
+}
+
+.rlb-surface__section--focused {
+    margin-bottom: 7px;
+    padding: 3px;
     border: 1px solid var(--rlb-surface-border);
+    border-left: 3px solid var(--rlb-session-running);
+    border-radius: 7px;
+    background: var(--rlb-surface-focused);
+}
+
+.rlb-surface__section--focused.rlb-surface__section--overrun {
+    border-left-color: #cd4246;
+}
+
+.bp3-dark .rlb-surface__section--focused.rlb-surface__section--overrun {
+    border-left-color: #ff7373;
+}
+
+.rlb-surface__section--focused .rlb-surface__section-label {
+    padding: 3px 6px 2px;
+}
+
+.rlb-surface__section--focused .rlb-run {
+    padding: 6px 6px 7px;
+}
+
+.rlb-surface__section--focused .rlb-run:hover,
+.rlb-surface__section--focused .rlb-run:focus-within {
+    background: rgba(126, 183, 148, 0.1);
+}
+
+.rlb-surface__section--recent {
+    margin-top: 1px;
+}
+
+.rlb-surface__section--recent .rlb-surface__section-label {
+    padding: 4px 6px 4px;
+    border-bottom: 1px solid var(--rlb-surface-border-light);
+}
+
+.rlb-surface__section--recent .rlb-run {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 6px;
+    border-radius: 0;
+    background: transparent;
+}
+
+.rlb-surface__section--recent .rlb-run + .rlb-run {
+    border-top: 1px solid var(--rlb-surface-border-light);
+}
+
+.rlb-surface__section--recent .rlb-run:hover,
+.rlb-surface__section--recent .rlb-run:focus-within {
+    background: var(--rlb-surface-hover);
+}
+
+.rlb-surface__section--paused,
+.rlb-surface__section--recovery {
+    margin-top: 6px;
+    padding: 3px;
+    border: 1px solid var(--rlb-surface-border-light);
     border-radius: 6px;
     background: var(--rlb-surface-canvas);
 }
 
-.rlb-surface__list > .rlb-run + .rlb-run {
-    border-top: 1px solid var(--rlb-surface-border-light);
-    border-radius: 0 0 3px 3px;
-}
-
-.rlb-surface__list > .rlb-run {
-    border-radius: 3px;
-}
-
-.rlb-surface__list > .rlb-run:hover {
-    background: var(--rlb-surface-hover);
-}
-
-.rlb-surface__list > .rlb-popover__empty {
-    padding: 6px 5px 8px;
+.rlb-surface__section--paused .rlb-surface__section-label,
+.rlb-surface__section--recovery .rlb-surface__section-label {
+    padding: 3px 6px 2px;
 }
 
 .rlb-surface__section-label {
@@ -5464,16 +5559,12 @@ var STYLES = `
     text-transform: uppercase;
 }
 
-.rlb-surface__section-label:not(:first-child) {
-    border-top: 1px solid var(--rlb-surface-border-light);
-    margin-top: 2px;
-}
-
 .rlb-run--recent {
     opacity: 0.88;
 }
 
-.rlb-run--recent:hover {
+.rlb-run--recent:hover,
+.rlb-run--recent:focus-within {
     opacity: 1;
 }
 
@@ -5684,6 +5775,7 @@ var STYLES = `
     --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-hover: rgba(167, 182, 194, 0.18);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
+    --rlb-surface-focused: rgba(142, 208, 170, 0.1);
     --rlb-surface-link: #7eb7d5;
     --rlb-surface-link-hover: #9dcae2;
     --rlb-session-running: #8ed0aa;
@@ -5754,6 +5846,15 @@ var STYLES = `
     outline-offset: 2px;
 }
 
+.rlb-surface__section--focused .bp3-button.bp3-minimal.rlb-run__title {
+    font-weight: 600;
+}
+
+.rlb-surface__section--recent .bp3-button.bp3-minimal.rlb-run__title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
 .rlb-run__meta {
     grid-column: 1;
     grid-row: 2;
@@ -5763,6 +5864,40 @@ var STYLES = `
     line-height: 1.25;
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
+}
+
+.rlb-run__meta .rlb-run__meta-primary {
+    display: inline-flex;
+    align-items: baseline;
+    min-width: 0;
+}
+
+.rlb-surface__section--focused .rlb-run__elapsed {
+    color: #405b70;
+    font-size: 1.08em;
+    font-weight: 700;
+}
+
+.rlb-surface__section--focused .rlb-run__meta {
+    opacity: 1;
+}
+
+.rlb-surface__section--focused .rlb-run__total,
+.rlb-surface__section--focused .rlb-run__started,
+.rlb-surface__section--focused .rlb-run__meta > .rlb-run__meta-separator {
+    opacity: 0.65;
+}
+
+.rlb-surface__section--focused .rlb-run__total {
+    font-weight: 600;
+}
+
+.bp3-dark .rlb-surface__section--focused .rlb-run__elapsed {
+    color: #c3d4df;
+}
+
+.rlb-run--overrun .rlb-run__elapsed {
+    color: inherit;
 }
 
 .rlb-run__meta-line {
@@ -5800,6 +5935,10 @@ var STYLES = `
     flex: 0 0 auto;
     margin: 0 6px;
     line-height: 1;
+}
+
+.rlb-run__meta-primary .rlb-run__meta-separator {
+    margin: 0 2px;
 }
 
 .rlb-run--inline-meta .rlb-run__started {
@@ -6977,7 +7116,10 @@ var SURFACE_TITLE = "ACTIVE WORK";
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
   const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 6e4);
-  return `${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(total)} total`;
+  return {
+    elapsed: formatElapsed(elapsed),
+    total: formatMinutesHuman(total)
+  };
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Focus this recent Task: ${title}`;
@@ -6991,6 +7133,17 @@ var appendMetaNodes = (meta, nodes) => {
     }
     meta.appendChild(node);
   });
+};
+var renderRunningFigures = (entry, now) => {
+  const figures = rowFigures(entry, now);
+  const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary");
+  primary.append(
+    el("span", "rlb-run__elapsed", figures.elapsed),
+    el("span", "rlb-run__meta-separator", " \xB7 "),
+    el("span", "rlb-run__total", `${figures.total} total`)
+  );
+  primary.querySelector(".rlb-run__meta-separator").setAttribute("aria-hidden", "true");
+  return primary;
 };
 var renderTitle = (row, onOpenTask, onFocusRecent) => {
   const title = row.title || row.taskUid;
@@ -7016,13 +7169,17 @@ var renderTitle = (row, onOpenTask, onFocusRecent) => {
 var renderRunningRow = (row, now, options) => {
   const entry = row.entry;
   const overrun = isCycleOverrun(now);
-  const node = el("div", `rlb-run rlb-run--inline-meta${overrun ? " rlb-run--overrun" : ""}`);
+  const node = el(
+    "div",
+    `rlb-run rlb-run--focused rlb-run--inline-meta${overrun ? " rlb-run--overrun" : ""}`
+  );
   node.dataset.sessionState = "running";
   node.dataset.clockUid = entry.clockUid;
+  node.dataset.taskUid = entry.taskUid;
   const body = el("div", "rlb-run__body");
   const meta = el("div", "rlb-run__meta");
   meta.dataset.clockUid = entry.clockUid;
-  const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", rowFigures(entry, now));
+  const primary = renderRunningFigures(entry, now);
   const started = formatStarted(entry.start, now);
   const startedDetails = `Started ${started.raw}` + (entry.pageTitle ? ` \xB7 Page: ${entry.pageTitle}` : "");
   const startedNode = el(
@@ -7072,15 +7229,18 @@ var renderRecentRow = (row, now, options) => {
   const body = el("div", "rlb-run__body");
   const meta = el("div", "rlb-run__meta");
   const ended = formatStarted(entry.end, now);
-  const lastActive = ended.valid ? `${ended.dateLabel} ${ended.timeLabel}` : ended.raw;
   const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
-  const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", `Recent \xB7 ${total} total`);
-  const endedNode = el("time", "rlb-run__meta-line rlb-run__started", `Last active ${lastActive}`);
-  endedNode.title = `Last active ${ended.raw}`;
-  endedNode.setAttribute("aria-label", endedNode.title);
+  const lastActiveLabel = `Last active ${ended.raw}`;
+  const endedNode = el(
+    "time",
+    "rlb-run__meta-line rlb-run__recent-meta",
+    `${total} total \xB7 ${formatRelativeTime(entry.end, now)}`
+  );
+  endedNode.title = lastActiveLabel;
+  endedNode.setAttribute("aria-label", `${total} total; last active ${ended.raw}`);
   if (ended.datetime)
     endedNode.dateTime = ended.datetime;
-  appendMetaNodes(meta, [primary, endedNode]);
+  meta.appendChild(endedNode);
   body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
   node.appendChild(body);
   return node;
@@ -7207,12 +7367,16 @@ function buildSessionSurfaceModel({
   };
 }
 var surfaceTitle = () => SURFACE_TITLE;
-var appendSection = (list, label, rows, renderRow) => {
+var appendSection = (list, label, rows, renderRow, modifier = "") => {
   if (!rows.length)
     return;
-  list.appendChild(el("div", "rlb-surface__section-label", label));
+  const section = el("section", `rlb-surface__section ${modifier}`.trim());
+  const labelNode = el("div", "rlb-surface__section-label", label);
+  section.setAttribute("aria-label", label);
+  section.appendChild(labelNode);
   for (const row of rows)
-    list.appendChild(renderRow(row));
+    section.appendChild(renderRow(row));
+  list.appendChild(section);
 };
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
@@ -7254,25 +7418,29 @@ function renderSessionSurface(root, model, options = {}) {
       sessionList,
       "FOCUSED",
       model.focusedRows,
-      (row) => renderRunningRow(row, model.now, options)
+      (row) => renderRunningRow(row, model.now, options),
+      `rlb-surface__section--focused${isCycleOverrun(model.now) ? " rlb-surface__section--overrun" : ""}`
     );
     appendSection(
       sessionList,
-      "RECENT",
+      `RECENT \xB7 ${model.recentRows.length}`,
       model.recentRows,
-      (row) => renderRecentRow(row, model.now, options)
+      (row) => renderRecentRow(row, model.now, options),
+      "rlb-surface__section--recent"
     );
     appendSection(
       sessionList,
       "PAUSED",
       model.pausedRows,
-      (row) => renderPausedRow(row, model.now, options)
+      (row) => renderPausedRow(row, model.now, options),
+      "rlb-surface__section--paused"
     );
     appendSection(
       sessionList,
       "RECOVERY",
       model.recoveryRows,
-      (row) => renderRecoveryRow(row, options)
+      (row) => renderRecoveryRow(row, options),
+      "rlb-surface__section--recovery"
     );
   }
   for (const notice4 of options.notices || []) {
@@ -7382,11 +7550,23 @@ function updateSessionSurfaceElapsed(root, entries, now) {
     if (!entry)
       continue;
     const primary = meta.querySelector(".rlb-run__meta-primary");
-    if (primary)
-      primary.textContent = rowFigures(entry, currentNow);
+    if (primary) {
+      const figures = rowFigures(entry, currentNow);
+      const elapsed = primary.querySelector(".rlb-run__elapsed");
+      const total = primary.querySelector(".rlb-run__total");
+      if (elapsed && total) {
+        elapsed.textContent = figures.elapsed;
+        total.textContent = `${figures.total} total`;
+      } else {
+        primary.textContent = `${figures.elapsed} \xB7 ${figures.total} total`;
+      }
+    }
     const row = meta.closest(".rlb-run");
-    if (row)
-      row.classList.toggle("rlb-run--overrun", isCycleOverrun(currentNow));
+    if (row) {
+      const overrun = isCycleOverrun(currentNow);
+      row.classList.toggle("rlb-run--overrun", overrun);
+      row.closest(".rlb-surface__section--focused")?.classList.toggle("rlb-surface__section--overrun", overrun);
+    }
   }
 }
 

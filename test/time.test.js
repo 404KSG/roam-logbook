@@ -7,6 +7,7 @@ import {
     formatDurationMinutes,
     formatElapsed,
     formatMinutesHuman,
+    formatRelativeTime,
     formatStarted,
     formatStamp,
     formatTimestamp,
@@ -109,6 +110,16 @@ test('elapsed drops the hour segment under an hour', () => {
 test('humanises minutes for the dashboard', () => {
     assert.equal(formatMinutesHuman(45), '45m');
     assert.equal(formatMinutesHuman(125), '2h 05m');
+});
+
+test('formats robust compact relative times for Recent Active Work', () => {
+    const now = new Date(2026, 7, 15, 9, 30);
+    assert.equal(formatRelativeTime(new Date(2026, 7, 15, 9, 29, 45), now), 'just now');
+    assert.equal(formatRelativeTime(new Date(2026, 7, 15, 9, 27), now), '3m ago');
+    assert.equal(formatRelativeTime(new Date(2026, 7, 15, 7, 30), now), '2h ago');
+    assert.equal(formatRelativeTime(new Date(2026, 7, 13, 9, 30), now), '2d ago');
+    assert.equal(formatRelativeTime(new Date(2026, 7, 15, 9, 31), now), 'just now');
+    assert.equal(formatRelativeTime('not a date', now), 'time unavailable');
 });
 
 test('date keys and day offsets use local midnight', () => {
