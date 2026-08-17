@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.38 — 2026-08-18
+
+- Renamed the Dashboard's live `RUNNING · 1 Session` section to the count-free
+  `TIMING` label, matching the single-focus model while retaining historical
+  Session metrics and columns.
+- Condensed the live Timing panel's vertical rhythm without removing its Task,
+  Started, Elapsed, or action context and retained 32px action targets.
+- Put Dashboard/Clock Out and Refresh/Delete on one exact 32px action rail in
+  the Active Threads popover, with a 4px gap between header hover targets and
+  the Timing card.
+
 ## 0.9.0-beta.37 — 2026-08-18
 
 - Renamed the shared current-session surface heading from `ACTIVE WORK · N` to

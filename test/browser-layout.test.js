@@ -826,7 +826,9 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             const focusedStartedStyle = getComputedStyle(focused.querySelector('.rlb-run__started'));
             const focusedTitle = focused.querySelector('.rlb-run__title');
             const focusedTitleRect = rect(focusedTitle);
-            const focusedActionsRect = rect(focused.querySelector('.rlb-run__actions'));
+            const focusedActions = focused.querySelector('.rlb-run__actions');
+            const focusedActionsRect = rect(focusedActions);
+            const focusedActionRects = [...focusedActions.children].map(rect);
             const focusedRect = rect(focused);
             const recentMeta = recent.querySelector('.rlb-run__recent-meta');
             const openLinesLabel = recentSection.querySelector('.rlb-surface__section-label');
@@ -878,6 +880,10 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                 headerActionCount: headerActions.children.length,
                 headerTitleBeforeActions: rect(header.querySelector('.rlb-popover__title')).right <= rect(headerActions).left + .5,
                 headerActionsInside: headerActionRects.every(item => item.left >= rect(surface).left && item.right <= rect(surface).right + .5),
+                actionRailDeltas: headerActionRects.map((item, index) => Math.abs(item.left - focusedActionRects[index].left)),
+                actionRailRightDelta: Math.abs(headerActionRects.at(-1).right - focusedActionRects.at(-1).right),
+                actionWidths: [...headerActionRects, ...focusedActionRects].map(item => item.width),
+                headerTimingGap: rect(focusedSection).top - Math.max(...headerActionRects.map(item => item.bottom)),
                 footerHeights: footerRects.map(item => item.height),
                 footerHeightDelta: Math.max(...footerRects.map(item => item.height)) - Math.min(...footerRects.map(item => item.height)),
                 footerLabels: [...footer.querySelectorAll('button')].map(button => button.textContent),
@@ -944,11 +950,49 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.headerActionCount, 2, context);
             assert.equal(geometry.headerTitleBeforeActions, true, context);
             assert.equal(geometry.headerActionsInside, true, context);
+            assert.ok(geometry.actionRailDeltas.every(delta => delta <= 0.5), context);
+            assert.ok(geometry.actionRailRightDelta <= 0.5, context);
+            assert.ok(geometry.actionWidths.every(width => Math.abs(width - 32) <= 0.5), context);
+            assert.ok(geometry.headerTimingGap >= 3, context);
             assert.ok(geometry.footerHeightDelta <= 1, context);
             assert.deepEqual(geometry.footerLabels, ['Clock Out All'], context);
             assert.equal(geometry.overflow, false, context);
         }
     }
+});
+
+test('Dashboard Timing keeps one live CLOCK in a compact labelled panel', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`
+            <div class="rlb-dashboard">
+                <section class="rlb-dashboard-section rlb-dashboard-panel rlb-running" style="width:900px">
+                    <div class="rlb-panel__header"><h3 class="rlb-section__title">Timing</h3></div>
+                    <table class="rlb-table">
+                        <thead><tr><th>Task</th><th>Started</th><th class="rlb-table__num">Elapsed</th><th><span class="rlb-visually-hidden">Actions</span></th></tr></thead>
+                        <tbody><tr><td>Roam Logbook v1</td><td>Today 07:18</td><td class="rlb-table__num">2:48</td><td class="rlb-table__num"><button class="bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash"></button></td></tr></tbody>
+                    </table>
+                </section>
+            </div>`),
+        `(() => {
+            const rect = node => node.getBoundingClientRect();
+            const panel = document.querySelector('.rlb-running');
+            const heading = panel.querySelector('.rlb-panel__header');
+            const action = panel.querySelector('.rlb-running__checkout');
+            return {
+                panelHeight: rect(panel).height,
+                headingGap: parseFloat(getComputedStyle(heading).marginBottom),
+                actionHeight: rect(action).height,
+                title: panel.querySelector('.rlb-section__title').textContent,
+                countExists: Boolean(panel.querySelector('.rlb-panel__count')),
+            };
+        })()`
+    );
+    assert.equal(geometry.title, 'Timing', JSON.stringify(geometry));
+    assert.equal(geometry.countExists, false, JSON.stringify(geometry));
+    assert.ok(geometry.panelHeight <= 90, JSON.stringify(geometry));
+    assert.ok(geometry.headingGap <= 2, JSON.stringify(geometry));
+    assert.ok(geometry.actionHeight >= 32, JSON.stringify(geometry));
 });
 
 test('Dashboard overlay keeps background and dialog chrome fixed while body content scrolls', async t => {

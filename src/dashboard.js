@@ -429,14 +429,7 @@ export function createDashboard({
         const section = el('section', 'rlb-dashboard-section rlb-running');
         section.classList.add('rlb-dashboard-panel');
         const heading = el('div', 'rlb-panel__header');
-        heading.appendChild(el('h3', 'rlb-section__title', 'Running'));
-        heading.appendChild(
-            el(
-                'span',
-                'rlb-panel__count',
-                `${running.length} Session${running.length === 1 ? '' : 's'}`
-            )
-        );
+        heading.appendChild(el('h3', 'rlb-section__title', 'Timing'));
         if (stale.size > 0) {
             heading.appendChild(
                 el('span', 'bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice', `${stale.size} stale`)

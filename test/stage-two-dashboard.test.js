@@ -80,7 +80,8 @@ test('Dashboard live elapsed updates only running cells without graph reads or t
         item => item.querySelector('.rlb-overview__label')?.textContent === 'Today'
     );
     assert.equal(today.querySelector('.rlb-overview__context'), null);
-    assert.equal(document.querySelector('.rlb-running .rlb-panel__count')?.textContent, '1 Session');
+    assert.equal(document.querySelector('.rlb-running .rlb-section__title')?.textContent, 'Timing');
+    assert.equal(document.querySelector('.rlb-running .rlb-panel__count'), null);
 
     const beforeQueries = queryCount;
     const toggle = document.querySelector('.rlb-tree__toggle');

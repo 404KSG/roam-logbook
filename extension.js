@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.37";
+var PLUGIN_VERSION = "0.9.0-beta.38";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -3069,14 +3069,7 @@ function createDashboard({
     const section = el("section", "rlb-dashboard-section rlb-running");
     section.classList.add("rlb-dashboard-panel");
     const heading = el("div", "rlb-panel__header");
-    heading.appendChild(el("h3", "rlb-section__title", "Running"));
-    heading.appendChild(
-      el(
-        "span",
-        "rlb-panel__count",
-        `${running2.length} Session${running2.length === 1 ? "" : "s"}`
-      )
-    );
+    heading.appendChild(el("h3", "rlb-section__title", "Timing"));
     if (stale.size > 0) {
       heading.appendChild(
         el("span", "bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice", `${stale.size} stale`)
@@ -4220,6 +4213,7 @@ var STYLES = `
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
 .rlb-popover {
     --rlb-surface-action-height: 32px;
+    --rlb-surface-action-inset: 12px;
     --rlb-surface-title-size: 10px;
     --rlb-surface-task-size: 13px;
     --rlb-surface-meta-size: 10px;
@@ -4259,7 +4253,7 @@ var STYLES = `
     align-items: center;
     column-gap: 6px;
     min-width: 0;
-    padding: 0 2px;
+    padding: 0 var(--rlb-surface-action-inset) 4px 2px;
 }
 
 .rlb-surface__header .rlb-popover__title {
@@ -4274,6 +4268,10 @@ var STYLES = `
     justify-content: flex-end;
     gap: 2px;
     min-width: 0;
+}
+
+.rlb-surface__header > .rlb-surface__actions {
+    margin-top: -2px;
 }
 
 .rlb-surface__header .bp3-button {
@@ -4776,6 +4774,18 @@ var STYLES = `
 
 
 .rlb-run__actions .bp3-icon-trash {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 0 var(--rlb-surface-action-height, 32px);
+    width: var(--rlb-surface-action-height, 32px);
+    min-width: var(--rlb-surface-action-height, 32px);
+    max-width: var(--rlb-surface-action-height, 32px);
+    height: var(--rlb-surface-action-height, 32px);
+    min-height: var(--rlb-surface-action-height, 32px);
+    max-height: var(--rlb-surface-action-height, 32px);
+    padding: 0 !important;
+    align-items: center;
+    justify-content: center;
     color: #5c7080;
     opacity: 0.65;
 }
@@ -5440,6 +5450,27 @@ var STYLES = `
     border: 1px solid var(--rlb-border);
     border-radius: 7px;
     background: var(--rlb-surface);
+}
+
+/* Single-focus mode exposes at most one live CLOCK. Keep this control surface
+   compact while preserving the table labels and 32px action targets. */
+.rlb-running.rlb-dashboard-panel {
+    padding: 8px 12px 7px;
+}
+
+.rlb-running .rlb-panel__header {
+    margin-bottom: 2px;
+}
+
+.rlb-dashboard .rlb-running .rlb-table th {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.rlb-dashboard .rlb-running .rlb-table td {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    vertical-align: middle;
 }
 
 .rlb-panel__header {
