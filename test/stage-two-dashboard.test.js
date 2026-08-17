@@ -21,6 +21,7 @@ const { createDashboard } = await import('../src/dashboard.js');
 const { STYLES } = await import('../src/styles.js');
 const clock = await import('../src/clock.js');
 const { openBlockInRightSidebar } = await import('../src/roam.js');
+const { createTimingLineSidebarFronting } = await import('../src/timing-line-sidebar.js');
 
 let graph;
 const settle = async () => {
@@ -229,6 +230,119 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(graph.store.has(clockUid), false);
     dashboard.destroy();
+});
+
+test('Dashboard By Task exposes status-aware focus actions and switches the single CLOCK in place', async () => {
+    graph = installGraph([
+        { uid: 'dash-idle-task', string: '{{[[TODO]]}} Idle TODO task', parent: null },
+        { uid: 'dash-idle-drawer', string: 'LOGBOOK::', parent: 'dash-idle-task' },
+        {
+            uid: 'dash-idle-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:25] => 0:25',
+            parent: 'dash-idle-drawer',
+        },
+        { uid: 'dash-focus-task', string: '{{[[TODO]]}} Focused TODO task', parent: null },
+        { uid: 'dash-focus-drawer', string: 'LOGBOOK::', parent: 'dash-focus-task' },
+        {
+            uid: 'dash-focus-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]',
+            parent: 'dash-focus-drawer',
+        },
+        { uid: 'dash-done-task', string: '{{[[DONE]]}} Done task', parent: null },
+        { uid: 'dash-done-drawer', string: 'LOGBOOK::', parent: 'dash-done-task' },
+        {
+            uid: 'dash-done-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 08:30]--[2026-08-15 Sat 08:40] => 0:10',
+            parent: 'dash-done-drawer',
+        },
+    ]);
+
+    const dashboard = createDashboard({
+        now: () => new Date('2026-08-15T09:10:00'),
+        setIntervalFn: () => 'dashboard-ticker',
+        clearIntervalFn: () => {},
+    });
+    const actions = [];
+    const sidebarTasks = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async taskUid => {
+            sidebarTasks.push(taskUid);
+            return { ok: true };
+        },
+        isEnabled: () => true,
+    });
+    const unsubscribe = clock.subscribeActions(action => actions.push(action));
+    const unsubscribeFronting = clock.subscribeActions(fronting.handleAction);
+
+    const rowFor = title =>
+        [...document.querySelectorAll('.rlb-task-table tbody tr')].find(
+            row => row.querySelector('.rlb-task-link__text')?.textContent === title
+        );
+
+    try {
+        dashboard.open();
+
+        const idleRow = rowFor('Idle TODO task');
+        const focusedRow = rowFor('Focused TODO task');
+        const doneRow = rowFor('Done task');
+        assert.ok(idleRow);
+        assert.ok(focusedRow);
+        assert.ok(doneRow);
+
+        const play = idleRow.querySelector('[data-action="start-timing"]');
+        assert.ok(play);
+        assert.equal(play.tagName, 'BUTTON');
+        assert.equal(play.textContent, '');
+        assert.equal(play.type, 'button');
+        assert.ok(play.classList.contains('bp3-icon-play'));
+        assert.equal(play.title, 'Start timing: Idle TODO task');
+        assert.equal(play.getAttribute('aria-label'), play.title);
+
+        const timing = focusedRow.querySelector('.rlb-task-action--timing');
+        assert.ok(timing);
+        assert.equal(timing.tagName, 'SPAN');
+        assert.equal(timing.getAttribute('role'), 'img');
+        assert.equal(timing.title, 'Currently timing');
+        assert.equal(timing.getAttribute('aria-label'), 'Currently timing');
+        assert.equal(timing.getAttribute('tabindex'), null);
+        assert.equal(timing.dataset.action, undefined);
+        assert.equal(focusedRow.querySelector('[data-action="start-timing"]'), null);
+        assert.equal(doneRow.querySelector('[data-action="start-timing"]'), null);
+        assert.equal(doneRow.querySelector('.rlb-task-action--timing'), null);
+
+        const overlay = document.querySelector('.rlb-root');
+        const dialog = overlay.querySelector('.rlb-dialog');
+        const tableBeforeSwitch = overlay.querySelector('.rlb-task-table');
+        play.click();
+        await settle();
+        await fronting.whenIdle();
+
+        assert.equal(document.querySelector('.rlb-root'), overlay);
+        assert.equal(overlay.classList.contains('rlb-root--open'), true);
+        assert.equal(overlay.querySelector('.rlb-dialog'), dialog);
+        assert.notEqual(overlay.querySelector('.rlb-task-table'), tableBeforeSwitch);
+        assert.equal(clock.getRunning().length, 1);
+        assert.equal(clock.getRunning()[0].taskUid, 'dash-idle-task');
+        assert.equal(
+            clock.getEntriesSnapshot().filter(entry => entry.running).length,
+            1,
+            'switching from Dashboard leaves exactly one open CLOCK'
+        );
+        assert.equal(
+            actions.at(-1)?.source,
+            'active-work-switch'
+        );
+        assert.equal(actions.at(-1)?.taskUid, 'dash-idle-task');
+        assert.deepEqual(sidebarTasks, ['dash-idle-task']);
+        const switchedRow = rowFor('Idle TODO task');
+        assert.ok(switchedRow.querySelector('.rlb-task-action--timing'));
+        assert.equal(switchedRow.querySelector('[data-action="start-timing"]'), null);
+    } finally {
+        unsubscribeFronting();
+        unsubscribe();
+        fronting.dispose();
+        dashboard.destroy();
+    }
 });
 
 test('Dashboard Running and By Task links preserve Roam page refs and tags without an icon cue', async () => {

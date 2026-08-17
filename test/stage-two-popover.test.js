@@ -1095,7 +1095,16 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     assert.equal(list.getAttribute('aria-label'), 'Active Work');
     assert.deepEqual(
         [...list.querySelectorAll('.rlb-surface__section-label')].map(node => node.textContent),
-        ['TIMING', 'PARALLEL THREADS · 1 Leave after 45m without focus']
+        ['TIMING', 'PARALLEL THREADS · 1Leave after 45m without focus']
+    );
+    const parallelLabel = list.querySelector('.rlb-surface__section--open-lines .rlb-surface__section-label');
+    assert.equal(
+        parallelLabel.querySelector('.rlb-surface__section-label-text').textContent,
+        'PARALLEL THREADS · 1'
+    );
+    assert.equal(
+        parallelLabel.querySelector('.rlb-surface__section-context').textContent,
+        'Leave after 45m without focus'
     );
     assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
     assert.equal(

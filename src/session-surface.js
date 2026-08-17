@@ -236,9 +236,6 @@ const appendSection = (list, label, rows, renderRow, modifier = '', context = ''
     const labelNode = el('div', 'rlb-surface__section-label');
     labelNode.appendChild(el('span', 'rlb-surface__section-label-text', label));
     if (context) {
-        // Keep the separator in the DOM as well as in the visual gap so the
-        // accessible/text representation does not collapse to e.g. "145m".
-        labelNode.append(' ');
         labelNode.appendChild(el('span', 'rlb-surface__section-context', context));
     }
     section.setAttribute('aria-label', context ? `${label}, ${context}` : label);

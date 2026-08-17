@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.35";
+var PLUGIN_VERSION = "0.9.0-beta.36";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -2784,6 +2784,7 @@ function createDashboard({
   let lastModel = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
+  let focusInFlight = null;
   let themeRuntime = null;
   let releaseScrollLock = null;
   const collapsed = /* @__PURE__ */ new Set();
@@ -3349,13 +3350,21 @@ function createDashboard({
         if (node.truncated) {
           content.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
         }
-        layout.append(leading, content);
+        const actions = el("div", "rlb-muted rlb-tree__actions");
         if (node.collapsed) {
           const hidden = countDescendants(node);
-          layout.appendChild(
-            el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
+          actions.appendChild(
+            el(
+              "span",
+              "rlb-muted rlb-tree__hidden",
+              `+${hidden} sub-task${hidden > 1 ? "s" : ""}`
+            )
           );
         }
+        const timingAction = taskTimingAction(node);
+        if (timingAction)
+          actions.appendChild(timingAction);
+        layout.append(leading, content, actions);
         name.appendChild(layout);
         row.append(
           name,
@@ -3453,6 +3462,46 @@ function createDashboard({
       console.error("[roam-logbook]", error);
     }
     render();
+  };
+  const startTaskTiming = (taskUid) => {
+    if (!taskUid || focusInFlight)
+      return focusInFlight;
+    const request = act(
+      () => clockIn(taskUid, { source: "active-work-switch" })
+    );
+    focusInFlight = request.finally(() => {
+      focusInFlight = null;
+    });
+    return focusInFlight;
+  };
+  const taskTimingAction = (node) => {
+    if (node.running) {
+      const timing = el(
+        "span",
+        "bp3-icon bp3-icon-time rlb-task-action rlb-task-action--timing"
+      );
+      timing.title = "Currently timing";
+      timing.setAttribute("role", "img");
+      timing.setAttribute("aria-label", "Currently timing");
+      timing.dataset.taskAction = "timing";
+      return timing;
+    }
+    if (node.status !== "TODO" || !node.taskUid)
+      return null;
+    const title = formatDisplayTitle(node);
+    const play = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-play rlb-task-action rlb-task-action--play",
+      "",
+      (event) => {
+        event.stopPropagation();
+        play.disabled = true;
+        void startTaskTiming(node.taskUid);
+      },
+      { title: `Start timing: ${title}` }
+    );
+    play.dataset.action = "start-timing";
+    play.dataset.taskUid = node.taskUid;
+    return play;
   };
   const dialogFocusables = (dialog) => [...dialog.querySelectorAll('button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter(
     (node) => !node.disabled && node.getAttribute("aria-hidden") !== "true"
@@ -4345,13 +4394,15 @@ var STYLES = `
 }
 
 .rlb-surface__section--open-lines .rlb-surface__section-label {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    align-items: start;
 }
 
 .rlb-surface__section-context {
-    margin-left: auto;
+    display: block;
+    margin-left: 0;
     color: var(--rlb-muted, #7a8b99);
     font-size: 10px;
     font-weight: 400;
@@ -4888,6 +4939,45 @@ var STYLES = `
     flex-wrap: wrap !important;
     gap: 4px;
     overflow: visible !important;
+}
+
+.rlb-tree__actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: max-content;
+    min-height: 20px;
+}
+
+.rlb-task-action {
+    flex: 0 0 24px;
+    width: 24px;
+    min-width: 24px;
+    max-width: 24px;
+    height: 24px;
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0 !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--rlb-muted, #5c7080);
+}
+
+.rlb-task-action--play:hover,
+.rlb-task-action--play:focus-visible {
+    color: var(--rlb-surface-link-hover, #316a9f);
+    background: var(--rlb-task-link-hover, rgba(167, 182, 194, 0.14));
+}
+
+.rlb-task-action--timing {
+    display: inline-flex;
+    opacity: 0.78;
+    pointer-events: none;
+}
+
+.rlb-task-action--timing::before {
+    margin: 0;
 }
 
 .rlb-section__heading {
@@ -6000,7 +6090,6 @@ var appendSection = (list, label, rows, renderRow, modifier = "", context = "") 
   const labelNode = el("div", "rlb-surface__section-label");
   labelNode.appendChild(el("span", "rlb-surface__section-label-text", label));
   if (context) {
-    labelNode.append(" ");
     labelNode.appendChild(el("span", "rlb-surface__section-context", context));
   }
   section.setAttribute("aria-label", context ? `${label}, ${context}` : label);

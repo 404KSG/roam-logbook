@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.36 — 2026-08-18
+
+- Added icon-only Play actions to unfinished Dashboard By Task rows, with a
+  non-interactive timing indicator for the current Timing Line and no Play
+  action on DONE rows.
+- Dashboard Play switches the single open `CLOCK` through the existing
+  `active-work-switch` path, keeps the Dashboard open, rerenders in place, and
+  preserves Timing Line right-sidebar fronting.
+- Fixed the Parallel Threads heading and its expiry explanation as two
+  left-aligned lines at narrow widths.
+
 ## 0.9.0-beta.35 — 2026-08-18
 
 - Changed the compact Top Bar working-set label from `N Active` to the

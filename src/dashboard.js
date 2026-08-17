@@ -125,6 +125,7 @@ export function createDashboard({
     let lastModel = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
+    let focusInFlight = null;
     let themeRuntime = null;
     let releaseScrollLock = null;
     // Kept across re-renders and reopens, keyed by task: changing the range or
@@ -733,13 +734,23 @@ export function createDashboard({
                 if (node.truncated) {
                     content.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
                 }
-                layout.append(leading, content);
+                // Keep the third layout item compatible with the existing
+                // collapsed-summary rail; actions live inside that rail so a
+                // play/status cue never steals width from the wrapped title.
+                const actions = el('div', 'rlb-muted rlb-tree__actions');
                 if (node.collapsed) {
                     const hidden = countDescendants(node);
-                    layout.appendChild(
-                        el('span', 'rlb-muted rlb-tree__hidden', `+${hidden} sub-task${hidden > 1 ? 's' : ''}`)
+                    actions.appendChild(
+                        el(
+                            'span',
+                            'rlb-muted rlb-tree__hidden',
+                            `+${hidden} sub-task${hidden > 1 ? 's' : ''}`
+                        )
                     );
                 }
+                const timingAction = taskTimingAction(node);
+                if (timingAction) actions.appendChild(timingAction);
+                layout.append(leading, content, actions);
                 name.appendChild(layout);
 
                 row.append(
@@ -850,6 +861,46 @@ export function createDashboard({
             console.error('[roam-logbook]', error);
         }
         render();
+    };
+
+    const startTaskTiming = taskUid => {
+        if (!taskUid || focusInFlight) return focusInFlight;
+        const request = act(() =>
+            clock.clockIn(taskUid, { source: 'active-work-switch' })
+        );
+        focusInFlight = request.finally(() => {
+            focusInFlight = null;
+        });
+        return focusInFlight;
+    };
+
+    const taskTimingAction = node => {
+        if (node.running) {
+            const timing = el(
+                'span',
+                'bp3-icon bp3-icon-time rlb-task-action rlb-task-action--timing'
+            );
+            timing.title = 'Currently timing';
+            timing.setAttribute('role', 'img');
+            timing.setAttribute('aria-label', 'Currently timing');
+            timing.dataset.taskAction = 'timing';
+            return timing;
+        }
+        if (node.status !== 'TODO' || !node.taskUid) return null;
+        const title = formatDisplayTitle(node);
+        const play = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-play rlb-task-action rlb-task-action--play',
+            '',
+            event => {
+                event.stopPropagation();
+                play.disabled = true;
+                void startTaskTiming(node.taskUid);
+            },
+            { title: `Start timing: ${title}` }
+        );
+        play.dataset.action = 'start-timing';
+        play.dataset.taskUid = node.taskUid;
+        return play;
     };
 
     const dialogFocusables = dialog =>
