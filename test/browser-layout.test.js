@@ -490,7 +490,7 @@ test('Session task title is the restrained link target without a leading open ic
                 titleEndsBeforeActions: titleRect.right <= actionsRect.left + .5,
                 titleClips: title.scrollWidth > title.clientWidth,
                 rowInsidePopover: rowRect.left >= 0 && rowRect.right <= 320.5,
-                linkCue: titleStyle.textDecorationLine.includes('underline'),
+                noUnderline: titleStyle.textDecorationLine === 'none' && focusStyle.textDecorationLine === 'none',
                 focusRing: focusStyle.outlineStyle !== 'none' && parseFloat(focusStyle.outlineWidth) > 0,
                 accessibleName: title.getAttribute('aria-label'),
                 tooltip: title.title
@@ -508,7 +508,7 @@ test('Session task title is the restrained link target without a leading open ic
     assert.equal(geometry.titleEndsBeforeActions, true, JSON.stringify(geometry));
     assert.equal(geometry.titleClips, true, JSON.stringify(geometry));
     assert.equal(geometry.rowInsidePopover, true, JSON.stringify(geometry));
-    assert.equal(geometry.linkCue, true, JSON.stringify(geometry));
+    assert.equal(geometry.noUnderline, true, JSON.stringify(geometry));
     assert.equal(geometry.focusRing, true, JSON.stringify(geometry));
     assert.match(geometry.accessibleName, /^Open this block:/, JSON.stringify(geometry));
     assert.match(geometry.tooltip, /^Open this block:/, JSON.stringify(geometry));

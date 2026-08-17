@@ -2095,7 +2095,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.30";
+var PLUGIN_VERSION = "0.9.0-beta.31";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -4476,10 +4476,7 @@ var STYLES = `
     font-size: var(--rlb-surface-task-size, 15px);
     font-weight: 500;
     line-height: 1.25;
-    text-decoration: underline;
-    text-decoration-color: currentColor;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
+    text-decoration: none;
     border-radius: 2px;
 }
 
@@ -4491,7 +4488,7 @@ var STYLES = `
 .bp3-button.bp3-minimal.rlb-run__title:hover,
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
     color: var(--rlb-surface-link-hover);
-    text-decoration-color: currentColor;
+    text-decoration: none;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
@@ -5755,6 +5752,34 @@ var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
 var dashboardLabel = "Open Roam Logbook Dashboard";
+var ACTIVE_WORK_TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
+var stripRoamMacros = (string) => {
+  let cleaned = "";
+  let depth = 0;
+  for (let index = 0; index < string.length; index += 1) {
+    const pair = string.slice(index, index + 2);
+    if (pair === "{{") {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+    if (pair === "}}" && depth > 0) {
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    if (depth === 0)
+      cleaned += string[index];
+  }
+  return cleaned;
+};
+function activeWorkDisplayTitle({ taskString, title, taskUid } = {}) {
+  const fallback = String(title || taskUid || "(untitled)").trim() || "(untitled)";
+  if (typeof taskString !== "string" || taskString.trim() === "")
+    return fallback;
+  const cleaned = stripRoamMacros(taskString.replace(ACTIVE_WORK_TASK_MARKER_RE, "")).replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
+  return cleaned || fallback;
+}
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
     if (index > 0) {
@@ -5777,7 +5802,7 @@ var renderRunningFigures = (entry, now) => {
   return primary;
 };
 var renderTitle = (row, onOpenTask) => {
-  const title = row.title || row.taskUid;
+  const title = activeWorkDisplayTitle(row);
   const recent = row.kind === "recent";
   const taskButton = button(
     `bp3-button bp3-minimal rlb-run__title${recent ? " rlb-run__title--recent" : ""}`,
@@ -5878,7 +5903,7 @@ var renderRecentRow = (row, now, options) => {
       event.stopPropagation();
       void options.onFocusRecent?.(entry, event);
     },
-    { title: focusRecentLabel(row.title || row.taskUid) }
+    { title: focusRecentLabel(activeWorkDisplayTitle(row)) }
   );
   focus.dataset.action = "focus-recent";
   actions.appendChild(focus);
@@ -5898,6 +5923,7 @@ function buildSessionSurfaceModel({
     kind: "focused",
     key: `focused:${entry.clockUid}`,
     taskUid: entry.taskUid,
+    taskString: entry.taskString,
     title: entry.title,
     entry
   }));
@@ -5905,6 +5931,7 @@ function buildSessionSurfaceModel({
     kind: "recent",
     key: `recent:${entry.taskUid}`,
     taskUid: entry.taskUid,
+    taskString: entry.taskString,
     title: entry.title,
     entry
   }));
@@ -7379,7 +7406,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
         },
         {
           id: SETTING_STALE_HOURS,
-          name: "Flag unfinished clocks after",
+          name: "Flag unfinished clocks after (hours)",
           description: "How long a clock may run before it is called out as forgotten.",
           action: {
             type: "select",

@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.30**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.31**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.24 refines the Active Work popover toward a neutral Linear-style hierarchy; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.31 refines Active Work title presentation while preserving the existing navigation and timing model; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -57,7 +57,7 @@ There is always exactly one real running `CLOCK`: the Focused Task. Switching ta
 0:28 · 2 Active
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Focused Task as a compact neutral Linear-style card with a uniform hairline border, while Recent Tasks form a quiet flat list headed **RECENT · N**. Focused elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Recent rows show `<total> total · <relative time>` and retain the exact last-active timestamp in their title and accessible name. Clicking a Recent title opens its block; its independent `▶ Focus` action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Focused row has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is one icon-only footer action with an icon-only loading state and hidden live status feedback. Current-work task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Timing Line as a compact neutral Linear-style card with a uniform hairline border, while Open Lines form a quiet flat list. Timing elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Open Lines show their total and remaining 45-minute return window. Active Work preserves visible Roam references such as `[[Roam Logbook]]` and `#[[Deep Work]]`; task titles use the graph's page-reference colour without an underline. Clicking an Open Line title opens its block; its independent Focus action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Timing Line has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is an icon-only action with an icon-only loading state and hidden live status feedback. Current-work task titles remain single native keyboard-accessible buttons rather than nested page-reference links.
 
 **DONE completion** — changing a watched Task to `DONE` closes its confirmed
 running Focused CLOCK and the confirmed running CLOCKs of its descendants. A
@@ -124,7 +124,7 @@ Clocking in another Task always closes the current Focused `CLOCK` at the same a
 | Keep Timing Line at top of right sidebar | on | A user Clock In opens or moves that block to order 0 without disturbing other sidebar windows |
 | Pomodoro duration (minutes) | 45 | Shared cycle threshold captured when the first Focused Task of a cycle starts; passing it only changes elapsed colour |
 | Only offer clock in on TODO blocks | on | Off lets any block be clocked |
-| Flag unfinished clocks after | 8h | When a running clock is called out as forgotten |
+| Flag unfinished clocks after (hours) | 8 | When a running clock is called out as forgotten |
 
 ## Notes
 

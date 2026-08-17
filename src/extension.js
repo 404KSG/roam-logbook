@@ -168,7 +168,7 @@ function createController({ extensionAPI }) {
                 },
                 {
                     id: SETTING_STALE_HOURS,
-                    name: 'Flag unfinished clocks after',
+                    name: 'Flag unfinished clocks after (hours)',
                     description: 'How long a clock may run before it is called out as forgotten.',
                     action: {
                         type: 'select',

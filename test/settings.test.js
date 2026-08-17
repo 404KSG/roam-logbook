@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
     allowMultipleClocks,
     keepTimingLineAtTopOfRightSidebar,
+    SETTING_STALE_HOURS,
     setExtensionAPI,
     showTopbarWidget,
+    staleHours,
     todoBlocksOnly,
 } from '../src/settings.js';
 
@@ -37,4 +39,14 @@ test('missing switch values use each setting default', () => {
     assert.equal(showTopbarWidget(), true);
     assert.equal(todoBlocksOnly(), true);
     assert.equal(keepTimingLineAtTopOfRightSidebar(), true);
+});
+
+test('unfinished-clock hours keep the existing storage key, values, and default', () => {
+    assert.equal(SETTING_STALE_HOURS, 'staleHours');
+    for (const value of ['2', '4', '8', '12', '24']) {
+        withValue(value);
+        assert.equal(staleHours(), Number(value));
+    }
+    setExtensionAPI({ settings: { get: () => undefined } });
+    assert.equal(staleHours(), 8);
 });

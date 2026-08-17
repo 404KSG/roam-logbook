@@ -615,10 +615,7 @@ export const STYLES = `
     font-size: var(--rlb-surface-task-size, 15px);
     font-weight: 500;
     line-height: 1.25;
-    text-decoration: underline;
-    text-decoration-color: currentColor;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
+    text-decoration: none;
     border-radius: 2px;
 }
 
@@ -630,7 +627,7 @@ export const STYLES = `
 .bp3-button.bp3-minimal.rlb-run__title:hover,
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
     color: var(--rlb-surface-link-hover);
-    text-decoration-color: currentColor;
+    text-decoration: none;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {

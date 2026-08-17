@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.31 — 2026-08-17
+
+- Preserved visible Roam page and tag references such as `[[Roam Logbook]]`
+  and `#[[Deep Work]]` in Active Work titles without changing canonical Task
+  titles, Dashboard reporting, navigation, or stored CLOCK data.
+- Removed Active Work title underlines in resting, hover, and keyboard-focus
+  states while retaining Roam's page-reference colour and accessible focus
+  outline.
+- Renamed the stale-clock setting to `Flag unfinished clocks after (hours)` so
+  its numeric choices are self-explanatory; the storage key, values, and
+  default remain unchanged.
+
 ## 0.9.0-beta.30 — 2026-08-17
 
 - Added a default-on `Keep Timing Line at top of right sidebar` setting. A
