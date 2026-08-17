@@ -67,6 +67,19 @@ test('a parent with no time of its own still appears', () => {
     assert.equal(forest[0].total, 120);
 });
 
+test('ancestor-only task rows retain their raw task strings for display formatting', () => {
+    const forest = buildTaskForest(
+        [row('childA', '写文档', 120)],
+        hierarchy([
+            ['parent', null, TODO('Parent [[Project]] #[[Planning]]')],
+            ['childA', 'parent', TODO('Child [[Task]] #[[Deep Work]]')],
+        ])
+    );
+
+    assert.equal(forest[0].taskString, TODO('Parent [[Project]] #[[Planning]]'));
+    assert.equal(forest[0].children[0].taskString, null);
+});
+
 test('plain blocks between two tasks do not become tree levels', () => {
     const forest = buildTaskForest(
         [row('parent', '发布 v1', 0), row('childA', '写文档', 120)],

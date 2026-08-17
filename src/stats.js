@@ -51,6 +51,7 @@ export function summariseByTask(entries, now) {
         if (!row) {
             row = {
                 taskUid: entry.taskUid,
+                taskString: entry.taskString ?? null,
                 title: entry.title,
                 status: entry.status ?? null,
                 pageTitle: entry.pageTitle,
@@ -60,6 +61,11 @@ export function summariseByTask(entries, now) {
                 lastActivity: entry.start,
             };
             byTask.set(entry.taskUid, row);
+        } else if (!row.taskString && entry.taskString) {
+            // A later CLOCK row can still carry recoverable task text when an
+            // earlier historical row was orphaned; keep the raw string for UI
+            // formatting without changing the canonical title.
+            row.taskString = entry.taskString;
         }
         row.minutes += entryMinutes(entry, now);
         row.sessions += 1;
@@ -165,6 +171,7 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
             if (!nodes.has(parentUid)) {
                 nodes.set(parentUid, {
                     taskUid: parentUid,
+                    taskString: hierarchy.stringOf[parentUid] ?? null,
                     title: taskTitle(hierarchy.stringOf[parentUid]),
                     status: taskStatus(hierarchy.stringOf[parentUid]),
                     pageTitle: null,
@@ -189,6 +196,7 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
         const node = nodes.get(uid);
         const base = {
             taskUid: node.taskUid,
+            taskString: node.taskString ?? null,
             title: node.title,
             status: node.status ?? null,
             pageTitle: node.pageTitle,

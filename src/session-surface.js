@@ -10,6 +10,7 @@ import { button, el } from './dom.js';
 import { ACTIVE_WORK_WINDOW_MINUTES, openLineMinutesLeft } from './active-work.js';
 import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
+import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
@@ -28,40 +29,9 @@ const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
 const dashboardLabel = 'Open Roam Logbook Dashboard';
-const ACTIVE_WORK_TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
 
-const stripRoamMacros = string => {
-    let cleaned = '';
-    let depth = 0;
-    for (let index = 0; index < string.length; index += 1) {
-        const pair = string.slice(index, index + 2);
-        if (pair === '{{') {
-            depth += 1;
-            index += 1;
-            continue;
-        }
-        if (pair === '}}' && depth > 0) {
-            depth -= 1;
-            index += 1;
-            continue;
-        }
-        if (depth === 0) cleaned += string[index];
-    }
-    return cleaned;
-};
-
-/** Display-only Task text for Active Work; canonical taskTitle() stays untouched. */
-export function activeWorkDisplayTitle({ taskString, title, taskUid } = {}) {
-    const fallback = String(title || taskUid || '(untitled)').trim() || '(untitled)';
-    if (typeof taskString !== 'string' || taskString.trim() === '') return fallback;
-    const cleaned = stripRoamMacros(taskString.replace(ACTIVE_WORK_TASK_MARKER_RE, ''))
-        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, '')
-        .replace(/\^\^|\*\*|__|~~/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return cleaned || fallback;
-}
+/** Backward-compatible seam; Active Work and Dashboard now share one formatter. */
+export const activeWorkDisplayTitle = formatDisplayTitle;
 
 const appendMetaNodes = (meta, nodes) => {
     nodes.forEach((node, index) => {
@@ -87,7 +57,7 @@ const renderRunningFigures = (entry, now) => {
 };
 
 const renderTitle = (row, onOpenTask) => {
-    const title = activeWorkDisplayTitle(row);
+    const title = formatDisplayTitle(row);
     const recent = row.kind === 'recent';
     const taskButton = button(
         `bp3-button bp3-minimal rlb-run__title${recent ? ' rlb-run__title--recent' : ''}`,
@@ -166,6 +136,7 @@ const renderRecentRow = (row, now, options) => {
     node.dataset.sessionState = 'recent';
     node.dataset.taskUid = entry.taskUid;
     node.dataset.clockUid = entry.clockUid;
+    if (row.status) node.dataset.taskStatus = row.status;
 
     const body = el('div', 'rlb-run__body');
     const meta = el('div', 'rlb-run__meta');
@@ -190,17 +161,25 @@ const renderRecentRow = (row, now, options) => {
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
-    const focus = button(
-        'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus',
-        '',
-        event => {
-            event.stopPropagation();
-            void options.onFocusRecent?.(entry, event);
-        },
-        { title: focusRecentLabel(activeWorkDisplayTitle(row)) }
-    );
-    focus.dataset.action = 'focus-recent';
-    actions.appendChild(focus);
+    if (row.status === 'DONE') {
+        const completed = el('span', 'bp3-icon bp3-icon-tick-circle rlb-run__completed');
+        completed.title = 'Completed';
+        completed.setAttribute('role', 'img');
+        completed.setAttribute('aria-label', 'Completed');
+        actions.appendChild(completed);
+    } else {
+        const focus = button(
+            'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus',
+            '',
+            event => {
+                event.stopPropagation();
+                void options.onFocusRecent?.(entry, event);
+            },
+            { title: focusRecentLabel(formatDisplayTitle(row)) }
+        );
+        focus.dataset.action = 'focus-recent';
+        actions.appendChild(focus);
+    }
     node.append(body, actions);
     return node;
 };
@@ -223,6 +202,7 @@ export function buildSessionSurfaceModel({
         taskUid: entry.taskUid,
         taskString: entry.taskString,
         title: entry.title,
+        status: entry.status ?? null,
         entry,
     }));
     const recentRows = recentItems.map(entry => ({
@@ -231,6 +211,7 @@ export function buildSessionSurfaceModel({
         taskUid: entry.taskUid,
         taskString: entry.taskString,
         title: entry.title,
+        status: entry.status ?? null,
         entry,
     }));
     return {

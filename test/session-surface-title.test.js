@@ -49,15 +49,18 @@ test('Timing and Open Line buttons expose the same bracket-preserving visible an
         taskUid: 'task-title-02',
         taskString: '{{[[DONE]]}} __Review__ [[Sidebar]] {{[[POMO]]}}',
         title: 'Review Sidebar',
+        status: 'DONE',
         start: new Date('2026-08-17T09:00:00'),
         end: new Date('2026-08-17T10:05:00'),
         minutes: 65,
         priorMinutes: 65,
     };
     const root = document.getElementById('surface');
+    const model = buildSessionSurfaceModel({ entries: [timing], recentItems: [openLine], now });
+    assert.equal(model.recentRows[0].status, 'DONE', 'surface rows carry the confirmed task status');
     renderSessionSurface(
         root,
-        buildSessionSurfaceModel({ entries: [timing], recentItems: [openLine], now }),
+        model,
         {}
     );
 
@@ -75,6 +78,47 @@ test('Timing and Open Line buttons expose the same bracket-preserving visible an
     );
     assert.equal(root.querySelectorAll('.rlb-run__title a').length, 0);
     assert.ok(titles.every(node => node.tagName === 'BUTTON'));
+
+    const completed = root.querySelector('.rlb-run--recent .rlb-run__completed');
+    assert.ok(completed, 'a DONE Open Line exposes a completed status indicator');
+    assert.equal(completed.tagName, 'SPAN');
+    assert.equal(completed.getAttribute('role'), 'img');
+    assert.equal(completed.title, 'Completed');
+    assert.equal(completed.getAttribute('aria-label'), 'Completed');
+    assert.equal(completed.dataset.action, undefined);
+    assert.equal(root.querySelector('.rlb-run--recent [data-action="focus-recent"]'), null);
+
+    dom.window.close();
+    delete globalThis.document;
+});
+
+test('TODO Open Lines keep an interactive focus action while DONE Open Lines do not', () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="surface"></div></body></html>');
+    globalThis.document = dom.window.document;
+    const root = document.getElementById('surface');
+    let focusCalls = 0;
+    const todo = {
+        clockUid: 'clock-title-03',
+        taskUid: 'task-title-03',
+        taskString: '{{[[TODO]]}} Continue [[Sidebar]]',
+        title: 'Continue Sidebar',
+        status: 'TODO',
+        start: new Date('2026-08-17T09:00:00'),
+        end: new Date('2026-08-17T10:05:00'),
+        minutes: 65,
+    };
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ recentItems: [todo], now: new Date('2026-08-17T10:10:00') }),
+        { onFocusRecent: () => { focusCalls += 1; } }
+    );
+
+    const focus = root.querySelector('[data-action="focus-recent"]');
+    assert.ok(focus, 'a TODO Open Line keeps the focus action');
+    focus.click();
+    assert.equal(focusCalls, 1);
+    assert.equal(root.querySelector('.rlb-run__completed'), null);
 
     dom.window.close();
     delete globalThis.document;

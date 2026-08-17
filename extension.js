@@ -1816,6 +1816,7 @@ function summariseByTask(entries, now) {
     if (!row) {
       row = {
         taskUid: entry.taskUid,
+        taskString: entry.taskString ?? null,
         title: entry.title,
         status: entry.status ?? null,
         pageTitle: entry.pageTitle,
@@ -1825,6 +1826,8 @@ function summariseByTask(entries, now) {
         lastActivity: entry.start
       };
       byTask.set(entry.taskUid, row);
+    } else if (!row.taskString && entry.taskString) {
+      row.taskString = entry.taskString;
     }
     row.minutes += entryMinutes(entry, now);
     row.sessions += 1;
@@ -1889,6 +1892,7 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
       if (!nodes.has(parentUid)) {
         nodes.set(parentUid, {
           taskUid: parentUid,
+          taskString: hierarchy.stringOf[parentUid] ?? null,
           title: taskTitle(hierarchy.stringOf[parentUid]),
           status: taskStatus(hierarchy.stringOf[parentUid]),
           pageTitle: null,
@@ -1911,6 +1915,7 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     const node = nodes.get(uid);
     const base = {
       taskUid: node.taskUid,
+      taskString: node.taskString ?? null,
       title: node.title,
       status: node.status ?? null,
       pageTitle: node.pageTitle,
@@ -2095,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.32";
+var PLUGIN_VERSION = "0.9.0-beta.33";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -2213,6 +2218,36 @@ function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
   const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   const rounded = Number(candidate.toFixed(6));
   return String(rounded > 0 ? rounded : 45);
+}
+
+// src/task-display.js
+var TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
+var stripRoamMacros = (string) => {
+  let cleaned = "";
+  let depth = 0;
+  for (let index = 0; index < string.length; index += 1) {
+    const pair = string.slice(index, index + 2);
+    if (pair === "{{") {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+    if (pair === "}}" && depth > 0) {
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    if (depth === 0)
+      cleaned += string[index];
+  }
+  return cleaned;
+};
+function formatDisplayTitle({ taskString, title, taskUid } = {}) {
+  const fallback = String(title || taskUid || "(untitled)").trim() || "(untitled)";
+  if (typeof taskString !== "string" || taskString.trim() === "")
+    return fallback;
+  const cleaned = stripRoamMacros(taskString.replace(TASK_MARKER_RE, "")).replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
+  return cleaned || fallback;
 }
 
 // src/theme.js
@@ -3064,7 +3099,7 @@ function createDashboard({
       const mark = statusMark(entry.status);
       if (mark)
         task.appendChild(mark);
-      task.appendChild(taskLink(entry.title, entry.taskUid));
+      task.appendChild(taskLink(entry));
       if (stale.has(entry.clockUid)) {
         task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
       }
@@ -3305,7 +3340,7 @@ function createDashboard({
           row.classList.add("rlb-row--done");
         if (node.context)
           row.classList.add("rlb-row--context");
-        content.appendChild(taskLink(node.title, node.taskUid));
+        content.appendChild(taskLink(node));
         if (node.occurrences > 1) {
           const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
           badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
@@ -3390,24 +3425,24 @@ function createDashboard({
     mark.setAttribute("aria-label", done ? "Done" : "To do");
     return mark;
   };
-  const taskLink = (title, taskUid) => {
+  const taskLink = (row) => {
+    const title = formatDisplayTitle(row);
     const accessibleName = `Open this block: ${title}`;
     const link = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon",
+      "bp3-button bp3-minimal bp3-small rlb-task-link",
       "",
       (event) => {
         event.stopPropagation();
         if (event.shiftKey) {
           event.preventDefault();
-          void openBlockInRightSidebar(taskUid);
+          void openBlockInRightSidebar(row.taskUid);
           return;
         }
         close();
-        void openBlock(taskUid);
+        void openBlock(row.taskUid);
       },
       { title: accessibleName }
     );
-    link.dataset.navigationCue = "icon";
     link.appendChild(el("span", "rlb-task-link__text", title));
     return link;
   };
@@ -4659,6 +4694,26 @@ var STYLES = `
     background: rgba(167, 182, 194, 0.24);
 }
 
+.rlb-run__actions .rlb-run__completed {
+    display: inline-flex;
+    flex: 0 0 28px;
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    align-items: center;
+    justify-content: center;
+    color: var(--rlb-muted, #7a8b99);
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.rlb-run__actions .rlb-run__completed::before {
+    margin: 0;
+}
+
 .rlb-run__actions .rlb-run__checkout:hover,
 .rlb-run__actions .rlb-run__checkout:focus {
     color: #c23030;
@@ -4968,32 +5023,30 @@ var STYLES = `
     white-space: nowrap;
 }
 
-/* Dashboard task buttons already carry a document-open cue. Keep their text
-   in the dashboard's neutral hierarchy; only icon-less Session titles use the
-   Roam page-reference palette below. */
-.bp3-button.bp3-minimal.rlb-task-link--icon {
-    color: var(--rlb-text);
+.bp3-button.bp3-minimal.rlb-task-link {
+    color: var(--rlb-surface-link);
     text-decoration: none;
     border-radius: 3px;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon::before {
-    color: var(--rlb-muted);
+.bp3-button.bp3-minimal.rlb-task-link::before {
+    display: none !important;
+    content: none !important;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon > .rlb-task-link__text {
+.bp3-button.bp3-minimal.rlb-task-link > .rlb-task-link__text {
     color: inherit;
     text-decoration: none;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon:hover,
-.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
-    color: var(--rlb-text);
+.bp3-button.bp3-minimal.rlb-task-link:hover,
+.bp3-button.bp3-minimal.rlb-task-link:focus-visible {
+    color: var(--rlb-surface-link-hover);
     background: var(--rlb-task-link-hover, rgba(167, 182, 194, 0.14));
     text-decoration: none;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+.bp3-button.bp3-minimal.rlb-task-link:focus-visible {
     outline: 2px solid var(--rlb-muted);
     outline-offset: 2px;
 }
@@ -5026,12 +5079,6 @@ var STYLES = `
     overflow: visible !important;
     overflow-wrap: anywhere !important;
     text-overflow: initial;
-}
-
-.rlb-task-table .rlb-task-link::before {
-    flex: 0 0 auto !important;
-    margin-left: 0 !important;
-    margin-right: 7px !important;
 }
 
 .rlb-task-table .rlb-task-link > .rlb-task-link__text {
@@ -5765,34 +5812,6 @@ var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
 var dashboardLabel = "Open Roam Logbook Dashboard";
-var ACTIVE_WORK_TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
-var stripRoamMacros = (string) => {
-  let cleaned = "";
-  let depth = 0;
-  for (let index = 0; index < string.length; index += 1) {
-    const pair = string.slice(index, index + 2);
-    if (pair === "{{") {
-      depth += 1;
-      index += 1;
-      continue;
-    }
-    if (pair === "}}" && depth > 0) {
-      depth -= 1;
-      index += 1;
-      continue;
-    }
-    if (depth === 0)
-      cleaned += string[index];
-  }
-  return cleaned;
-};
-function activeWorkDisplayTitle({ taskString, title, taskUid } = {}) {
-  const fallback = String(title || taskUid || "(untitled)").trim() || "(untitled)";
-  if (typeof taskString !== "string" || taskString.trim() === "")
-    return fallback;
-  const cleaned = stripRoamMacros(taskString.replace(ACTIVE_WORK_TASK_MARKER_RE, "")).replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
-  return cleaned || fallback;
-}
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
     if (index > 0) {
@@ -5815,7 +5834,7 @@ var renderRunningFigures = (entry, now) => {
   return primary;
 };
 var renderTitle = (row, onOpenTask) => {
-  const title = activeWorkDisplayTitle(row);
+  const title = formatDisplayTitle(row);
   const recent = row.kind === "recent";
   const taskButton = button(
     `bp3-button bp3-minimal rlb-run__title${recent ? " rlb-run__title--recent" : ""}`,
@@ -5886,6 +5905,8 @@ var renderRecentRow = (row, now, options) => {
   node.dataset.sessionState = "recent";
   node.dataset.taskUid = entry.taskUid;
   node.dataset.clockUid = entry.clockUid;
+  if (row.status)
+    node.dataset.taskStatus = row.status;
   const body = el("div", "rlb-run__body");
   const meta = el("div", "rlb-run__meta");
   const ended = formatStarted(entry.end, now);
@@ -5909,17 +5930,25 @@ var renderRecentRow = (row, now, options) => {
   meta.appendChild(endedNode);
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
-  const focus = button(
-    "bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus",
-    "",
-    (event) => {
-      event.stopPropagation();
-      void options.onFocusRecent?.(entry, event);
-    },
-    { title: focusRecentLabel(activeWorkDisplayTitle(row)) }
-  );
-  focus.dataset.action = "focus-recent";
-  actions.appendChild(focus);
+  if (row.status === "DONE") {
+    const completed = el("span", "bp3-icon bp3-icon-tick-circle rlb-run__completed");
+    completed.title = "Completed";
+    completed.setAttribute("role", "img");
+    completed.setAttribute("aria-label", "Completed");
+    actions.appendChild(completed);
+  } else {
+    const focus = button(
+      "bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus",
+      "",
+      (event) => {
+        event.stopPropagation();
+        void options.onFocusRecent?.(entry, event);
+      },
+      { title: focusRecentLabel(formatDisplayTitle(row)) }
+    );
+    focus.dataset.action = "focus-recent";
+    actions.appendChild(focus);
+  }
   node.append(body, actions);
   return node;
 };
@@ -5938,6 +5967,7 @@ function buildSessionSurfaceModel({
     taskUid: entry.taskUid,
     taskString: entry.taskString,
     title: entry.title,
+    status: entry.status ?? null,
     entry
   }));
   const recentRows = recentItems.map((entry) => ({
@@ -5946,6 +5976,7 @@ function buildSessionSurfaceModel({
     taskUid: entry.taskUid,
     taskString: entry.taskString,
     title: entry.title,
+    status: entry.status ?? null,
     entry
   }));
   return {

@@ -231,8 +231,12 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     dashboard.destroy();
 });
 
-test('Dashboard Running and By Task links expose the complete Task title', async () => {
+test('Dashboard Running and By Task links preserve Roam page refs and tags without an icon cue', async () => {
     const nowMs = new Date('2026-08-15T09:00:00').getTime();
+    graph.store.get('live-parent').string =
+        '{{[[TODO]]}} Parent [[Project Page]] #[[project]]';
+    graph.store.get('live-child').string =
+        '{{[[TODO]]}} Child [[Running Page]] #[[urgent]]';
     await clock.clockIn('live-child', { now: new Date(nowMs) });
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
@@ -243,11 +247,39 @@ test('Dashboard Running and By Task links expose the complete Task title', async
         assert.match(link.getAttribute('aria-label'), /^Open this block: .+/);
         assert.equal(link.getAttribute('aria-label'), link.title);
         assert.notEqual(link.getAttribute('aria-label'), 'Open this block');
-        assert.ok(link.classList.contains('rlb-task-link--icon'));
-        assert.equal(link.dataset.navigationCue, 'icon');
+        assert.equal(link.classList.contains('bp3-icon-document-open'), false);
+        assert.equal(link.classList.contains('rlb-task-link--icon'), false);
+        assert.equal(link.dataset.navigationCue, undefined);
+        assert.equal(link.querySelector('.bp3-icon-document-open'), null);
+        assert.equal(link.textContent, link.querySelector('.rlb-task-link__text').textContent);
+        assert.equal(link.getAttribute('aria-label'), `Open this block: ${link.textContent}`);
     }
-    assert.ok(links.some(link => /Child running task/.test(link.title)));
+    assert.ok(links.some(link => link.textContent === 'Child [[Running Page]] #[[urgent]]'));
+    assert.ok(links.some(link => link.textContent === 'Parent [[Project Page]] #[[project]]'));
     dashboard.destroy();
+});
+
+test('Dashboard task links keep ordinary click navigation for formatted titles', async () => {
+    const openCalls = [];
+    const mainWindow = window.roamAlphaAPI.ui.mainWindow;
+    const originalOpenBlock = mainWindow.openBlock;
+    mainWindow.openBlock = async spec => openCalls.push(spec);
+    try {
+        graph.store.get('live-child').string =
+            '{{[[TODO]]}} Child [[Running Page]] #[[urgent]]';
+        await clock.clockIn('live-child', { now: new Date('2026-08-15T09:00:00') });
+        const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
+        dashboard.open();
+        const link = document.querySelector('.rlb-running .rlb-task-link');
+        link.click();
+        await new Promise(resolve => setImmediate(resolve));
+
+        assert.deepEqual(openCalls, [{ block: { uid: 'live-child' } }]);
+        assert.equal(document.querySelector('.rlb-root--open'), null);
+        dashboard.destroy();
+    } finally {
+        mainWindow.openBlock = originalOpenBlock;
+    }
 });
 
 test('Shift+Click Dashboard task entries opens the matching block in Roam right sidebar', async () => {

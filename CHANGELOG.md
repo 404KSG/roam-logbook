@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.33 — 2026-08-17
+
+- Replaced the invalid play action on completed Open Lines with a
+  non-interactive, accessible completed-state icon. TODO Open Lines retain the
+  existing Focus action, and completed lines remain navigable by title until
+  their normal 45-minute Active Work window expires.
+- Aligned Dashboard task titles with Active Work: full `[[page references]]`
+  and `#[[tags]]` remain visible in Roam's link colour, while the redundant
+  leading document icon and underline cue are removed.
+- Kept canonical task titles, sorting, filters, rollups, CLOCK data, ordinary
+  navigation, and Shift-click right-sidebar navigation unchanged.
+
 ## 0.9.0-beta.32 — 2026-08-17
 
 - Persisted the three missing default-on switch values before Roam creates the

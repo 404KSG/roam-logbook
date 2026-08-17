@@ -22,6 +22,7 @@ import {
     transformTaskForest,
 } from './stats.js';
 import { staleHours } from './settings.js';
+import { formatDisplayTitle } from './task-display.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
@@ -461,7 +462,7 @@ export function createDashboard({
             const task = el('td', 'rlb-cell');
             const mark = statusMark(entry.status);
             if (mark) task.appendChild(mark);
-            task.appendChild(taskLink(entry.title, entry.taskUid));
+            task.appendChild(taskLink(entry));
             if (stale.has(entry.clockUid)) {
                 task.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'stale'));
             }
@@ -721,7 +722,7 @@ export function createDashboard({
                 if (mark) leading.appendChild(mark);
                 if (node.status === 'DONE') row.classList.add('rlb-row--done');
                 if (node.context) row.classList.add('rlb-row--context');
-                content.appendChild(taskLink(node.title, node.taskUid));
+                content.appendChild(taskLink(node));
                 // A task reachable from more than one parent is counted under each
                 // of them; say so on the row rather than let the columns look wrong.
                 if (node.occurrences > 1) {
@@ -820,24 +821,24 @@ export function createDashboard({
         return mark;
     };
 
-    const taskLink = (title, taskUid) => {
+    const taskLink = row => {
+        const title = formatDisplayTitle(row);
         const accessibleName = `Open this block: ${title}`;
         const link = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon',
+            'bp3-button bp3-minimal bp3-small rlb-task-link',
             '',
             event => {
                 event.stopPropagation();
                 if (event.shiftKey) {
                     event.preventDefault();
-                    void openBlockInRightSidebar(taskUid);
+                    void openBlockInRightSidebar(row.taskUid);
                     return;
                 }
                 close();
-                void openBlock(taskUid);
+                void openBlock(row.taskUid);
             },
             { title: accessibleName }
         );
-        link.dataset.navigationCue = 'icon';
         link.appendChild(el('span', 'rlb-task-link__text', title));
         return link;
     };

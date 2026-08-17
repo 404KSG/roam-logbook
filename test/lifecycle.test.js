@@ -528,7 +528,8 @@ test('the dashboard renders totals and the task breakdown', () => {
     }
     assert.match(dialog().textContent, /Today/);
     assert.match(dialog().textContent, /Graph Engineering:/);
-    assert.ok(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'));
+    assert.ok(dialog().querySelector('.rlb-task-link'));
+    assert.equal(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'), null);
     // The running session is listed separately from the by-task rollup.
     assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
     const runningTable = dialog().querySelector('.rlb-table');
@@ -560,9 +561,9 @@ test('the dashboard renders totals and the task breakdown', () => {
     const css = document.getElementById('roam-logbook-styles').textContent;
     assert.match(css, /\.rlb-task-table \.rlb-task-link[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-task-table \.rlb-task-link > \.rlb-task-link__text[^}]*white-space: normal/s);
-    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon\s*\{[^}]*color: var\(--rlb-text\)[^}]*text-decoration: none/s);
-    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon::before\s*\{[^}]*color: var\(--rlb-muted\)/s);
-    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link--icon:focus-visible\s*\{[^}]*outline:/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link\s*\{[^}]*color: var\(--rlb-surface-link\)[^}]*text-decoration: none/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link::before\s*\{[^}]*display: none/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-task-link:focus-visible\s*\{[^}]*outline:/s);
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     click(dialog().querySelector('.rlb-header .bp3-icon-refresh'));
 });

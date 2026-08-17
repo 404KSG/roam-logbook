@@ -785,6 +785,26 @@ export const STYLES = `
     background: rgba(167, 182, 194, 0.24);
 }
 
+.rlb-run__actions .rlb-run__completed {
+    display: inline-flex;
+    flex: 0 0 28px;
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    align-items: center;
+    justify-content: center;
+    color: var(--rlb-muted, #7a8b99);
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.rlb-run__actions .rlb-run__completed::before {
+    margin: 0;
+}
+
 .rlb-run__actions .rlb-run__checkout:hover,
 .rlb-run__actions .rlb-run__checkout:focus {
     color: #c23030;
@@ -1094,32 +1114,30 @@ export const STYLES = `
     white-space: nowrap;
 }
 
-/* Dashboard task buttons already carry a document-open cue. Keep their text
-   in the dashboard's neutral hierarchy; only icon-less Session titles use the
-   Roam page-reference palette below. */
-.bp3-button.bp3-minimal.rlb-task-link--icon {
-    color: var(--rlb-text);
+.bp3-button.bp3-minimal.rlb-task-link {
+    color: var(--rlb-surface-link);
     text-decoration: none;
     border-radius: 3px;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon::before {
-    color: var(--rlb-muted);
+.bp3-button.bp3-minimal.rlb-task-link::before {
+    display: none !important;
+    content: none !important;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon > .rlb-task-link__text {
+.bp3-button.bp3-minimal.rlb-task-link > .rlb-task-link__text {
     color: inherit;
     text-decoration: none;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon:hover,
-.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
-    color: var(--rlb-text);
+.bp3-button.bp3-minimal.rlb-task-link:hover,
+.bp3-button.bp3-minimal.rlb-task-link:focus-visible {
+    color: var(--rlb-surface-link-hover);
     background: var(--rlb-task-link-hover, rgba(167, 182, 194, 0.14));
     text-decoration: none;
 }
 
-.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible {
+.bp3-button.bp3-minimal.rlb-task-link:focus-visible {
     outline: 2px solid var(--rlb-muted);
     outline-offset: 2px;
 }
@@ -1152,12 +1170,6 @@ export const STYLES = `
     overflow: visible !important;
     overflow-wrap: anywhere !important;
     text-overflow: initial;
-}
-
-.rlb-task-table .rlb-task-link::before {
-    flex: 0 0 auto !important;
-    margin-left: 0 !important;
-    margin-right: 7px !important;
 }
 
 .rlb-task-table .rlb-task-link > .rlb-task-link__text {

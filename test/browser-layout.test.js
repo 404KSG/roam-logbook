@@ -204,46 +204,110 @@ test('Active Work titles inherit Roam colors without resting or keyboard-focus u
     assert.equal(geometry.outline, geometry.color, JSON.stringify(geometry));
 });
 
-test('icon-bearing Dashboard task buttons stay neutral and keyboard-visible in light and dark themes', async t => {
+test('Dashboard task links keep Roam reference text, sampled link colors, and narrow wrapping without icon cues', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const title = 'Build [[Project Page]] #[[urgent]] with a title that wraps in a narrow Dashboard';
     for (const theme of ['', 'bp3-dark']) {
         const geometry = await withChromium(
             htmlWithLateHost(
-                `<div class="${theme} rlb-root"><button class="bp3-button bp3-minimal bp3-small bp3-icon-document-open rlb-task-link rlb-task-link--icon" data-navigation-cue="icon" title="Open this block: Long task" aria-label="Open this block: Long task"><span class="rlb-task-link__text">Long task</span></button></div>`
+                `<div class="${theme}"><div class="rlb-root rlb-root--open rlb-dashboard" style="width:360px"><div class="rlb-dialog" style="width:320px"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-by-task"><table class="rlb-table rlb-task-table" style="width:100%"><tbody><tr><td class="rlb-tree__cell"><div class="rlb-tree__layout"><div class="rlb-tree__leading"></div><div class="rlb-tree__content"><button class="bp3-button bp3-minimal bp3-small rlb-task-link" title="Open this block: ${title}" aria-label="Open this block: ${title}"><span class="rlb-task-link__text">${title}</span></button></div></div></td><td class="rlb-table__num">1</td><td class="rlb-table__num">1m</td><td class="rlb-table__num">1m</td></tr></tbody></table></section></div></div></div>`
             ),
             `(() => {
                 const link = document.querySelector('.rlb-task-link');
+                const text = link.querySelector('.rlb-task-link__text');
                 const normal = getComputedStyle(link);
-                const icon = getComputedStyle(link, '::before');
-                link.focus();
-                const focused = getComputedStyle(link);
-                const focusRule = [...document.styleSheets]
-                    .flatMap(sheet => [...sheet.cssRules])
-                    .find(rule => rule.selectorText === '.bp3-button.bp3-minimal.rlb-task-link--icon:focus-visible');
+                const before = getComputedStyle(link, '::before');
+                const rect = link.getBoundingClientRect();
                 return {
-                    cue: link.dataset.navigationCue,
+                    text: text.textContent,
                     title: link.title,
                     aria: link.getAttribute('aria-label'),
-                    text: link.querySelector('.rlb-task-link__text').textContent,
+                    hasIconClass: link.classList.contains('bp3-icon-document-open'),
+                    hasIconCueClass: link.classList.contains('rlb-task-link--icon'),
+                    navigationCue: link.dataset.navigationCue,
+                    pseudoContent: before.content,
                     color: normal.color,
-                    iconColor: icon.color,
                     decoration: normal.textDecorationLine,
-                    focusedDecoration: focused.textDecorationLine,
-                    focusBackground: focused.backgroundColor,
-                    focusRule: focusRule?.cssText || '',
+                    width: rect.width,
+                    scrollWidth: link.scrollWidth,
                 };
             })()`
         );
+        const expectedColor = theme === 'bp3-dark' ? 'rgb(126, 183, 213)' : 'rgb(49, 106, 159)';
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ theme, geometry }));
-        assert.equal(geometry.cue, 'icon', JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.text, title, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.title, `Open this block: ${title}`, JSON.stringify({ theme, geometry }));
         assert.equal(geometry.aria, geometry.title, JSON.stringify({ theme, geometry }));
-        assert.equal(geometry.text, 'Long task', JSON.stringify({ theme, geometry }));
-        assert.notEqual(geometry.color, geometry.iconColor, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.hasIconClass, false, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.hasIconCueClass, false, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.navigationCue, undefined, JSON.stringify({ theme, geometry }));
+        assert.ok(['none', 'normal'].includes(geometry.pseudoContent), JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.color, expectedColor, JSON.stringify({ theme, geometry }));
         assert.equal(geometry.decoration, 'none', JSON.stringify({ theme, geometry }));
-        assert.equal(geometry.focusedDecoration, 'none', JSON.stringify({ theme, geometry }));
-        assert.match(geometry.focusRule, /outline: 2px solid var\(--rlb-muted\)/, JSON.stringify({ theme, geometry }));
-        assert.notEqual(geometry.focusBackground, 'rgba(0, 0, 0, 0)', JSON.stringify({ theme, geometry }));
+        assert.ok(geometry.width > 0, JSON.stringify({ theme, geometry }));
+        assert.ok(geometry.scrollWidth <= geometry.width + 1, JSON.stringify({ theme, geometry }));
     }
+});
+
+test('DONE Open Lines use a non-interactive completed indicator while TODO keeps focus', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const geometry = await withChromium(
+        htmlWithLateHost(`
+            <div class="rlb-popover" style="width:360px">
+                <div class="rlb-run rlb-run--recent" data-session-state="recent" data-task-status="DONE">
+                    <div class="rlb-run__body">
+                        <button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Done line" aria-label="Open this block: Done line">Done line</button>
+                    </div>
+                    <div class="rlb-run__actions">
+                        <span class="bp3-icon bp3-icon-tick-circle rlb-run__completed" role="img" title="Completed" aria-label="Completed"></span>
+                    </div>
+                </div>
+                <div class="rlb-run rlb-run--recent" data-session-state="recent" data-task-status="TODO">
+                    <div class="rlb-run__body">
+                        <button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: Todo line" aria-label="Open this block: Todo line">Todo line</button>
+                    </div>
+                    <div class="rlb-run__actions">
+                        <button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to Todo line" aria-label="Switch Focus to Todo line"></button>
+                    </div>
+                </div>
+            </div>
+        `),
+        `(() => {
+            const done = document.querySelector('[data-task-status="DONE"]');
+            const todo = document.querySelector('[data-task-status="TODO"]');
+            const completed = done.querySelector('.rlb-run__completed');
+            const focus = todo.querySelector('[data-action="focus-recent"]');
+            const completedStyle = getComputedStyle(completed);
+            const completedRect = completed.getBoundingClientRect();
+            return {
+                completedTag: completed.tagName,
+                completedRole: completed.getAttribute('role'),
+                completedTitle: completed.title,
+                completedAria: completed.getAttribute('aria-label'),
+                completedAction: completed.dataset.action,
+                doneFocus: done.querySelector('[data-action="focus-recent"]'),
+                completedIcon: completed.classList.contains('bp3-icon-tick-circle'),
+                completedPointerEvents: completedStyle.pointerEvents,
+                completedWidth: completedRect.width,
+                completedHeight: completedRect.height,
+                todoFocusTag: focus.tagName,
+                todoFocusAction: focus.dataset.action,
+            };
+        })()`
+    );
+
+    assert.equal(geometry.completedTag, 'SPAN', JSON.stringify(geometry));
+    assert.equal(geometry.completedRole, 'img', JSON.stringify(geometry));
+    assert.equal(geometry.completedTitle, 'Completed', JSON.stringify(geometry));
+    assert.equal(geometry.completedAria, 'Completed', JSON.stringify(geometry));
+    assert.equal(geometry.completedAction, undefined, JSON.stringify(geometry));
+    assert.equal(geometry.doneFocus, null, JSON.stringify(geometry));
+    assert.equal(geometry.completedIcon, true, JSON.stringify(geometry));
+    assert.equal(geometry.completedPointerEvents, 'none', JSON.stringify(geometry));
+    assert.ok(geometry.completedWidth >= 28, JSON.stringify(geometry));
+    assert.ok(geometry.completedHeight >= 28, JSON.stringify(geometry));
+    assert.equal(geometry.todoFocusTag, 'BUTTON', JSON.stringify(geometry));
+    assert.equal(geometry.todoFocusAction, 'focus-recent', JSON.stringify(geometry));
 });
 
 test('topbar remains a stable unit while Roam search expands and at narrow widths', async t => {
