@@ -1,5 +1,7 @@
 # Dashboard Task Focus Actions
 
+Status: implemented in `0.9.0-beta.36`.
+
 ## Approved behavior
 
 The Dashboard task table supports starting or switching the single Timing Line directly from a task row.
