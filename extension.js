@@ -2108,7 +2108,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.23";
+var PLUGIN_VERSION = "0.9.0-beta.24";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -5416,7 +5416,7 @@ var STYLES = `
     --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
     --rlb-surface-hover: rgba(167, 182, 194, 0.15);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
-    --rlb-surface-focused: rgba(126, 183, 148, 0.08);
+    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
     --rlb-surface-link: #316a9f;
     --rlb-surface-link-hover: #2a5a8d;
     --rlb-session-running: #7eb794;
@@ -5481,20 +5481,11 @@ var STYLES = `
 }
 
 .rlb-surface__section--focused {
-    margin-bottom: 7px;
+    margin-bottom: 6px;
     padding: 3px;
     border: 1px solid var(--rlb-surface-border);
-    border-left: 3px solid var(--rlb-session-running);
-    border-radius: 7px;
+    border-radius: 6px;
     background: var(--rlb-surface-focused);
-}
-
-.rlb-surface__section--focused.rlb-surface__section--overrun {
-    border-left-color: #cd4246;
-}
-
-.bp3-dark .rlb-surface__section--focused.rlb-surface__section--overrun {
-    border-left-color: #ff7373;
 }
 
 .rlb-surface__section--focused .rlb-surface__section-label {
@@ -5507,7 +5498,7 @@ var STYLES = `
 
 .rlb-surface__section--focused .rlb-run:hover,
 .rlb-surface__section--focused .rlb-run:focus-within {
-    background: rgba(126, 183, 148, 0.1);
+    background: var(--rlb-surface-hover);
 }
 
 .rlb-surface__section--recent {
@@ -5775,7 +5766,7 @@ var STYLES = `
     --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
     --rlb-surface-hover: rgba(167, 182, 194, 0.18);
     --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
-    --rlb-surface-focused: rgba(142, 208, 170, 0.1);
+    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
     --rlb-surface-link: #7eb7d5;
     --rlb-surface-link-hover: #9dcae2;
     --rlb-session-running: #8ed0aa;
@@ -5793,15 +5784,6 @@ var STYLES = `
 
 .rlb-run:hover {
     background: rgba(167, 182, 194, 0.2);
-}
-
-.rlb-run--overrun .rlb-run__meta {
-    color: #cd4246;
-    opacity: 1;
-}
-
-.bp3-dark .rlb-run--overrun .rlb-run__meta {
-    color: #ff7373;
 }
 
 .rlb-run__body {
@@ -5896,8 +5878,12 @@ var STYLES = `
     color: #c3d4df;
 }
 
-.rlb-run--overrun .rlb-run__elapsed {
-    color: inherit;
+.rlb-surface__section--focused .rlb-run--overrun .rlb-run__elapsed {
+    color: #cd4246;
+}
+
+.bp3-dark .rlb-surface__section--focused .rlb-run--overrun .rlb-run__elapsed {
+    color: #ff7373;
 }
 
 .rlb-run__meta-line {
