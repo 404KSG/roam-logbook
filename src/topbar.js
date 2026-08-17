@@ -248,12 +248,18 @@ export function createTopbar({
     };
 
     const sessionModel = () => {
-        const activeWork = clock.getActiveWork(nowDate());
+        const pausedItems = paused.getPaused();
+        const recoveryItems = paused
+            .getPendingResume()
+            .filter(item => item?.recoveryState === 'conflict');
+        const recoveryTaskUids = new Set(recoveryItems.map(item => item.taskUid));
+        const visiblePausedItems = pausedItems.filter(item => !recoveryTaskUids.has(item.taskUid));
+        const activeWork = clock.getActiveWork(nowDate(), { pausedItems, recoveryItems });
         return buildSessionSurfaceModel({
             entries: activeWork.focused ? [activeWork.focused] : [],
             recentItems: activeWork.recent,
-            pausedItems: paused.getPaused(),
-            pendingItems: paused.getPendingResume(),
+            pausedItems: visiblePausedItems,
+            pendingItems: recoveryItems,
             recoveryState: paused.getRecoveryState(),
             now: nowDate(),
             staleHours: staleHours(),
@@ -534,6 +540,7 @@ export function createTopbar({
         if (layoutMode === mode) return;
         if (mode === 'idle') buttonNode.replaceChildren(iconNode);
         else if (mode === 'paused') buttonNode.replaceChildren(iconNode);
+        else if (mode === 'active') buttonNode.replaceChildren(iconNode, parallelNode);
         else if (mode === 'parallel') buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         else buttonNode.replaceChildren(timeNode);
         layoutMode = mode;
@@ -545,20 +552,20 @@ export function createTopbar({
         { reconcile = true } = {}
     ) => {
         if (!buttonNode) return;
-        const derived = clock.getActiveWork(now);
-        const focused = derived.focused || entries[0] || null;
-        const activeWork = focused === derived.focused
-            ? derived
-            : focused
-              ? { focused, recent: [], items: [focused], count: 1 }
-              : { focused: null, recent: [], items: [], count: 0 };
-        const focusedEntries = focused ? [focused] : [];
         const pausedItems = paused.getPaused();
         const recoveryItems = paused
             .getPendingResume()
             .filter(item => item?.recoveryState === 'conflict');
         const finalizingRecovery = paused.getRecoveryState();
         const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
+        const derived = clock.getActiveWork(now, { pausedItems, recoveryItems });
+        const focused = derived.focused || entries[0] || null;
+        const activeWork = focused === derived.focused
+            ? derived
+            : focused
+              ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some(item => item.taskUid === focused.taskUid) ? 0 : 1) }
+              : derived;
+        const focusedEntries = focused ? [focused] : [];
         const running = focusedEntries.length > 0;
         if (running && reconcile) pomodoro.reconcileCycle(focusedEntries, { now });
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
@@ -576,7 +583,9 @@ export function createTopbar({
                 : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
 
         if (!running) {
-            buttonNode.classList.add('rlb-topbar__button--icon-only');
+            const hasActiveWork = activeWork.count > 0;
+            buttonNode.classList.toggle('rlb-topbar__button--icon-only', !hasActiveWork);
+            buttonNode.classList.toggle('rlb-topbar__button--active', hasActiveWork);
             buttonNode.classList.remove('rlb-topbar__button--parallel');
             buttonNode.classList.toggle(
                 'rlb-topbar__button--paused',
@@ -585,11 +594,9 @@ export function createTopbar({
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
-            parallelNode.textContent = '';
+            parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : '';
             separatorNode.textContent = '';
-            syncButtonLayout(
-                pausedItems.length > 0 || recoveryItems.length > 0 || finalizingRecovery ? 'paused' : 'idle'
-            );
+            syncButtonLayout(hasActiveWork ? 'active' : 'idle');
             buttonNode.title = pausedItems.length
                 ? `${taskCount(pausedItems.length)} Paused — click to resume or review.` +
                   (recoveryItems.length > 0
@@ -597,12 +604,16 @@ export function createTopbar({
                       : '')
                 : recoveryCount > 0
                   ? `${recoveryCount} Recovery item${recoveryCount === 1 ? '' : 's'} require review — click to retry.`
-                  : 'Roam Logbook — no Session running. Click for details.';
+                  : hasActiveWork
+                    ? `${activeCount(activeWork.count)} — no Session is currently timing. Click for details.`
+                    : 'Roam Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
+            if (activeChanged && popover) renderPopover();
             return;
         }
 
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
+        buttonNode.classList.remove('rlb-topbar__button--active');
         buttonNode.classList.remove('rlb-topbar__button--paused');
         const [first] = focusedEntries;
         // The topbar is a timing-state entry, not a task summary. Overrun
@@ -657,7 +668,6 @@ export function createTopbar({
     const tick = () => {
         tickCount += 1;
         const entries = clock.getRunning();
-        if (entries.length === 0) return;
         const now = nowDate();
         renderButton(entries, now);
         updateSessionSurfaceElapsed(popover, entries, now);

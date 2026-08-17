@@ -77,6 +77,14 @@ export const STYLES = `
     background: transparent !important;
 }
 
+.rlb-topbar__button--active {
+    column-gap: 6px;
+}
+
+.rlb-topbar__button--active > .rlb-topbar__icon {
+    flex: 0 0 auto;
+}
+
 .rlb-topbar__button--paused > .rlb-topbar__icon {
     color: var(--rlb-topbar-load-yellow) !important;
 }
@@ -374,7 +382,7 @@ export const STYLES = `
 }
 
 .rlb-surface__section--recent .rlb-run {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) max-content;
     padding: 6px;
     border-radius: 0;
     background: transparent;
@@ -820,6 +828,25 @@ export const STYLES = `
     justify-content: center;
     align-items: center;
     color: #5c7080;
+}
+
+.rlb-run__actions .rlb-run__focus {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
+    color: var(--rlb-muted, #7a8b99);
+}
+
+.rlb-run__actions .rlb-run__focus:hover,
+.rlb-run__actions .rlb-run__focus:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: rgba(167, 182, 194, 0.24);
 }
 
 .rlb-run__actions .rlb-run__checkout:hover,

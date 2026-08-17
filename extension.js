@@ -826,7 +826,12 @@ var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (i
 function chooseFocusedEntry(entries = []) {
   return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).slice().sort(compareNewest)[0] || null;
 }
-function buildActiveWork(entries = [], { now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES } = {}) {
+function buildActiveWork(entries = [], {
+  now = Date.now(),
+  windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
+  pausedItems = [],
+  recoveryItems = []
+} = {}) {
   const snapshot = Array.isArray(entries) ? entries : [];
   const nowMs = instantOf(now) ?? Date.now();
   const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
@@ -841,24 +846,18 @@ function buildActiveWork(entries = [], { now = Date.now(), windowMinutes = ACTIV
       (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
     );
   }
-  if (!focusedEntry) {
-    return {
-      focused: null,
-      recent: [],
-      items: [],
-      count: 0,
-      windowMinutes: normalizedWindow
-    };
-  }
+  const pausedTaskUids = new Set(
+    [...pausedItems, ...recoveryItems].map((item) => item?.taskUid).filter(Boolean)
+  );
   const recentByTask = /* @__PURE__ */ new Map();
   for (const candidate of snapshot) {
-    if (!candidate || candidate.running || candidate.taskUid === focusedEntry.taskUid)
+    if (!candidate || candidate.running || candidate.taskUid === focusedEntry?.taskUid || pausedTaskUids.has(candidate.taskUid))
       continue;
     const endedAt = instantOf(candidate.end);
     if (endedAt === null)
       continue;
     const age = nowMs - endedAt;
-    if (age < 0 || age > windowMs)
+    if (age < 0 || age >= windowMs)
       continue;
     const previous = recentByTask.get(candidate.taskUid);
     if (!previous || endedAt > instantOf(previous.end))
@@ -867,21 +866,26 @@ function buildActiveWork(entries = [], { now = Date.now(), windowMinutes = ACTIV
   const recent = [...recentByTask.values()].sort(
     (left, right) => (instantOf(right.end) ?? -Infinity) - (instantOf(left.end) ?? -Infinity)
   );
-  const focused = {
+  const focused = focusedEntry ? {
     ...focusedEntry,
     priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
     activeKind: "focused"
-  };
+  } : null;
   const recentItems = recent.map((item) => ({
     ...item,
     priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
     activeKind: "recent"
   }));
+  const pausedActiveItems = [...pausedItems, ...recoveryItems].filter((item) => item?.taskUid).map((item) => ({ ...item, activeKind: item.recoveryState ? "recovery" : "paused" }));
+  const allItems = [focused, ...recentItems, ...pausedActiveItems].filter(Boolean);
+  const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
   return {
     focused,
     recent: recentItems,
-    items: [focused, ...recentItems],
-    count: 1 + recentItems.length,
+    paused: pausedItems.slice(),
+    recovery: recoveryItems.slice(),
+    items: uniqueItems,
+    count: uniqueItems.length,
     windowMinutes: normalizedWindow
   };
 }
@@ -968,8 +972,8 @@ function getRunning() {
 function getEntriesSnapshot() {
   return entriesSnapshot.slice();
 }
-function getActiveWork(now = /* @__PURE__ */ new Date()) {
-  return buildActiveWork(entriesSnapshot, { now });
+function getActiveWork(now = /* @__PURE__ */ new Date(), options = {}) {
+  return buildActiveWork(entriesSnapshot, { now, ...options });
 }
 function getLastRefreshStatus() {
   return { ...lastRefreshStatus };
@@ -2108,7 +2112,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.24";
+var PLUGIN_VERSION = "0.9.0-beta.25";
 var STATE_FORMATS = Object.freeze({
   pauseBatch: 2,
   pomodoroTargets: 1,
@@ -5214,6 +5218,14 @@ var STYLES = `
     background: transparent !important;
 }
 
+.rlb-topbar__button--active {
+    column-gap: 6px;
+}
+
+.rlb-topbar__button--active > .rlb-topbar__icon {
+    flex: 0 0 auto;
+}
+
 .rlb-topbar__button--paused > .rlb-topbar__icon {
     color: var(--rlb-topbar-load-yellow) !important;
 }
@@ -5511,7 +5523,7 @@ var STYLES = `
 }
 
 .rlb-surface__section--recent .rlb-run {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) max-content;
     padding: 6px;
     border-radius: 0;
     background: transparent;
@@ -5957,6 +5969,25 @@ var STYLES = `
     justify-content: center;
     align-items: center;
     color: #5c7080;
+}
+
+.rlb-run__actions .rlb-run__focus {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0 !important;
+    justify-content: center;
+    align-items: center;
+    color: var(--rlb-muted, #7a8b99);
+}
+
+.rlb-run__actions .rlb-run__focus:hover,
+.rlb-run__actions .rlb-run__focus:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: rgba(167, 182, 194, 0.24);
 }
 
 .rlb-run__actions .rlb-run__checkout:hover,
@@ -7108,7 +7139,7 @@ var rowFigures = (entry, now) => {
   };
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
-var focusRecentLabel = (title) => `Focus this recent Task: ${title}`;
+var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
@@ -7131,25 +7162,16 @@ var renderRunningFigures = (entry, now) => {
   primary.querySelector(".rlb-run__meta-separator").setAttribute("aria-hidden", "true");
   return primary;
 };
-var renderTitle = (row, onOpenTask, onFocusRecent) => {
+var renderTitle = (row, onOpenTask) => {
   const title = row.title || row.taskUid;
   const recent = row.kind === "recent";
   const taskButton = button(
     `bp3-button bp3-minimal rlb-run__title${recent ? " rlb-run__title--recent" : ""}`,
     title,
-    (event) => {
-      if (recent && !event?.shiftKey) {
-        event.stopPropagation();
-        void onFocusRecent?.(row.entry, event);
-        return;
-      }
-      onOpenTask?.(row.taskUid, event);
-    },
-    { title: recent ? focusRecentLabel(title) : fullTaskLabel(title) }
+    (event) => onOpenTask?.(row.taskUid, event),
+    { title: fullTaskLabel(title) }
   );
-  taskButton.setAttribute("aria-label", recent ? focusRecentLabel(title) : fullTaskLabel(title));
-  if (recent)
-    taskButton.dataset.action = "focus-recent";
+  taskButton.setAttribute("aria-label", fullTaskLabel(title));
   return taskButton;
 };
 var renderRunningRow = (row, now, options) => {
@@ -7178,7 +7200,7 @@ var renderRunningRow = (row, now, options) => {
   if (started.datetime)
     startedNode.dateTime = started.datetime;
   appendMetaNodes(meta, [primary, startedNode]);
-  body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
+  body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(
     "bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout",
@@ -7227,8 +7249,20 @@ var renderRecentRow = (row, now, options) => {
   if (ended.datetime)
     endedNode.dateTime = ended.datetime;
   meta.appendChild(endedNode);
-  body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
-  node.appendChild(body);
+  body.append(renderTitle(row, options.onOpenTask), meta);
+  const actions = el("div", "rlb-run__actions");
+  const focus = button(
+    "bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus",
+    "",
+    (event) => {
+      event.stopPropagation();
+      void options.onFocusRecent?.(entry, event);
+    },
+    { title: focusRecentLabel(row.title || row.taskUid) }
+  );
+  focus.dataset.action = "focus-recent";
+  actions.appendChild(focus);
+  node.append(body, actions);
   return node;
 };
 var renderPausedRow = (row, now, options) => {
@@ -7758,12 +7792,16 @@ function createTopbar({
     popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
   };
   const sessionModel = () => {
-    const activeWork = getActiveWork(nowDate());
+    const pausedItems = getPaused();
+    const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
+    const recoveryTaskUids = new Set(recoveryItems.map((item) => item.taskUid));
+    const visiblePausedItems = pausedItems.filter((item) => !recoveryTaskUids.has(item.taskUid));
+    const activeWork = getActiveWork(nowDate(), { pausedItems, recoveryItems });
     return buildSessionSurfaceModel({
       entries: activeWork.focused ? [activeWork.focused] : [],
       recentItems: activeWork.recent,
-      pausedItems: getPaused(),
-      pendingItems: getPendingResume(),
+      pausedItems: visiblePausedItems,
+      pendingItems: recoveryItems,
       recoveryState: getRecoveryState(),
       now: nowDate(),
       staleHours: staleHours()
@@ -8024,6 +8062,8 @@ function createTopbar({
       buttonNode.replaceChildren(iconNode);
     else if (mode === "paused")
       buttonNode.replaceChildren(iconNode);
+    else if (mode === "active")
+      buttonNode.replaceChildren(iconNode, parallelNode);
     else if (mode === "parallel")
       buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
     else
@@ -8033,14 +8073,14 @@ function createTopbar({
   const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true } = {}) => {
     if (!buttonNode)
       return;
-    const derived = getActiveWork(now);
-    const focused = derived.focused || entries[0] || null;
-    const activeWork = focused === derived.focused ? derived : focused ? { focused, recent: [], items: [focused], count: 1 } : { focused: null, recent: [], items: [], count: 0 };
-    const focusedEntries = focused ? [focused] : [];
     const pausedItems = getPaused();
     const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
     const finalizingRecovery = getRecoveryState();
     const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
+    const derived = getActiveWork(now, { pausedItems, recoveryItems });
+    const focused = derived.focused || entries[0] || null;
+    const activeWork = focused === derived.focused ? derived : focused ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some((item) => item.taskUid === focused.taskUid) ? 0 : 1) } : derived;
+    const focusedEntries = focused ? [focused] : [];
     const running2 = focusedEntries.length > 0;
     if (running2 && reconcile2)
       reconcileCycle(focusedEntries, { now });
@@ -8053,7 +8093,9 @@ function createTopbar({
     activeSignature = signature;
     parallelNode.className = loadTone === "neutral" ? "rlb-topbar__parallel" : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
     if (!running2) {
-      buttonNode.classList.add("rlb-topbar__button--icon-only");
+      const hasActiveWork = activeWork.count > 0;
+      buttonNode.classList.toggle("rlb-topbar__button--icon-only", !hasActiveWork);
+      buttonNode.classList.toggle("rlb-topbar__button--active", hasActiveWork);
       buttonNode.classList.remove("rlb-topbar__button--parallel");
       buttonNode.classList.toggle(
         "rlb-topbar__button--paused",
@@ -8062,17 +8104,18 @@ function createTopbar({
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
-      parallelNode.textContent = "";
+      parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : "";
       separatorNode.textContent = "";
-      syncButtonLayout(
-        pausedItems.length > 0 || recoveryItems.length > 0 || finalizingRecovery ? "paused" : "idle"
-      );
+      syncButtonLayout(hasActiveWork ? "active" : "idle");
       buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
-${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryCount > 0 ? `${recoveryCount} Recovery item${recoveryCount === 1 ? "" : "s"} require review \u2014 click to retry.` : "Roam Logbook \u2014 no Session running. Click for details.";
+${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryCount > 0 ? `${recoveryCount} Recovery item${recoveryCount === 1 ? "" : "s"} require review \u2014 click to retry.` : hasActiveWork ? `${activeCount(activeWork.count)} \u2014 no Session is currently timing. Click for details.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
+      if (activeChanged && popover)
+        renderPopover();
       return;
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
+    buttonNode.classList.remove("rlb-topbar__button--active");
     buttonNode.classList.remove("rlb-topbar__button--paused");
     const [first] = focusedEntries;
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
@@ -8103,8 +8146,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   const tick = () => {
     tickCount += 1;
     const entries = getRunning();
-    if (entries.length === 0)
-      return;
     const now = nowDate();
     renderButton(entries, now);
     updateSessionSurfaceElapsed(popover, entries, now);

@@ -611,12 +611,13 @@ test('clocking out through the palette closes the entry', async () => {
     const drawer = graph.childrenOf('taskone01')[0];
     assert.match(graph.childrenOf(drawer.uid)[0].string, /\]--\[.*\] => \d+:\d\d$/);
     assert.ok(!topbarWidget().querySelector('.rlb-topbar__button--running'));
-    // Idle is icon-only — it earns no words in Roam's topbar — so the state
-    // shows up in the icon and the tooltip rather than in the text.
-    assert.equal(topbarWidget().textContent, '');
+    // Clock Out removes the timer, but recent work remains visible for the
+    // 45-minute Active Work window.
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
+    assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(topbarWidget().querySelector('button').title, /no Session running/);
+    assert.match(topbarWidget().querySelector('button').title, /no Session is currently timing/);
 });
 
 test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {

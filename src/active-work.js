@@ -36,7 +36,12 @@ export function chooseFocusedEntry(entries = []) {
  */
 export function buildActiveWork(
     entries = [],
-    { now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES } = {}
+    {
+        now = Date.now(),
+        windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
+        pausedItems = [],
+        recoveryItems = [],
+    } = {}
 ) {
     const snapshot = Array.isArray(entries) ? entries : [];
     const nowMs = instantOf(now) ?? Date.now();
@@ -54,25 +59,23 @@ export function buildActiveWork(
         );
     }
 
-    // Without a Focused CLOCK the widget is idle. Recent history remains in the
-    // graph/dashboard, but it is not an Active Work surface by itself.
-    if (!focusedEntry) {
-        return {
-            focused: null,
-            recent: [],
-            items: [],
-            count: 0,
-            windowMinutes: normalizedWindow,
-        };
-    }
-
+    const pausedTaskUids = new Set(
+        [...pausedItems, ...recoveryItems]
+            .map(item => item?.taskUid)
+            .filter(Boolean)
+    );
     const recentByTask = new Map();
     for (const candidate of snapshot) {
-        if (!candidate || candidate.running || candidate.taskUid === focusedEntry.taskUid) continue;
+        if (
+            !candidate ||
+            candidate.running ||
+            candidate.taskUid === focusedEntry?.taskUid ||
+            pausedTaskUids.has(candidate.taskUid)
+        ) continue;
         const endedAt = instantOf(candidate.end);
         if (endedAt === null) continue;
         const age = nowMs - endedAt;
-        if (age < 0 || age > windowMs) continue;
+        if (age < 0 || age >= windowMs) continue;
         const previous = recentByTask.get(candidate.taskUid);
         if (!previous || endedAt > instantOf(previous.end)) recentByTask.set(candidate.taskUid, candidate);
     }
@@ -80,21 +83,30 @@ export function buildActiveWork(
     const recent = [...recentByTask.values()].sort(
         (left, right) => (instantOf(right.end) ?? -Infinity) - (instantOf(left.end) ?? -Infinity)
     );
-    const focused = {
-        ...focusedEntry,
-        priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
-        activeKind: 'focused',
-    };
+    const focused = focusedEntry
+        ? {
+              ...focusedEntry,
+              priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
+              activeKind: 'focused',
+          }
+        : null;
     const recentItems = recent.map(item => ({
         ...item,
         priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
         activeKind: 'recent',
     }));
+    const pausedActiveItems = [...pausedItems, ...recoveryItems]
+        .filter(item => item?.taskUid)
+        .map(item => ({ ...item, activeKind: item.recoveryState ? 'recovery' : 'paused' }));
+    const allItems = [focused, ...recentItems, ...pausedActiveItems].filter(Boolean);
+    const uniqueItems = [...new Map(allItems.map(item => [item.taskUid, item])).values()];
     return {
         focused,
         recent: recentItems,
-        items: [focused, ...recentItems],
-        count: 1 + recentItems.length,
+        paused: pausedItems.slice(),
+        recovery: recoveryItems.slice(),
+        items: uniqueItems,
+        count: uniqueItems.length,
         windowMinutes: normalizedWindow,
     };
 }

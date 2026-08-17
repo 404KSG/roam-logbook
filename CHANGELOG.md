@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0-beta.25 — 2026-08-17
+
+- Separated Recent Task navigation from Focus switching: clicking a title opens
+  its Roam block, Shift+click opens it in the right sidebar, and a dedicated
+  action starts the Task's Focused CLOCK.
+- Kept the 45-minute Active Work set visible after Clock Out and Pause. With no
+  timer running, the Top Bar now shows only the distinct Active count; Paused
+  and Recovery Tasks take precedence over duplicate Recent rows.
+- Let Recent work expire from the in-memory snapshot at the 45-minute boundary
+  even while no CLOCK is running, without adding graph reads.
+- Added direct interaction coverage for Clock Out, Pause, Recent navigation,
+  Focus switching, deduplication, and idle-window expiry.
+
 ## 0.9.0-beta.24 — 2026-08-17
 
 - Refined the Active Work popover toward a restrained Linear-style hierarchy:

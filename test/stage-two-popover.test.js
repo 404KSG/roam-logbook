@@ -97,7 +97,10 @@ const createManualPostPaintScheduler = () => {
     };
 };
 
-const mountControlledTopbar = (t, { blocks, scheduler, prime = true }) => {
+const mountControlledTopbar = (
+    t,
+    { blocks, scheduler, prime = true, setIntervalFn, clearIntervalFn }
+) => {
     extension.onunload();
     document.body.innerHTML = '<div class="rm-topbar"></div>';
     install(blocks);
@@ -107,6 +110,8 @@ const mountControlledTopbar = (t, { blocks, scheduler, prime = true }) => {
     const topbar = createTopbar({
         onOpenDashboard: () => {},
         scheduleAfterPaintFn: scheduler.schedule,
+        ...(setIntervalFn ? { setIntervalFn } : {}),
+        ...(clearIntervalFn ? { clearIntervalFn } : {}),
     });
     topbar.mount();
     t.after(() => {
@@ -135,6 +140,15 @@ const cachedSessionBlocks = ({ title = 'Cached Session' } = {}) => [
         parent: 'popover-drawer-01',
     },
 ];
+
+const addTask = (uid, title) => {
+    graph.store.set(uid, {
+        uid,
+        string: `{{[[TODO]]}} ${title}`,
+        parent: null,
+        page: 'Project Page',
+    });
+};
 
 test.beforeEach(() => {
     extension.onunload();
@@ -975,7 +989,14 @@ test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
     assert.equal(focusedSection.querySelectorAll('.rlb-run').length, 1);
     assert.equal(recentSection.querySelectorAll('.rlb-run').length, 1);
     assert.ok(focused.querySelector('.rlb-run__actions'));
-    assert.equal(recent.querySelector('.rlb-run__actions'), null);
+    const recentTitle = recent.querySelector('.rlb-run__title');
+    assert.equal(recentTitle.title, 'Open this block: Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.equal(recentTitle.getAttribute('aria-label'), 'Open this block: Graph Engineering: a deliberately long task title that must remain accessible');
+    const recentFocus = recent.querySelector('[data-action="focus-recent"]');
+    assert.ok(recentFocus);
+    assert.equal(recentFocus.title, 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.equal(recentFocus.getAttribute('aria-label'), 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.ok(recentFocus.classList.contains('bp3-icon-play'));
     assert.equal(focused.querySelector('.rlb-run__elapsed').textContent, '3:00');
 
     const recentMeta = recent.querySelector('.rlb-run__recent-meta');
@@ -997,7 +1018,36 @@ test('Beta.24 Active Work keeps Focused neutral and Recent flat', async t => {
     assert.match(focusedSection.querySelector('.rlb-run__total').textContent, /^\d+\w+ total$/);
 });
 
-test('clicking a Recent row switches it to the one Focused CLOCK', async t => {
+test('clicking a Recent title opens its block without switching Focus', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
+    graph.store.set('popover-task-02', {
+        uid: 'popover-task-02',
+        string: '{{[[TODO]]}} A second task',
+        parent: null,
+        page: 'Project Page',
+    });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
+
+    const openCalls = [];
+    const mainWindow = window.roamAlphaAPI.ui.mainWindow;
+    const originalOpenBlock = mainWindow.openBlock;
+    mainWindow.openBlock = async spec => openCalls.push(spec);
+    try {
+        const surface = openPopover();
+        const recentTitle = surface.querySelector('.rlb-surface__section--recent .rlb-run__title');
+        click(recentTitle);
+        await settle();
+
+        assert.deepEqual(openCalls, [{ block: { uid: 'popover-task-01' } }]);
+        assert.equal(clock.getRunning().length, 1);
+        assert.equal(clock.getRunning()[0].taskUid, 'popover-task-02');
+    } finally {
+        mainWindow.openBlock = originalOpenBlock;
+    }
+});
+
+test('the Recent Focus action switches it to the one Focused CLOCK', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
@@ -1009,11 +1059,11 @@ test('clicking a Recent row switches it to the one Focused CLOCK', async t => {
     await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
 
     const surface = openPopover();
-    const recentTitle = surface.querySelector(
+    const recentFocus = surface.querySelector(
         '.rlb-surface__section--recent [data-action="focus-recent"]'
     );
-    assert.equal(recentTitle.textContent, 'Graph Engineering: a deliberately long task title that must remain accessible');
-    click(recentTitle);
+    assert.equal(recentFocus.getAttribute('aria-label'), 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    click(recentFocus);
     await settle();
 
     assert.equal(clock.getRunning().length, 1);
@@ -1058,6 +1108,137 @@ test('Check Out icon ends only the clicked Focused Task; Recent Tasks have no ti
     click(rows[0].querySelector('[data-action="clock-out"]'));
     await settle();
     assert.equal(clock.getRunning().length, 0);
+});
+
+test('Clock Out keeps the open popover and exposes the ended Focus plus prior Recent Tasks', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:00:00') });
+    addTask('popover-task-02', 'A prior Recent task');
+    addTask('popover-task-03', 'The current Focus task');
+
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T08:30:00') });
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T08:40:00') });
+    await clock.clockIn('popover-task-03', { now: new Date('2026-08-17T08:50:00') });
+
+    const surface = openPopover();
+    const checkout = surface.querySelector('[data-action="clock-out"]');
+    click(checkout);
+    await settle();
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(surface.querySelector('.rlb-surface__section--focused'), null);
+    assert.deepEqual(
+        [...surface.querySelectorAll('[data-session-state="recent"]')].map(row => row.dataset.taskUid),
+        ['popover-task-03', 'popover-task-02']
+    );
+    assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-03"]').length, 1);
+    assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-02"]').length, 1);
+    assert.equal(topbarButton().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
+    assert.equal(topbarButton().querySelector('.rlb-topbar__time'), null);
+    assert.equal(topbarButton().textContent, '2 Active');
+});
+
+test('Pause keeps the paused Focus and other Recent Tasks without duplicating the paused task', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:00:00') });
+    addTask('popover-task-02', 'A prior Recent task');
+    addTask('popover-task-03', 'The current Focus task');
+
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T08:30:00') });
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T08:40:00') });
+    await clock.clockIn('popover-task-03', { now: new Date('2026-08-17T08:50:00') });
+
+    const surface = openPopover();
+    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
+    await settle();
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 1);
+    assert.equal(surface.querySelector('[data-session-state="paused"]').dataset.taskUid, 'popover-task-03');
+    assert.deepEqual(
+        [...surface.querySelectorAll('[data-session-state="recent"]')].map(row => row.dataset.taskUid),
+        ['popover-task-02']
+    );
+    assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-03"]').length, 1);
+    assert.equal(topbarButton().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
+});
+
+test('pure Recent Active Work expires on the ticker without another graph read', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:00:00') });
+    const scheduler = createManualPostPaintScheduler();
+    const tickerCallbacks = [];
+    const topbar = mountControlledTopbar(t, {
+        blocks: [],
+        scheduler,
+        setIntervalFn: callback => {
+            tickerCallbacks.push(callback);
+            return callback;
+        },
+        clearIntervalFn: callback => {
+            const index = tickerCallbacks.indexOf(callback);
+            if (index >= 0) tickerCallbacks.splice(index, 1);
+        },
+    });
+    addTask('popover-task-02', 'A Recent task');
+
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T09:00:00') });
+    t.mock.timers.tick(60_000);
+    await clock.clockOut(clock.getRunning()[0].clockUid);
+    const surface = openPopover();
+    scheduler.flush();
+    await settle();
+
+    assert.equal(surface.querySelectorAll('[data-session-state="recent"]').length, 1);
+    let graphReads = 0;
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    try {
+        const readsBeforeExpiry = graphReads;
+        t.mock.timers.tick(45 * 60_000);
+        for (let index = 0; index < 45 * 60; index += 1) tickerCallbacks[0]?.();
+
+        assert.equal(graphReads, readsBeforeExpiry, 'ticker expiry is derived from the cached snapshot');
+        assert.equal(surface.querySelectorAll('[data-session-state="recent"]').length, 0);
+        assert.ok(surface.querySelector('.rlb-popover__empty'));
+        assert.equal(topbarButton().querySelector('.rlb-topbar__parallel'), null);
+        assert.equal(topbarButton().querySelector('.rlb-topbar__time'), null);
+        assert.ok(topbarButton().querySelector('.bp3-icon-history'));
+        assert.equal(topbarButton().textContent, '');
+        assert.equal(topbar.getPerformanceSnapshot().tickCount >= 45, true);
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+});
+
+test('pure Recent rows keep navigation and an independent Focus action', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:05:00') });
+    addTask('popover-task-02', 'A Recent task');
+    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T09:00:00') });
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T09:01:00') });
+
+    const openCalls = [];
+    const mainWindow = window.roamAlphaAPI.ui.mainWindow;
+    const originalOpenBlock = mainWindow.openBlock;
+    mainWindow.openBlock = async spec => openCalls.push(spec);
+    try {
+        const surface = openPopover();
+        const row = surface.querySelector('[data-session-state="recent"]');
+        const title = row.querySelector('.rlb-run__title');
+        const focus = row.querySelector('[data-action="focus-recent"]');
+
+        click(title);
+        await settle();
+        assert.deepEqual(openCalls, [{ block: { uid: 'popover-task-02' } }]);
+        assert.equal(clock.getRunning().length, 0, 'navigation does not start timing');
+
+        click(focus);
+        await settle();
+        assert.equal(clock.getRunning().length, 1);
+        assert.equal(clock.getRunning()[0].taskUid, 'popover-task-02');
+    } finally {
+        mainWindow.openBlock = originalOpenBlock;
+    }
 });
 
 test('a paused row exposes an icon-only Resume action and restores one Focused Task', async t => {
@@ -1120,12 +1301,14 @@ test('paused topbar keeps its clock identity while visibly distinguishing paused
     await settle();
 
     const pausedButton = topbarButton();
-    assert.ok(pausedButton.classList.contains('rlb-topbar__button--icon-only'));
+    assert.equal(pausedButton.classList.contains('rlb-topbar__button--icon-only'), false);
+    assert.ok(pausedButton.classList.contains('rlb-topbar__button--active'));
     assert.ok(pausedButton.classList.contains('rlb-topbar__button--paused'));
     assert.ok(pausedButton.querySelector('.bp3-icon-history'), 'paused state keeps the clock identity');
     assert.equal(pausedButton.querySelector('.rlb-topbar__pause-badge'), null);
     assert.match(pausedButton.getAttribute('aria-label'), /1 Task Paused/i);
-    assert.equal(pausedButton.textContent, '');
+    assert.equal(pausedButton.querySelector('.rlb-topbar__parallel').textContent, '1 Active');
+    assert.equal(pausedButton.querySelector('.rlb-topbar__time'), null);
 
     const resume = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
     assert.ok(resume);

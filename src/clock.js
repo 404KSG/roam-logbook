@@ -66,8 +66,8 @@ export function getEntriesSnapshot() {
 }
 
 /** Derive the one Focused item plus the recent return set without a graph read. */
-export function getActiveWork(now = new Date()) {
-    return buildActiveWork(entriesSnapshot, { now });
+export function getActiveWork(now = new Date(), options = {}) {
+    return buildActiveWork(entriesSnapshot, { now, ...options });
 }
 
 export function getLastRefreshStatus() {

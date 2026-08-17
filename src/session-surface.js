@@ -24,7 +24,7 @@ const rowFigures = (entry, now) => {
 };
 
 const fullTaskLabel = title => `Open this block: ${title}`;
-const focusRecentLabel = title => `Focus this recent Task: ${title}`;
+const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
 
 const appendMetaNodes = (meta, nodes) => {
@@ -50,24 +50,16 @@ const renderRunningFigures = (entry, now) => {
     return primary;
 };
 
-const renderTitle = (row, onOpenTask, onFocusRecent) => {
+const renderTitle = (row, onOpenTask) => {
     const title = row.title || row.taskUid;
     const recent = row.kind === 'recent';
     const taskButton = button(
         `bp3-button bp3-minimal rlb-run__title${recent ? ' rlb-run__title--recent' : ''}`,
         title,
-        event => {
-            if (recent && !event?.shiftKey) {
-                event.stopPropagation();
-                void onFocusRecent?.(row.entry, event);
-                return;
-            }
-            onOpenTask?.(row.taskUid, event);
-        },
-        { title: recent ? focusRecentLabel(title) : fullTaskLabel(title) }
+        event => onOpenTask?.(row.taskUid, event),
+        { title: fullTaskLabel(title) }
     );
-    taskButton.setAttribute('aria-label', recent ? focusRecentLabel(title) : fullTaskLabel(title));
-    if (recent) taskButton.dataset.action = 'focus-recent';
+    taskButton.setAttribute('aria-label', fullTaskLabel(title));
     return taskButton;
 };
 
@@ -99,7 +91,7 @@ const renderRunningRow = (row, now, options) => {
     startedNode.setAttribute('aria-label', startedDetails);
     if (started.datetime) startedNode.dateTime = started.datetime;
     appendMetaNodes(meta, [primary, startedNode]);
-    body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
+    body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
     const checkout = button(
@@ -153,8 +145,21 @@ const renderRecentRow = (row, now, options) => {
     endedNode.setAttribute('aria-label', `${total} total; last active ${ended.raw}`);
     if (ended.datetime) endedNode.dateTime = ended.datetime;
     meta.appendChild(endedNode);
-    body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
-    node.appendChild(body);
+    body.append(renderTitle(row, options.onOpenTask), meta);
+
+    const actions = el('div', 'rlb-run__actions');
+    const focus = button(
+        'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus',
+        '',
+        event => {
+            event.stopPropagation();
+            void options.onFocusRecent?.(entry, event);
+        },
+        { title: focusRecentLabel(row.title || row.taskUid) }
+    );
+    focus.dataset.action = 'focus-recent';
+    actions.appendChild(focus);
+    node.append(body, actions);
     return node;
 };
 

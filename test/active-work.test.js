@@ -46,12 +46,33 @@ test('Active Work chooses the newest running entry as Focused during legacy over
     assert.equal(model.count, 1);
 });
 
-test('Active Work is empty when there is no Focused CLOCK', () => {
+test('Active Work keeps pure Recent history when there is no Focused CLOCK', () => {
     const model = buildActiveWork([
         entry({ taskUid: 'recent', start: '09:00', end: '10:00' }),
     ], { now: at('10:01') });
 
     assert.equal(model.focused, null);
-    assert.deepEqual(model.items, []);
-    assert.equal(model.count, 0);
+    assert.deepEqual(model.recent.map(item => item.taskUid), ['recent']);
+    assert.deepEqual(model.items.map(item => item.taskUid), ['recent']);
+    assert.equal(model.count, 1);
+});
+
+test('Active Work prioritizes Paused and keeps other Recent Tasks without duplicates', () => {
+    const model = buildActiveWork([
+        entry({ taskUid: 'paused', start: '09:00', end: '10:00' }),
+        entry({ taskUid: 'recent', start: '09:20', end: '10:10' }),
+    ], {
+        now: at('10:20'),
+        pausedItems: [{ taskUid: 'paused', title: 'paused', pausedAtMs: at('10:15').getTime() }],
+    });
+
+    assert.deepEqual(model.recent.map(item => item.taskUid), ['recent']);
+    assert.deepEqual(model.items.map(item => item.taskUid), ['recent', 'paused']);
+    assert.equal(model.count, 2);
+});
+
+test('pure Recent Active Work expires without a running clock', () => {
+    const entries = [entry({ taskUid: 'recent', start: '09:00', end: '10:00' })];
+    assert.equal(buildActiveWork(entries, { now: at('10:44') }).count, 1);
+    assert.equal(buildActiveWork(entries, { now: at('10:45') }).count, 0);
 });
