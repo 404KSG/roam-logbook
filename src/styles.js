@@ -358,6 +358,29 @@ export const STYLES = `
     padding: 6px 5px 8px;
 }
 
+.rlb-surface__section-label {
+    padding: 7px 6px 3px;
+    color: #7a8b99;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.65px;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.rlb-surface__section-label:not(:first-child) {
+    border-top: 1px solid var(--rlb-surface-border-light);
+    margin-top: 2px;
+}
+
+.rlb-run--recent {
+    opacity: 0.88;
+}
+
+.rlb-run--recent:hover {
+    opacity: 1;
+}
+
 .rlb-popover__notice {
     margin: 6px;
     padding: 6px 8px;

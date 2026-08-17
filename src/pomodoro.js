@@ -2,7 +2,8 @@
  * A shared Pomodoro cycle layered on top of running clocks.
  *
  * `cycle` is the active user-facing timer: one frozen threshold and one start
- * instant for the whole set of concurrently running Sessions. The old
+ * instant for the current continuous Focused work period. Seamless task
+ * switches retain the same cycle. The old
  * clock-UID target map remains only as a versioned compatibility read/write
  * seam for older integrations; it no longer drives the topbar or session UI.
  */
@@ -219,8 +220,8 @@ export function cycleOverrunMs(now = Date.now()) {
  * Reconcile one graph snapshot with the shared Pomodoro cycle.
  *
  * A non-empty snapshot starts a cycle only when no cycle is active. The cycle
- * then survives parallel Session additions/removals until the graph confirms
- * that no Session remains. On reload, a valid persisted cycle wins; otherwise
+ * then survives Focused task switches until the graph confirms that no Focused
+ * work remains. On reload, a valid persisted cycle wins; otherwise
  * the earliest open CLOCK is the conservative fallback.
  */
 export function reconcileCycle(running = [], { now = Date.now() } = {}) {

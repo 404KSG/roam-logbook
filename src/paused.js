@@ -13,9 +13,7 @@ import { taskTitle } from './org.js';
 import { STATE_FORMATS } from './version.js';
 import { getBlockString, GraphReadError } from './roam.js';
 import {
-    allowMultipleClocks,
     readSetting,
-    SETTING_MULTIPLE,
     SETTING_PAUSED_BATCH,
     preserveStateBackup,
     writeSetting,
@@ -955,31 +953,6 @@ export async function resumeOne(taskUid, { now = new Date() } = {}) {
         });
     }
 
-    let enabledMultiple = false;
-    if (initial.running.length > 0 && !allowMultipleClocks()) {
-        try {
-            writeSetting(SETTING_MULTIPLE, true);
-        } catch (error) {
-            notice = 'Multiple clocks could not be enabled; the paused Session was kept.';
-            notify();
-            return resumeOneResult({
-                failed: 1,
-                pendingTaskUids: [taskUid],
-                error,
-            });
-        }
-        if (!allowMultipleClocks()) {
-            notice = 'Multiple clocks could not be enabled; the paused Session was kept.';
-            notify();
-            return resumeOneResult({
-                failed: 1,
-                pendingTaskUids: [taskUid],
-                error: new Error(notice),
-            });
-        }
-        enabledMultiple = true;
-    }
-
     try {
         await resumeRecord(valid, now);
     } catch (error) {
@@ -1003,9 +976,9 @@ export async function resumeOne(taskUid, { now = new Date() } = {}) {
         });
     }
 
-    notice = enabledMultiple ? 'Multiple clocks were enabled to resume this Session.' : '';
+    notice = '';
     notify();
-    return resumeOneResult({ completed: 1, enabledMultiple });
+    return resumeOneResult({ completed: 1 });
 }
 
 /** Start a fresh CLOCK for each valid paused task and consume successful records. */
@@ -1024,9 +997,9 @@ export async function resumeAll({ now = new Date(), reconcileOnly = false } = {}
 
     const hadFinalizing = Boolean(finalizing);
     notice = '';
-    // Read the complete graph snapshot before planning any CLOCK writes. The
-    // multiple-clock setting must be enabled before the first resume so a batch
-    // cannot make its own later Sessions clock one another out.
+    // Read the complete graph snapshot before planning any CLOCK writes. Resume
+    // uses the same single-Focused clock boundary as manual Clock In; a batch
+    // can never create overlapping real timers.
     const initial = clock.refreshResult();
     if (!initial.ok) {
         notice = clock.getNotice() || 'Graph state could not be confirmed; no further changes were made.';
@@ -1139,35 +1112,6 @@ export async function resumeAll({ now = new Date(), reconcileOnly = false } = {}
         ready.push(valid);
     }
 
-    const needsMultiple = ready.length > 1 || (ready.length > 0 && runningEntries.length > 0);
-    let enabledMultiple = false;
-    if (needsMultiple && !allowMultipleClocks()) {
-        try {
-            writeSetting(SETTING_MULTIPLE, true);
-        } catch (error) {
-            console.error('[roam-logbook] could not enable multiple clocks for Resume All', error);
-        }
-        if (!allowMultipleClocks()) {
-            notice = 'Multiple clocks could not be enabled; no paused Tasks were resumed.';
-            items = [...retained, ...ready];
-            persist();
-            notify();
-            return {
-                ...resumeBatchResult({
-                    completed: recovered.recovered,
-                    failed: recovered.failed + recovered.conflicts.length + ready.length,
-                    pendingTaskUids: [...retained, ...ready, ...pendingResume].map(item => item.taskUid),
-                    blocked: true,
-                    error: new Error(notice),
-                    pruned,
-                    satisfied,
-                }),
-                conflicts: recovered.conflicts,
-            };
-        }
-        enabledMultiple = true;
-    }
-
     let resumed = recovered.recovered;
     let failed = recovered.failed + uncertain + recovered.conflicts.length;
     let legacyRecovered = recovered.legacyRecovered;
@@ -1204,7 +1148,9 @@ export async function resumeAll({ now = new Date(), reconcileOnly = false } = {}
 
     items = retained.filter(item => !completedTasks.has(item.taskUid));
     const messages = [];
-    if (enabledMultiple) messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
+    if (ready.length > 1) {
+        messages.push('Paused Tasks were resumed as a single Focused CLOCK in sequence.');
+    }
     if (pruned > 0) messages.push(`${pruned} missing Task${pruned === 1 ? ' was' : 's were'} removed.`);
     if (completedPruned > 0) {
         messages.push(

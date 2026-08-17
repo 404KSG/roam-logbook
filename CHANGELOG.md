@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.22 — 2026-08-17
+
+- Replaced overlapping parallel CLOCKs with one Focused CLOCK. Switching Tasks
+  closes the previous interval and opens the next at the same action instant, so
+  recorded user time remains linear and cannot be double-counted.
+- Added a 45-minute Active Work return set: the Top Bar shows
+  `cycle time · N Active`, while the popover separates the timed Focused Task
+  from untimed Recent Tasks that can be focused again with one click.
+- Preserved one shared work/Pomodoro cycle across seamless Task switches.
+  Pause, Clock Out, or a confirmed empty state resets the cycle; reaching the
+  threshold only changes the timer colour and never ends the CLOCK.
+- Changed the default Pomodoro duration from 30 to 45 minutes while preserving
+  existing user-configured values and the legacy per-session compatibility data.
+- Added safe reload reconciliation for legacy graphs with multiple open CLOCKs:
+  the newest interval becomes Focused and older overlaps are closed at its start
+  boundary without deleting or merging historical Sessions.
+- Kept the Roam Depot submission as a Draft preview and rebuilt the checked-in
+  bundle from the verified beta.22 source.
+
 ## 0.9.0-beta.21 — 2026-08-16
 
 - Hardened the graph-backed completion and Pause/Resume boundaries: DONE tree

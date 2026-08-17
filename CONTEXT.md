@@ -15,9 +15,15 @@ A single `CLOCK` interval belonging to exactly one Task. A Session may be runnin
 or completed.
 _Avoid_: Task, timer
 
-**Running Session**:
-A Session whose `CLOCK` interval has no end time yet. The Topbar count is the
-number of Running Sessions, not the number of distinct Tasks.
+**Focused CLOCK**:
+The one Session whose `CLOCK` interval has no end time yet. At most one Focused
+CLOCK exists; switching Tasks closes the old interval before opening the new one.
+The Topbar count is Active Work, not the number of running CLOCK blocks.
+
+**Active Work**:
+The Focused Task plus distinct Tasks whose most recent Session ended within the
+fixed 45-minute return window. Recent Tasks are clickable navigation shortcuts;
+they never imply a second running CLOCK.
 _Avoid_: active Task, open Task
 
 **Completed Session**:
@@ -42,8 +48,8 @@ paused batch is Task-based recoverable state, not a set of paused Sessions.
 _Avoid_: paused Session, frozen Session
 
 **Pomodoro Cycle**:
-One shared focus cycle for the current running state. The first confirmed
-Running Session captures the threshold and start instant; parallel Sessions
+One shared focus cycle for the current continuous work period. The first
+Focused CLOCK captures the threshold and start instant; seamless Task switches
 share it, and passing the threshold changes the reminder state without ending a
 Session.
 _Avoid_: per-Session timer, Pomodoro Session, timer limit
@@ -71,11 +77,11 @@ pretend that an unconfirmed graph read was empty.
 
 ## DONE completion
 
-Changing a Task to `DONE` closes its confirmed running Sessions and the confirmed
-running Sessions of its descendants. A parent without its own Session still
-closes its running child tree; siblings and unrelated parallel Sessions remain
-running. Reload reconciliation applies the same rule to open CLOCKs left under
-DONE Tasks. Manual single-Session Check Out remains exact and does not cascade.
+Changing a Task to `DONE` closes its confirmed Focused CLOCK and any confirmed
+legacy open descendant CLOCKs. A parent without its own Session still closes its
+running child tree. Reload reconciliation deterministically keeps one Focused
+CLOCK and closes older overlapping legacy intervals. Manual single-Session Check
+Out remains exact and does not cascade.
 
 ## Roam adapter boundary
 

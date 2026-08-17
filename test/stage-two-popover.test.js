@@ -46,7 +46,7 @@ const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
 const paused = await import('../src/paused.js');
-const { createPostPaintScheduler, createTopbar, sessionCount, sessionLoadTone } =
+const { createPostPaintScheduler, createTopbar, activeCount, sessionLoadTone } =
     await import('../src/topbar.js');
 const { setExtensionAPI } = await import('../src/settings.js');
 
@@ -268,6 +268,7 @@ test('post-paint scheduler waits for animation frame and a following task and ca
 });
 
 test('external graph Sessions appear only after open-time revalidation settles', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     const scheduler = createManualPostPaintScheduler();
     mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
     graph.store.set('popover-task-02', {
@@ -348,6 +349,7 @@ test('closing before the post-paint callback cancels revalidation', async t => {
 });
 
 test('closing after graph revalidation starts updates shared cache without reopening Popover', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     const scheduler = createManualPostPaintScheduler();
     mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
     graph.store.set('popover-task-02', {
@@ -371,7 +373,7 @@ test('closing after graph revalidation starts updates shared cache without reope
     graph.api.data.q = (...args) => {
         if (String(args[0]).includes('LOGBOOK:')) {
             graphReads += 1;
-            click(topbarButton());
+            if (graphReads === 1) click(topbarButton());
         }
         return originalQuery(...args);
     };
@@ -383,10 +385,10 @@ test('closing after graph revalidation starts updates shared cache without reope
     scheduler.flush();
     await settle();
 
-    assert.equal(graphReads, 1);
-    assert.equal(clock.getRunning().length, 2);
+    assert.equal(graphReads, 2, 'one discovery read plus one post-reconciliation confirmation');
+    assert.equal(clock.getRunning().length, 1);
     assert.equal(document.querySelector('body > .rlb-popover'), null);
-    assert.match(topbarButton().textContent, /2 Sessions/);
+    assert.match(topbarButton().textContent, /2 Active/);
 });
 
 test('unmount cancels a pending open-time revalidation callback', async t => {
@@ -451,22 +453,22 @@ test('empty Session surface keeps Dashboard and Refresh on one row', () => {
     assert.ok(footer.classList.contains('rlb-popover__footer--empty'));
     assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
     assert.equal(refreshCell.dataset.refreshState, 'loading');
-    assert.equal(refreshCell.querySelector('[data-action="refresh"]').getAttribute('aria-label'), 'Refresh Sessions from graph');
+    assert.equal(refreshCell.querySelector('[data-action="refresh"]').getAttribute('aria-label'), 'Refresh Active Work from graph');
     assert.equal(footer.querySelectorAll('.bp3-button').length, 2);
     assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
 });
 
-test('single running Session keeps Dashboard, Pause, and Refresh on one row', async t => {
+test('single Focused Task keeps Dashboard, Pause, and Refresh on one row', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
     const topbar = topbarButton();
     const elapsed = topbar.querySelector('.rlb-topbar__time');
     const count = topbar.querySelector('.rlb-topbar__parallel');
-    assert.match(topbar.textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Session$/);
-    assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Session`);
+    assert.match(topbar.textContent.trim(), /^\d+:\d{2}(?::\d{2})?1 Active$/);
+    assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Active`);
     assert.equal(topbar.querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
-    assert.equal(count.textContent, '1 Session');
+    assert.equal(count.textContent, '1 Active');
     assert.equal(
         [...count.classList].some(className =>
             className.startsWith('rlb-topbar__parallel--load-')
@@ -495,26 +497,26 @@ test('single running Session keeps Dashboard, Pause, and Refresh on one row', as
     assert.equal(popover.querySelectorAll('[data-session-state="paused"]').length, 1);
 });
 
-test('Session count tones keep 0–3 neutral and color only higher-load boundaries', () => {
+test('Active Work count tones keep 0–3 neutral and color only higher-load boundaries', () => {
     const cases = [
-        [0, 'neutral', '0 Sessions'],
-        [1, 'neutral', '1 Session'],
-        [2, 'neutral', '2 Sessions'],
-        [3, 'neutral', '3 Sessions'],
-        [4, 'yellow', '4 Sessions'],
-        [5, 'yellow', '5 Sessions'],
-        [6, 'yellow', '6 Sessions'],
-        [7, 'red', '7 Sessions'],
-        [99, 'red', '99 Sessions'],
+        [0, 'neutral', '0 Active'],
+        [1, 'neutral', '1 Active'],
+        [2, 'neutral', '2 Active'],
+        [3, 'neutral', '3 Active'],
+        [4, 'yellow', '4 Active'],
+        [5, 'yellow', '5 Active'],
+        [6, 'yellow', '6 Active'],
+        [7, 'red', '7 Active'],
+        [99, 'red', '99 Active'],
     ];
 
     for (const [count, tone, label] of cases) {
-        assert.equal(sessionLoadTone(count), tone, `${count} Sessions should be ${tone}`);
-        assert.equal(sessionCount(count), label);
+        assert.equal(sessionLoadTone(count), tone, `${count} Active should be ${tone}`);
+        assert.equal(activeCount(count), label);
     }
 });
 
-test('live Session count reclassifies only the count node without duplicate DOM', async t => {
+test('live Active Work count reclassifies only the count node without duplicate DOM', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     for (let index = 2; index <= 7; index += 1) {
@@ -534,7 +536,7 @@ test('live Session count reclassifies only the count node without duplicate DOM'
     const button = topbarButton();
     const countNode = () => button.querySelector('.rlb-topbar__parallel');
     const timeNode = () => button.querySelector('.rlb-topbar__time');
-    assert.equal(countNode().textContent, '3 Sessions');
+    assert.equal(countNode().textContent, '3 Active');
     assert.equal(
         [...countNode().classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
         false
@@ -542,24 +544,24 @@ test('live Session count reclassifies only the count node without duplicate DOM'
     assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
 
     await clock.clockIn('popover-load-4', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '4 Sessions');
+    assert.equal(countNode().textContent, '4 Active');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
 
     await clock.clockIn('popover-load-5', { now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-load-6', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '6 Sessions');
+    assert.equal(countNode().textContent, '6 Active');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-yellow'));
 
     await clock.clockIn('popover-load-7', { now: new Date('2026-08-15T09:00:00') });
-    assert.equal(countNode().textContent, '7 Sessions');
+    assert.equal(countNode().textContent, '7 Active');
     assert.ok(countNode().classList.contains('rlb-topbar__parallel--load-red'));
     assert.equal(button.querySelectorAll('.rlb-topbar__parallel').length, 1);
     assert.ok(timeNode().classList.contains('rlb-topbar__time--neutral'));
     assert.doesNotMatch(button.title, /normal|high|overloaded|limit/i);
 });
 
-test('Pomodoro overrun stays on the timer and remains independent of Session count tone', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:30:00') });
+test('Pomodoro overrun stays on the timer and remains independent of Active Work tone', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:46:00') });
     settingsStore.set('allowMultipleClocks', true);
     for (let index = 2; index <= 4; index += 1) {
         const uid = `popover-threshold-${index}`;
@@ -571,10 +573,9 @@ test('Pomodoro overrun stays on the timer and remains independent of Session cou
         });
     }
 
-    const start = new Date('2026-08-15T09:00:00');
-    await clock.clockIn('popover-task-01', { now: start });
-    await clock.clockIn('popover-threshold-2', { now: start });
-    await clock.clockIn('popover-threshold-3', { now: start });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-threshold-2', { now: new Date('2026-08-15T09:43:00') });
+    await clock.clockIn('popover-threshold-3', { now: new Date('2026-08-15T09:44:00') });
 
     const button = topbarButton();
     const time = button.querySelector('.rlb-topbar__time');
@@ -587,7 +588,7 @@ test('Pomodoro overrun stays on the timer and remains independent of Session cou
     assert.equal(count.classList.contains('rlb-topbar__parallel--load-red'), false);
     assert.equal(button.querySelector('.rlb-topbar__separator').className, 'rlb-topbar__separator');
 
-    await clock.clockIn('popover-threshold-4', { now: start });
+    await clock.clockIn('popover-threshold-4', { now: new Date('2026-08-15T09:45:00') });
     assert.ok(button.querySelector('.rlb-topbar__time--overrun'));
     assert.ok(button.querySelector('.rlb-topbar__parallel--load-yellow'));
     assert.equal(button.querySelector('.rlb-topbar__parallel--load-overrun'), null);
@@ -689,7 +690,7 @@ test('Session task titles preserve ordinary click and native keyboard activation
     }
 });
 
-test('topbar uses one shared cycle across parallel Sessions and ignores Roam sync indicator color', async t => {
+test('topbar keeps one shared Work Cycle across task switches and ignores Roam sync indicator color', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:31:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -707,21 +708,18 @@ test('topbar uses one shared cycle across parallel Sessions and ignores Roam syn
     document.querySelector('.rm-topbar').appendChild(syncIndicator);
 
     assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
-    assert.ok(topbarButton().querySelector('.rlb-topbar__time--overrun'));
+    assert.ok(topbarButton().querySelector('.rlb-topbar__time--neutral'));
     await clock.clockIn('popover-task-02', { now: secondStart });
     assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
-    assert.ok(topbarButton().querySelector('.rlb-topbar__time--overrun'));
+    assert.ok(topbarButton().querySelector('.rlb-topbar__time--neutral'));
     assert.equal(document.querySelector('.rm-sync-indicator').style.color, 'rgb(220, 50, 50)');
 
-    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:31:00') });
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(topbarButton().querySelector('.rlb-topbar__time').textContent, '31:00');
     await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:31:00') });
     assert.equal(clock.getRunning().length, 0);
     assert.equal(pomodoro.getCycle(), null);
 });
 
-test('Session surfaces keep Refresh copy hidden while preserving accessible state feedback', async t => {
+test('Active Work surfaces keep Refresh copy hidden while preserving accessible state feedback', async t => {
     t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -740,8 +738,8 @@ test('Session surfaces keep Refresh copy hidden while preserving accessible stat
     assert.ok(refresh, 'Refresh belongs in the surface footer');
     assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
     assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
-    assert.equal(refresh.title, 'Refresh Sessions from graph');
-    assert.equal(refresh.getAttribute('aria-label'), 'Refresh Sessions from graph');
+    assert.equal(refresh.title, 'Refresh Active Work from graph');
+    assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
     assert.ok(refresh.classList.contains('bp3-icon-refresh'));
     assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
     const live = popover.querySelector('.rlb-surface__refresh-status');
@@ -751,7 +749,7 @@ test('Session surfaces keep Refresh copy hidden while preserving accessible stat
     assert.ok(live.classList.contains('rlb-visually-hidden'));
     assert.deepEqual(
         [...popover.querySelectorAll('.rlb-popover__footer button')].map(node => node.textContent),
-        ['Dashboard', 'Pause All', 'Clock Out All', '']
+        ['Dashboard', 'Pause', '']
     );
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
@@ -803,7 +801,7 @@ test('Session surfaces keep Refresh copy hidden while preserving accessible stat
 
 });
 
-test('Refresh rereads an external graph Session without closing the popover', async t => {
+test('Refresh reconciles an external graph CLOCK into Recent Active Work without closing the popover', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const popover = openPopover();
@@ -833,7 +831,7 @@ test('Refresh rereads an external graph Session without closing the popover', as
 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, '2 Sessions Running');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
     assert.match(popover.textContent, /External graph task/);
 });
 
@@ -945,7 +943,7 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
     );
 });
 
-test('shared Session surfaces use one compact accessible list group for session rows', async t => {
+test('shared Active Work surfaces use one compact accessible list group for task rows', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -962,22 +960,17 @@ test('shared Session surfaces use one compact accessible list group for session 
     assert.ok(list, 'session rows are grouped in a shared surface list');
     assert.equal(surface.querySelectorAll('.rlb-surface__list').length, 1);
     assert.equal(list.getAttribute('role'), 'group');
-    assert.equal(list.getAttribute('aria-label'), 'Current Sessions');
+    assert.equal(list.getAttribute('aria-label'), 'Active Work');
     const rows = [...list.querySelectorAll('.rlb-run')];
     assert.equal(rows.length, 2);
-    assert.ok(
-        rows.every(
-            row =>
-                !row.querySelector('.rlb-run__status') &&
-                row.querySelector('.rlb-run__title') &&
-                row.querySelector('.rlb-run__meta') &&
-                row.querySelector('.rlb-run__actions')
-        )
-    );
+    assert.ok(rows.every(row => !row.querySelector('.rlb-run__status')));
+    assert.ok(rows.every(row => row.querySelector('.rlb-run__title') && row.querySelector('.rlb-run__meta')));
+    assert.ok(rows.find(row => row.dataset.sessionState === 'running')?.querySelector('.rlb-run__actions'));
+    assert.equal(rows.find(row => row.dataset.sessionState === 'recent')?.querySelector('.rlb-run__actions'), null);
     assert.equal(surface.querySelectorAll('.bp3-card.rlb-run').length, 0);
 });
 
-test('Check Out icon ends only its clicked Session in single and parallel mode', async t => {
+test('Check Out icon ends only the clicked Focused Task; Recent Tasks have no timer to close', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -1001,42 +994,33 @@ test('Check Out icon ends only its clicked Session in single and parallel mode',
     const parallelPopover = openPopover();
     const rows = [...parallelPopover.querySelectorAll('.rlb-run')];
     assert.equal(rows.length, 2);
-    assert.ok(rows.every(row => row.querySelector('[data-action="clock-out"]')?.title === 'Check Out'));
-    const retainedUid = clock.getRunning()[1].clockUid;
+    assert.equal(rows[0].querySelector('[data-action="clock-out"]')?.title, 'Check Out');
+    assert.equal(rows[1].querySelector('[data-action="clock-out"]'), null);
     click(rows[0].querySelector('[data-action="clock-out"]'));
     await settle();
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(clock.getRunning()[0].clockUid, retainedUid);
+    assert.equal(clock.getRunning().length, 0);
 });
 
-test('paused rows expose an icon-only Resume action and restore only the clicked Session', async t => {
+test('a paused row exposes an icon-only Resume action and restores one Focused Task', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    settingsStore.set('allowMultipleClocks', true);
-    graph.store.set('popover-task-02', {
-        uid: 'popover-task-02',
-        string: '{{[[TODO]]}} A second paused task',
-        parent: null,
-        page: 'Project Page',
-    });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
 
     const surface = openPopover();
     const pause = [...surface.querySelectorAll('.rlb-popover__footer button')].find(
-        node => node.textContent === 'Pause All'
+        node => node.textContent === 'Pause'
     );
     click(pause);
     await settle();
 
     const pausedRows = [...surface.querySelectorAll('[data-session-state="paused"]')];
-    assert.equal(pausedRows.length, 2);
+    assert.equal(pausedRows.length, 1);
     assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__status')));
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, '2 Tasks Paused');
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
     const resumeAll = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
     assert.ok(resumeAll);
-    assert.equal(resumeAll.textContent, 'Resume All');
-    assert.equal(resumeAll.title, 'Resume all paused Tasks');
-    assert.equal(resumeAll.getAttribute('aria-label'), 'Resume all paused Tasks');
+    assert.equal(resumeAll.textContent, 'Resume');
+    assert.equal(resumeAll.title, 'Resume the paused Task');
+    assert.equal(resumeAll.getAttribute('aria-label'), 'Resume the paused Task');
     assert.ok(pausedRows.every(row => row.querySelector('[data-action="resume"]')));
     assert.ok(
         pausedRows.every(row => {
@@ -1059,14 +1043,9 @@ test('paused rows expose an icon-only Resume action and restore only the clicked
     await settle();
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].taskUid, firstTaskUid);
-    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 1);
-    assert.ok(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
-
-    click(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
-    await settle();
-    assert.equal(clock.getRunning().length, 2);
+    assert.equal(clock.getRunning().length, 1);
     assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
-    assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause All'));
+    assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause'));
     assert.equal(surface.querySelector('.rlb-popover__footer [data-action="resume-all"]'), null);
 });
 
@@ -1132,7 +1111,7 @@ test('pending Resume conflicts stay visible as retryable Recovery rows', async (
     const retry = recovery.querySelector('[data-action="recovery"]');
     assert.equal(retry.title, 'Retry Recovery');
     assert.equal(retry.getAttribute('aria-label'), 'Retry Recovery');
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, '1 Recovery Required');
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
     assert.match(topbarButton().getAttribute('aria-label'), /Recovery item/i);
 
     click(retry);
@@ -1381,7 +1360,7 @@ test('topbar does not present a confirmed empty state when graph refresh fails',
 
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
-    assert.match(popover.textContent, /Refreshing Session state/i);
+    assert.match(popover.textContent, /Refreshing Active Work state/i);
     await settlePostPaint();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
     assert.match(popover.textContent, /state could not be confirmed|retry/i);
@@ -1408,7 +1387,7 @@ test('topbar shows a running Session for a confirmed open CLOCK', async () => {
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
     await settlePostPaint();
-    assert.match(popover.querySelector('.rlb-popover__title').textContent, /1 Session Running/);
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
     assert.ok(popover.querySelector('.rlb-run'));
     assert.doesNotMatch(popover.textContent, /No Session is running/);
 });
@@ -1462,7 +1441,7 @@ test('popover is a labelled dialog and returns focus to its trigger on every clo
     assert.ok(popover.getAttribute('aria-labelledby'));
     assert.equal(
         document.getElementById(popover.getAttribute('aria-labelledby')).textContent,
-        '1 Session Running'
+        'ACTIVE WORK'
     );
     assert.equal(document.activeElement, popover.querySelector('button'));
 

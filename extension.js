@@ -772,6 +772,79 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   return { parentOf, stringOf, mirrorsOf, issues };
 }
 
+// src/active-work.js
+var ACTIVE_WORK_WINDOW_MINUTES = 45;
+var ACTIVE_WORK_WINDOW_MS = ACTIVE_WORK_WINDOW_MINUTES * 6e4;
+var instantOf = (value) => {
+  if (value instanceof Date)
+    return value.getTime();
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
+function chooseFocusedEntry(entries = []) {
+  return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).slice().sort(compareNewest)[0] || null;
+}
+function buildActiveWork(entries = [], { now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES } = {}) {
+  const snapshot = Array.isArray(entries) ? entries : [];
+  const nowMs = instantOf(now) ?? Date.now();
+  const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
+  const windowMs = normalizedWindow * 6e4;
+  const focusedEntry = chooseFocusedEntry(snapshot);
+  const completedMinutesByTask = /* @__PURE__ */ new Map();
+  for (const entry of snapshot) {
+    if (!entry || entry.running || !entry.taskUid)
+      continue;
+    completedMinutesByTask.set(
+      entry.taskUid,
+      (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
+    );
+  }
+  if (!focusedEntry) {
+    return {
+      focused: null,
+      recent: [],
+      items: [],
+      count: 0,
+      windowMinutes: normalizedWindow
+    };
+  }
+  const recentByTask = /* @__PURE__ */ new Map();
+  for (const candidate of snapshot) {
+    if (!candidate || candidate.running || candidate.taskUid === focusedEntry.taskUid)
+      continue;
+    const endedAt = instantOf(candidate.end);
+    if (endedAt === null)
+      continue;
+    const age = nowMs - endedAt;
+    if (age < 0 || age > windowMs)
+      continue;
+    const previous = recentByTask.get(candidate.taskUid);
+    if (!previous || endedAt > instantOf(previous.end))
+      recentByTask.set(candidate.taskUid, candidate);
+  }
+  const recent = [...recentByTask.values()].sort(
+    (left, right) => (instantOf(right.end) ?? -Infinity) - (instantOf(left.end) ?? -Infinity)
+  );
+  const focused = {
+    ...focusedEntry,
+    priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
+    activeKind: "focused"
+  };
+  const recentItems = recent.map((item) => ({
+    ...item,
+    priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
+    activeKind: "recent"
+  }));
+  return {
+    focused,
+    recent: recentItems,
+    items: [focused, ...recentItems],
+    count: 1 + recentItems.length,
+    windowMinutes: normalizedWindow
+  };
+}
+
 // src/mutations.js
 var tail = Promise.resolve();
 var generation = 0;
@@ -811,116 +884,9 @@ function resetMutationQueue() {
   generation += 1;
 }
 
-// src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.21";
-var STATE_FORMATS = Object.freeze({
-  pauseBatch: 2,
-  pomodoroTargets: 1,
-  pomodoroCycle: 1,
-  stateBackups: 1
-});
-
-// src/settings.js
-var SETTING_TOPBAR = "showTopbarWidget";
-var SETTING_MULTIPLE = "allowMultipleClocks";
-var SETTING_TODO_ONLY = "todoBlocksOnly";
-var SETTING_STALE_HOURS = "staleHours";
-var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
-var SETTING_POMODORO_STATE = "pomodoroTargets";
-var SETTING_POMODORO_CYCLE = "pomodoroCycle";
-var SETTING_PAUSED_BATCH = "pausedBatch";
-var SETTING_STATE_BACKUPS = "stateBackups";
-var DEFAULTS = {
-  [SETTING_TOPBAR]: true,
-  [SETTING_MULTIPLE]: false,
-  [SETTING_TODO_ONLY]: true,
-  [SETTING_STALE_HOURS]: "8",
-  [SETTING_POMODORO_MINUTES]: "30"
-};
-var extensionAPI = null;
-function setExtensionAPI(api) {
-  extensionAPI = api;
-}
-function read(key) {
-  const value = extensionAPI?.settings?.get(key);
-  return value === void 0 || value === null ? DEFAULTS[key] : value;
-}
-function booleanSetting(key) {
-  const value = read(key);
-  if (value === true || value === 1)
-    return true;
-  if (value === false || value === 0)
-    return false;
-  if (typeof value === "string") {
-    const normalized2 = value.trim().toLowerCase();
-    if (normalized2 === "true" || normalized2 === "1")
-      return true;
-    if (normalized2 === "false" || normalized2 === "0")
-      return false;
-  }
-  return Boolean(DEFAULTS[key]);
-}
-function showTopbarWidget() {
-  return booleanSetting(SETTING_TOPBAR);
-}
-function allowMultipleClocks() {
-  return booleanSetting(SETTING_MULTIPLE);
-}
-function todoBlocksOnly() {
-  return booleanSetting(SETTING_TODO_ONLY);
-}
-function staleHours() {
-  const parsed = Number(read(SETTING_STALE_HOURS));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
-}
-function pomodoroMinutes() {
-  const parsed = Number(read(SETTING_POMODORO_MINUTES));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
-}
-function readSetting(key) {
-  return extensionAPI?.settings?.get(key) ?? null;
-}
-function writeSetting(key, value) {
-  extensionAPI?.settings?.set(key, value);
-}
-function preserveStateBackup(key, raw) {
-  try {
-    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
-    let stored = readSetting(SETTING_STATE_BACKUPS);
-    try {
-      stored = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
-    } catch {
-      stored = null;
-    }
-    const data = stored?.version === 1 && stored.data && typeof stored.data === "object" ? stored.data : {};
-    if (data[key]?.rawSignature === rawSignature)
-      return false;
-    data[key] = { rawSignature, raw };
-    writeSetting(
-      SETTING_STATE_BACKUPS,
-      JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
-    );
-    return true;
-  } catch (error) {
-    console.warn("[roam-logbook] could not preserve invalid state backup", error);
-    return true;
-  }
-}
-function normalizeChecked(event) {
-  return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
-}
-function normalizeSelected(event) {
-  return typeof event === "string" ? event : String(event?.target?.value ?? "");
-}
-function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
-  const parsed = Number(normalizeSelected(event).trim());
-  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-  const rounded = Number(candidate.toFixed(6));
-  return String(rounded > 0 ? rounded : 30);
-}
-
 // src/clock.js
 var running = [];
+var entriesSnapshot = [];
 var lastRefreshStatus = { ok: true, error: null };
 var notice = "";
 var listeners = /* @__PURE__ */ new Set();
@@ -957,6 +923,12 @@ function publishAction(action) {
 }
 function getRunning() {
   return running;
+}
+function getEntriesSnapshot() {
+  return entriesSnapshot.slice();
+}
+function getActiveWork(now = /* @__PURE__ */ new Date()) {
+  return buildActiveWork(entriesSnapshot, { now });
 }
 function getLastRefreshStatus() {
   return { ...lastRefreshStatus };
@@ -1038,7 +1010,11 @@ function refresh({ entries, notify: shouldNotify = true } = {}) {
       continue;
     bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
   }
-  running = all.filter((entry) => entry.running).map((entry) => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
+  entriesSnapshot = all.map(
+    (entry) => entry.running ? { ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 } : { ...entry }
+  );
+  const focused = chooseFocusedEntry(entriesSnapshot);
+  running = focused ? [{ ...focused }] : [];
   lastRefreshStatus = { ok: true, error: null };
   notice = "";
   if (shouldNotify)
@@ -1060,6 +1036,7 @@ function refreshResult({ entries, notify: shouldNotify = true } = {}) {
 }
 function reset() {
   running = [];
+  entriesSnapshot = [];
   lastRefreshStatus = { ok: true, error: null };
   notice = "";
   listeners.clear();
@@ -1196,28 +1173,25 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
         error.doneAncestorUid = doneAncestorUid;
         throw error;
       }
-      if (allowMultipleClocks()) {
-        if (open.some((entry) => entry.taskUid === taskUid)) {
-          refresh();
-          throw new Error("This task already has a running clock");
+      if (open.length === 1 && open[0].taskUid === taskUid) {
+        refresh({ entries, notify: false });
+        return { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+      }
+      if (open.length > 0) {
+        const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
+          publish: false
+        });
+        if (outcome.uncertain) {
+          return {
+            taskUid,
+            uncertain: true,
+            partial: outcome.partial,
+            notice: GRAPH_UNCERTAIN,
+            retry: outcome.retry
+          };
         }
-      } else {
-        if (open.length > 0) {
-          const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
-            publish: false
-          });
-          if (outcome.uncertain) {
-            return {
-              taskUid,
-              uncertain: true,
-              partial: outcome.partial,
-              notice: GRAPH_UNCERTAIN,
-              retry: outcome.retry
-            };
-          }
-          if (outcome.failed > 0)
-            throw outcome.results.find((result2) => result2.error).error;
-        }
+        if (outcome.failed > 0)
+          throw outcome.results.find((result2) => result2.error).error;
       }
       const drawer = await ensureDrawer(taskUid);
       if (drawer.confirmation && !drawer.confirmation.ok) {
@@ -1259,6 +1233,58 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
       });
       notify();
       return result;
+    })
+  );
+}
+async function reconcileOpenClocks({
+  now = /* @__PURE__ */ new Date(),
+  source = "legacy-reconcile",
+  entries: suppliedEntries
+} = {}) {
+  return enqueueMutation(
+    () => withGraphGuard(async () => {
+      if (suppliedEntries !== void 0 && !Array.isArray(suppliedEntries)) {
+        throw new GraphReadError("Clock reconciliation received an invalid entries snapshot");
+      }
+      const entries = suppliedEntries ?? readAllEntries();
+      const open = entries.filter((entry) => entry.running);
+      if (open.length <= 1) {
+        refresh({ entries, notify: false });
+        return {
+          action: "reconcile-overlapping-clocks",
+          ok: true,
+          focused: open[0]?.clockUid || null,
+          closed: 0,
+          pending: 0,
+          entries
+        };
+      }
+      const focused = chooseFocusedEntry(open) || open[0];
+      const closeAt = focused?.start instanceof Date ? focused.start : now;
+      const outcome = await closeEntriesNow(
+        entries,
+        open.filter((entry) => entry.clockUid !== focused.clockUid).map((entry) => entry.clockUid),
+        closeAt,
+        { publish: false }
+      );
+      if (!outcome.uncertain) {
+        for (const closed of outcome.results.filter((item) => item.closed)) {
+          const entry = open.find((item) => item.clockUid === closed.clockUid);
+          publishAction({
+            type: "clock-out",
+            source,
+            clockUid: closed.clockUid,
+            taskUid: entry?.taskUid
+          });
+        }
+      }
+      notify({ reason: "reconcile-overlap", explicit: true });
+      return {
+        ...outcome,
+        action: "reconcile-overlapping-clocks",
+        focused: focused.clockUid,
+        entries
+      };
     })
   );
 }
@@ -2038,6 +2064,111 @@ function buildDashboard(entries, { now, rangeId, hierarchy = EMPTY_HIERARCHY }) 
 function findStaleClocks(entries, now, staleHours2) {
   const cutoff = now.getTime() - staleHours2 * 36e5;
   return entries.filter((entry) => entry.running && entry.start.getTime() < cutoff);
+}
+
+// src/version.js
+var PLUGIN_VERSION = "0.9.0-beta.22";
+var STATE_FORMATS = Object.freeze({
+  pauseBatch: 2,
+  pomodoroTargets: 1,
+  pomodoroCycle: 1,
+  stateBackups: 1
+});
+
+// src/settings.js
+var SETTING_TOPBAR = "showTopbarWidget";
+var SETTING_MULTIPLE = "allowMultipleClocks";
+var SETTING_TODO_ONLY = "todoBlocksOnly";
+var SETTING_STALE_HOURS = "staleHours";
+var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
+var SETTING_POMODORO_STATE = "pomodoroTargets";
+var SETTING_POMODORO_CYCLE = "pomodoroCycle";
+var SETTING_PAUSED_BATCH = "pausedBatch";
+var SETTING_STATE_BACKUPS = "stateBackups";
+var DEFAULTS = {
+  [SETTING_TOPBAR]: true,
+  [SETTING_MULTIPLE]: false,
+  [SETTING_TODO_ONLY]: true,
+  [SETTING_STALE_HOURS]: "8",
+  [SETTING_POMODORO_MINUTES]: "45"
+};
+var extensionAPI = null;
+function setExtensionAPI(api) {
+  extensionAPI = api;
+}
+function read(key) {
+  const value = extensionAPI?.settings?.get(key);
+  return value === void 0 || value === null ? DEFAULTS[key] : value;
+}
+function booleanSetting(key) {
+  const value = read(key);
+  if (value === true || value === 1)
+    return true;
+  if (value === false || value === 0)
+    return false;
+  if (typeof value === "string") {
+    const normalized2 = value.trim().toLowerCase();
+    if (normalized2 === "true" || normalized2 === "1")
+      return true;
+    if (normalized2 === "false" || normalized2 === "0")
+      return false;
+  }
+  return Boolean(DEFAULTS[key]);
+}
+function showTopbarWidget() {
+  return booleanSetting(SETTING_TOPBAR);
+}
+function todoBlocksOnly() {
+  return booleanSetting(SETTING_TODO_ONLY);
+}
+function staleHours() {
+  const parsed = Number(read(SETTING_STALE_HOURS));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+}
+function pomodoroMinutes() {
+  const parsed = Number(read(SETTING_POMODORO_MINUTES));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 45;
+}
+function readSetting(key) {
+  return extensionAPI?.settings?.get(key) ?? null;
+}
+function writeSetting(key, value) {
+  extensionAPI?.settings?.set(key, value);
+}
+function preserveStateBackup(key, raw) {
+  try {
+    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
+    let stored = readSetting(SETTING_STATE_BACKUPS);
+    try {
+      stored = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
+    } catch {
+      stored = null;
+    }
+    const data = stored?.version === 1 && stored.data && typeof stored.data === "object" ? stored.data : {};
+    if (data[key]?.rawSignature === rawSignature)
+      return false;
+    data[key] = { rawSignature, raw };
+    writeSetting(
+      SETTING_STATE_BACKUPS,
+      JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
+    );
+    return true;
+  } catch (error) {
+    console.warn("[roam-logbook] could not preserve invalid state backup", error);
+    return true;
+  }
+}
+function normalizeChecked(event) {
+  return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
+}
+function normalizeSelected(event) {
+  return typeof event === "string" ? event : String(event?.target?.value ?? "");
+}
+function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
+  const parsed = Number(normalizeSelected(event).trim());
+  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const rounded = Number(candidate.toFixed(6));
+  return String(rounded > 0 ? rounded : 45);
 }
 
 // src/theme.js
@@ -2966,8 +3097,8 @@ function createDashboard({
     const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
     const heading = el("div", "rlb-section__heading rlb-panel__header");
     heading.appendChild(el("h3", "rlb-section__title", "By task"));
-    const taskCount3 = el("span", "rlb-task-count");
-    heading.appendChild(taskCount3);
+    const taskCount2 = el("span", "rlb-task-count");
+    heading.appendChild(taskCount2);
     const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
     const info = button(
       "bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info",
@@ -3037,7 +3168,7 @@ function createDashboard({
         isCollapsed: (node) => viewCollapsed.has(node.taskUid)
       });
       const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
-      taskCount3.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
+      taskCount2.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
       for (const filterButton of filterGroup.querySelectorAll("[data-filter]")) {
         filterButton.setAttribute(
           "aria-pressed",
@@ -4506,30 +4637,6 @@ async function resumeOne(taskUid, { now = /* @__PURE__ */ new Date() } = {}) {
       error: new Error(notice3)
     });
   }
-  let enabledMultiple = false;
-  if (initial.running.length > 0 && !allowMultipleClocks()) {
-    try {
-      writeSetting(SETTING_MULTIPLE, true);
-    } catch (error) {
-      notice3 = "Multiple clocks could not be enabled; the paused Session was kept.";
-      notify2();
-      return resumeOneResult({
-        failed: 1,
-        pendingTaskUids: [taskUid],
-        error
-      });
-    }
-    if (!allowMultipleClocks()) {
-      notice3 = "Multiple clocks could not be enabled; the paused Session was kept.";
-      notify2();
-      return resumeOneResult({
-        failed: 1,
-        pendingTaskUids: [taskUid],
-        error: new Error(notice3)
-      });
-    }
-    enabledMultiple = true;
-  }
   try {
     await resumeRecord(valid, now);
   } catch (error) {
@@ -4552,9 +4659,9 @@ async function resumeOne(taskUid, { now = /* @__PURE__ */ new Date() } = {}) {
       error
     });
   }
-  notice3 = enabledMultiple ? "Multiple clocks were enabled to resume this Session." : "";
+  notice3 = "";
   notify2();
-  return resumeOneResult({ completed: 1, enabledMultiple });
+  return resumeOneResult({ completed: 1 });
 }
 async function resumeAll({ now = /* @__PURE__ */ new Date(), reconcileOnly = false } = {}) {
   if (unsupportedRaw2 !== null) {
@@ -4677,34 +4784,6 @@ async function resumeAll({ now = /* @__PURE__ */ new Date(), reconcileOnly = fal
     plannedTasks.add(valid.taskUid);
     ready.push(valid);
   }
-  const needsMultiple = ready.length > 1 || ready.length > 0 && runningEntries.length > 0;
-  let enabledMultiple = false;
-  if (needsMultiple && !allowMultipleClocks()) {
-    try {
-      writeSetting(SETTING_MULTIPLE, true);
-    } catch (error) {
-      console.error("[roam-logbook] could not enable multiple clocks for Resume All", error);
-    }
-    if (!allowMultipleClocks()) {
-      notice3 = "Multiple clocks could not be enabled; no paused Tasks were resumed.";
-      items = [...retained, ...ready];
-      persist();
-      notify2();
-      return {
-        ...resumeBatchResult({
-          completed: recovered.recovered,
-          failed: recovered.failed + recovered.conflicts.length + ready.length,
-          pendingTaskUids: [...retained, ...ready, ...pendingResume].map((item) => item.taskUid),
-          blocked: true,
-          error: new Error(notice3),
-          pruned,
-          satisfied
-        }),
-        conflicts: recovered.conflicts
-      };
-    }
-    enabledMultiple = true;
-  }
   let resumed = recovered.recovered;
   let failed = recovered.failed + uncertain + recovered.conflicts.length;
   let legacyRecovered = recovered.legacyRecovered;
@@ -4739,8 +4818,9 @@ async function resumeAll({ now = /* @__PURE__ */ new Date(), reconcileOnly = fal
   }
   items = retained.filter((item) => !completedTasks.has(item.taskUid));
   const messages = [];
-  if (enabledMultiple)
-    messages.push(`Multiple clocks were enabled to resume ${ready.length} Tasks.`);
+  if (ready.length > 1) {
+    messages.push("Paused Tasks were resumed as a single Focused CLOCK in sequence.");
+  }
   if (pruned > 0)
     messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
   if (completedPruned > 0) {
@@ -5372,6 +5452,29 @@ var STYLES = `
 
 .rlb-surface__list > .rlb-popover__empty {
     padding: 6px 5px 8px;
+}
+
+.rlb-surface__section-label {
+    padding: 7px 6px 3px;
+    color: #7a8b99;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.65px;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.rlb-surface__section-label:not(:first-child) {
+    border-top: 1px solid var(--rlb-surface-border-light);
+    margin-top: 2px;
+}
+
+.rlb-run--recent {
+    opacity: 0.88;
+}
+
+.rlb-run--recent:hover {
+    opacity: 1;
 }
 
 .rlb-popover__notice {
@@ -6870,15 +6973,15 @@ var STYLES = `
 
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-var taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
-var SURFACE_TITLE = "Roam Logbook";
+var SURFACE_TITLE = "ACTIVE WORK";
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
-  const total = entry.priorMinutes + Math.floor(elapsed / 6e4);
+  const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 6e4);
   return `${formatElapsed(elapsed)} \xB7 ${formatMinutesHuman(total)} total`;
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
-var refreshLabel = "Refresh Sessions from graph";
+var focusRecentLabel = (title) => `Focus this recent Task: ${title}`;
+var refreshLabel = "Refresh Active Work from graph";
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
     if (index > 0) {
@@ -6889,15 +6992,25 @@ var appendMetaNodes = (meta, nodes) => {
     meta.appendChild(node);
   });
 };
-var renderTitle = (row, onOpenTask) => {
+var renderTitle = (row, onOpenTask, onFocusRecent) => {
   const title = row.title || row.taskUid;
+  const recent = row.kind === "recent";
   const taskButton = button(
-    "bp3-button bp3-minimal rlb-run__title",
+    `bp3-button bp3-minimal rlb-run__title${recent ? " rlb-run__title--recent" : ""}`,
     title,
-    (event) => onOpenTask?.(row.taskUid, event),
-    { title: fullTaskLabel(title) }
+    (event) => {
+      if (recent && !event?.shiftKey) {
+        event.stopPropagation();
+        void onFocusRecent?.(row.entry, event);
+        return;
+      }
+      onOpenTask?.(row.taskUid, event);
+    },
+    { title: recent ? focusRecentLabel(title) : fullTaskLabel(title) }
   );
-  taskButton.setAttribute("aria-label", fullTaskLabel(title));
+  taskButton.setAttribute("aria-label", recent ? focusRecentLabel(title) : fullTaskLabel(title));
+  if (recent)
+    taskButton.dataset.action = "focus-recent";
   return taskButton;
 };
 var renderRunningRow = (row, now, options) => {
@@ -6922,7 +7035,7 @@ var renderRunningRow = (row, now, options) => {
   if (started.datetime)
     startedNode.dateTime = started.datetime;
   appendMetaNodes(meta, [primary, startedNode]);
-  body.append(renderTitle(row, options.onOpenTask), meta);
+  body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(
     "bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout",
@@ -6948,6 +7061,28 @@ var renderRunningRow = (row, now, options) => {
   discard.dataset.action = "discard";
   actions.append(checkout, discard);
   node.append(body, actions);
+  return node;
+};
+var renderRecentRow = (row, now, options) => {
+  const entry = row.entry;
+  const node = el("div", "rlb-run rlb-run--recent rlb-run--inline-meta");
+  node.dataset.sessionState = "recent";
+  node.dataset.taskUid = entry.taskUid;
+  node.dataset.clockUid = entry.clockUid;
+  const body = el("div", "rlb-run__body");
+  const meta = el("div", "rlb-run__meta");
+  const ended = formatStarted(entry.end, now);
+  const lastActive = ended.valid ? `${ended.dateLabel} ${ended.timeLabel}` : ended.raw;
+  const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+  const primary = el("div", "rlb-run__meta-line rlb-run__meta-primary", `Recent \xB7 ${total} total`);
+  const endedNode = el("time", "rlb-run__meta-line rlb-run__started", `Last active ${lastActive}`);
+  endedNode.title = `Last active ${ended.raw}`;
+  endedNode.setAttribute("aria-label", endedNode.title);
+  if (ended.datetime)
+    endedNode.dateTime = ended.datetime;
+  appendMetaNodes(meta, [primary, endedNode]);
+  body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
+  node.appendChild(body);
   return node;
 };
 var renderPausedRow = (row, now, options) => {
@@ -7016,6 +7151,7 @@ var renderRecoveryRow = (row, options) => {
 };
 function buildSessionSurfaceModel({
   entries = [],
+  recentItems = [],
   pausedItems = [],
   pendingItems = [],
   recoveryState = null,
@@ -7024,8 +7160,15 @@ function buildSessionSurfaceModel({
 }) {
   const currentNow = now instanceof Date ? now : new Date(now);
   const runningRows = entries.map((entry) => ({
-    kind: "running",
-    key: `running:${entry.clockUid}`,
+    kind: "focused",
+    key: `focused:${entry.clockUid}`,
+    taskUid: entry.taskUid,
+    title: entry.title,
+    entry
+  }));
+  const recentRows = recentItems.map((entry) => ({
+    kind: "recent",
+    key: `recent:${entry.taskUid}`,
     taskUid: entry.taskUid,
     title: entry.title,
     entry
@@ -7050,14 +7193,27 @@ function buildSessionSurfaceModel({
     pausedItems: pausedItems.slice(),
     pendingItems: pendingItems.slice(),
     recoveryState: recoveryState ? { ...recoveryState } : null,
-    rows: [...runningRows, ...pausedRows, ...recoveryRows],
-    runningCount: entries.length,
+    rows: [...runningRows, ...recentRows, ...pausedRows, ...recoveryRows],
+    focusedRows: runningRows,
+    recentRows,
+    pausedRows,
+    recoveryRows,
+    focusedCount: runningRows.length,
+    activeCount: runningRows.length + recentRows.length,
+    runningCount: runningRows.length,
     pausedCount: pausedItems.length,
     recoveryCount: recoveryRows.length,
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = (model) => model.runningCount > 0 ? `${sessionCount(model.runningCount)} Running` : model.pausedCount > 0 ? `${taskCount(model.pausedCount)} Paused` : model.recoveryCount > 0 ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? "y" : "ies"} Required` : model.recoveryState ? "Pause Batch Recovery Required" : SURFACE_TITLE;
+var surfaceTitle = () => SURFACE_TITLE;
+var appendSection = (list, label, rows, renderRow) => {
+  if (!rows.length)
+    return;
+  list.appendChild(el("div", "rlb-surface__section-label", label));
+  for (const row of rows)
+    list.appendChild(renderRow(row));
+};
 function renderSessionSurface(root, model, options = {}) {
   const title = el("div", "rlb-popover__title", surfaceTitle(model));
   if (options.titleId)
@@ -7078,11 +7234,11 @@ function renderSessionSurface(root, model, options = {}) {
   root.replaceChildren(header);
   const sessionList = el("div", "rlb-surface__list");
   sessionList.setAttribute("role", "group");
-  sessionList.setAttribute("aria-label", "Current Sessions");
+  sessionList.setAttribute("aria-label", "Active Work");
   root.appendChild(sessionList);
   if (model.rows.length === 0) {
     sessionList.appendChild(
-      el("div", "rlb-popover__empty", options.emptyMessage || "No Session is running.")
+      el("div", "rlb-popover__empty", options.emptyMessage || "No Focused Task is running.")
     );
   } else {
     if (model.staleEntries.length > 0) {
@@ -7094,11 +7250,30 @@ function renderSessionSurface(root, model, options = {}) {
         )
       );
     }
-    for (const row of model.rows) {
-      sessionList.appendChild(
-        row.kind === "running" ? renderRunningRow(row, model.now, options) : row.kind === "paused" ? renderPausedRow(row, model.now, options) : renderRecoveryRow(row, options)
-      );
-    }
+    appendSection(
+      sessionList,
+      "FOCUSED",
+      model.focusedRows,
+      (row) => renderRunningRow(row, model.now, options)
+    );
+    appendSection(
+      sessionList,
+      "RECENT",
+      model.recentRows,
+      (row) => renderRecentRow(row, model.now, options)
+    );
+    appendSection(
+      sessionList,
+      "PAUSED",
+      model.pausedRows,
+      (row) => renderPausedRow(row, model.now, options)
+    );
+    appendSection(
+      sessionList,
+      "RECOVERY",
+      model.recoveryRows,
+      (row) => renderRecoveryRow(row, options)
+    );
   }
   for (const notice4 of options.notices || []) {
     const message = typeof notice4 === "string" ? notice4 : notice4?.message;
@@ -7221,11 +7396,11 @@ var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
 var TOPBAR_SELECTOR2 = ".rm-topbar";
 var REFRESH_SUCCESS_DURATION = 1800;
-var REFRESH_LOADING_MESSAGE2 = "Refreshing Sessions from graph\u2026";
+var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
 var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
-var sessionCount2 = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-var taskCount2 = (count) => `${count} Task${count === 1 ? "" : "s"}`;
+var activeCount = (count) => `${count} Active`;
+var taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   if (normalized2 >= 7)
@@ -7319,6 +7494,7 @@ function createTopbar({
   let pendingOpenRefresh = null;
   let refreshClearTimer = null;
   let refreshState = { state: "idle", message: "" };
+  let activeSignature = "";
   let themeRuntime = null;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
@@ -7415,14 +7591,18 @@ function createTopbar({
     popover.style.top = `${anchor.bottom + 6}px`;
     popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
   };
-  const sessionModel = () => buildSessionSurfaceModel({
-    entries: getRunning(),
-    pausedItems: getPaused(),
-    pendingItems: getPendingResume(),
-    recoveryState: getRecoveryState(),
-    now: nowDate(),
-    staleHours: staleHours()
-  });
+  const sessionModel = () => {
+    const activeWork = getActiveWork(nowDate());
+    return buildSessionSurfaceModel({
+      entries: activeWork.focused ? [activeWork.focused] : [],
+      recentItems: activeWork.recent,
+      pausedItems: getPaused(),
+      pendingItems: getPendingResume(),
+      recoveryState: getRecoveryState(),
+      now: nowDate(),
+      staleHours: staleHours()
+    });
+  };
   const surfaceNotices = () => actionNotice ? [{ message: actionNotice, role: "alert" }] : [getNotice(), getNotice2()].filter(Boolean).map((message) => ({ message, role: "status" }));
   const renderSurfaces = () => {
     if (popover)
@@ -7465,7 +7645,16 @@ function createTopbar({
   const refreshSessions = () => {
     if (refreshInFlight)
       return refreshInFlight;
-    const request = Promise.resolve().then(() => refreshResult()).then(
+    const request = Promise.resolve().then(() => refreshResult()).then(async (result) => {
+      if (!result?.ok)
+        return result;
+      const snapshot = getEntriesSnapshot();
+      const reconciliation = await reconcileOpenClocks({
+        source: "refresh",
+        entries: snapshot
+      });
+      return { ...result, reconciliation };
+    }).then(
       (result) => {
         if (result?.ok) {
           actionNotice = "";
@@ -7572,6 +7761,7 @@ function createTopbar({
         closePopover({ restoreFocus: false });
         void openBlock(taskUid);
       },
+      onFocusRecent: (entry) => void run(() => clockIn(entry.taskUid, { source: "active-work-switch" })),
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
       onResume: (item) => void run(() => resumeOne(item.taskUid)),
       onRecovery: () => void run(() => resumeAll()),
@@ -7616,7 +7806,7 @@ function createTopbar({
     const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
     const options = surfaceOptions();
-    options.emptyMessage = refreshState.state === "loading" ? "Refreshing Session state from graph\u2026" : refreshStatus.ok ? "No Session is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Session state could not be confirmed. Retry after Roam finishes syncing.";
+    options.emptyMessage = refreshState.state === "loading" ? "Refreshing Active Work state from graph\u2026" : refreshStatus.ok ? "No Focused Task is running. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
     renderSessionSurface(popover, model, options);
     themeRuntime?.apply(popover);
   }
@@ -7677,17 +7867,24 @@ function createTopbar({
   const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true } = {}) => {
     if (!buttonNode)
       return;
+    const derived = getActiveWork(now);
+    const focused = derived.focused || entries[0] || null;
+    const activeWork = focused === derived.focused ? derived : focused ? { focused, recent: [], items: [focused], count: 1 } : { focused: null, recent: [], items: [], count: 0 };
+    const focusedEntries = focused ? [focused] : [];
     const pausedItems = getPaused();
     const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
     const finalizingRecovery = getRecoveryState();
     const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
-    const running2 = entries.length > 0;
+    const running2 = focusedEntries.length > 0;
     if (running2 && reconcile2)
-      reconcileCycle(entries, { now });
+      reconcileCycle(focusedEntries, { now });
     const cycleElapsed = cycleElapsedMs(now);
     const overrun = isCycleOverrun(now);
-    const stale = findStaleClocks(entries, now, staleHours()).length > 0;
-    const loadTone = sessionLoadTone(running2 ? entries.length : 0);
+    const stale = findStaleClocks(focusedEntries, now, staleHours()).length > 0;
+    const loadTone = sessionLoadTone(activeWork.count);
+    const signature = activeWork.items.map((item) => `${item.activeKind || "focused"}:${item.taskUid}`).join("|");
+    const activeChanged = signature !== activeSignature;
+    activeSignature = signature;
     parallelNode.className = loadTone === "neutral" ? "rlb-topbar__parallel" : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
     if (!running2) {
       buttonNode.classList.add("rlb-topbar__button--icon-only");
@@ -7704,34 +7901,38 @@ function createTopbar({
       syncButtonLayout(
         pausedItems.length > 0 || recoveryItems.length > 0 || finalizingRecovery ? "paused" : "idle"
       );
-      buttonNode.title = pausedItems.length ? `${taskCount2(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
+      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
 ${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryCount > 0 ? `${recoveryCount} Recovery item${recoveryCount === 1 ? "" : "s"} require review \u2014 click to retry.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       return;
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
     buttonNode.classList.remove("rlb-topbar__button--paused");
-    const [first] = entries;
+    const [first] = focusedEntries;
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(cycleElapsed);
     buttonNode.classList.add("rlb-topbar__button--parallel");
-    parallelNode.textContent = sessionCount2(entries.length);
+    parallelNode.textContent = activeCount(activeWork.count);
     separatorNode.textContent = "";
     syncButtonLayout("parallel");
-    if (entries.length > 1) {
-      buttonNode.title = `${sessionCount2(entries.length)} Running
-Primary timer: ${first.title}
-Shared cycle ${formatElapsed(cycleElapsed)}` + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
-    } else {
-      const totalMinutes2 = first.priorMinutes + Math.floor((now - first.start.getTime()) / 6e4);
+    if (activeWork.count > 1) {
       const threshold = cycleThresholdMinutes();
-      buttonNode.title = `${sessionCount2(entries.length)} Running
+      buttonNode.title = `${activeCount(activeWork.count)}
+Primary timer: ${first.title}
+Shared cycle ${formatElapsed(cycleElapsed)}` + (threshold ? `
+Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
+    } else {
+      const totalMinutes2 = (first.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 6e4);
+      const threshold = cycleThresholdMinutes();
+      buttonNode.title = `${activeCount(activeWork.count)}
 Clocked in: ${first.title}
 Shared cycle ${formatElapsed(cycleElapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (threshold ? `
 Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
     }
     buttonNode.setAttribute("aria-label", buttonNode.title);
+    if (activeChanged && popover)
+      renderPopover();
   };
   const tick = () => {
     tickCount += 1;
@@ -8362,7 +8563,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
         {
           id: SETTING_TOPBAR,
           name: "Show topbar widget",
-          description: "The live counter and its running Session list in Roam\u2019s left navigation.",
+          description: "The shared work-cycle timer and Active Work list in Roam\u2019s left navigation.",
           action: {
             type: "switch",
             defaultValue: true,
@@ -8383,23 +8584,13 @@ function createController({ extensionAPI: extensionAPI2 }) {
           }
         },
         {
-          id: SETTING_MULTIPLE,
-          name: "Allow multiple clocks at once",
-          description: "Off (org-mode behaviour): clocking in closes the running clock. On: several tasks run in parallel.",
-          action: {
-            type: "switch",
-            defaultValue: false,
-            onChange: (event) => extensionAPI2.settings.set(SETTING_MULTIPLE, normalizeChecked(event))
-          }
-        },
-        {
           id: SETTING_POMODORO_MINUTES,
           name: "Pomodoro duration (minutes)",
-          description: "Sets the shared cycle threshold captured when the first Session starts. Passing it turns elapsed time red; the cycle keeps running.",
+          description: "Sets the shared work-cycle threshold. Passing it turns elapsed time red; seamless Task switches keep the cycle running.",
           action: {
             type: "input",
-            placeholder: "30",
-            defaultValue: "30",
+            placeholder: "45",
+            defaultValue: "45",
             onChange: (event) => {
               extensionAPI2.settings.set(
                 SETTING_POMODORO_MINUTES,
@@ -8481,6 +8672,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
       });
       topbar.mount();
       refresh();
+      const snapshot = getEntriesSnapshot();
+      if (snapshot.filter((entry) => entry.running).length > 1) {
+        void reconcileOpenClocks({ entries: snapshot });
+      }
     },
     destroy() {
       if (destroyed)

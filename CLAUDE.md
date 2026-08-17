@@ -12,15 +12,15 @@ npm run build   # explicitly regenerate extension.js when source changed
 Then commit both the source files and `extension.js` together — Roam Depot loads the
 bundle, not `src/`.
 
-The beta.21 documentation/metadata pass is intentionally an exception: it does
-not rebuild or rewrite the root `extension.js`. A separately authorized source
-release must regenerate and verify the bundle before Depot publication.
+Beta.22 changes runtime source, so it must regenerate and verify the root
+`extension.js` before the Roam Depot Draft is updated.
 
 ## Architecture
 
-The graph is the state. There is no cached mirror of clock data and no persisted
-timer: a `CLOCK::` block with no end stamp *is* a running Session, so a reload, a
-crash, or another device all converge on the same answer. Queued mutations read
+The graph is the state. There is no persisted timer: a `CLOCK::` block with no
+end stamp is a running Session, and the runtime derives one Focused CLOCK plus
+the 45-minute Active Work return set from that graph. A reload, a crash, or
+another device therefore converges on the same answer. Queued mutations read
 before writing and check a post-write refresh. The queue is only per loaded plugin
 instance; it is not a cross-tab/device lock or CAS, so a last-moment external write
 can still race and must be surfaced conservatively.
@@ -47,9 +47,10 @@ Layering, innermost first:
   and native block navigation; it distinguishes a valid empty result from an
   uncertain/failed read.
 - `entries.js`, `clock.js` — read entries out of the graph; clock in/out/discard.
-  `refresh()` also tags each open clock with `priorMinutes`, so the topbar can show
-  a running task total every second without touching the query path.
-- `pomodoro.js` — one shared cycle layered over Running Sessions. Deliberately
+  `refresh()` tags entries with `priorMinutes`, derives one Focused CLOCK, and
+  exposes the 45-minute Active Work return set without touching the query path
+  on each topbar tick.
+- `pomodoro.js` — one shared cycle layered over Focused Work. Deliberately
   *not* in the graph: a Pomodoro cycle is an intention, not a record, and the
   LOGBOOK drawer stays a faithful org clock log. The visible cycle is persisted in
   extension settings; the legacy per-session `pomodoroTargets` map is compatibility
@@ -73,8 +74,8 @@ Layering, innermost first:
     gray, restrained amber stale state, and restrained red Pomodoro overrun state;
     there is no success-green running dot in the topbar. Idle uses a dedicated
     square icon-only hit target, while running preserves the elapsed/count unit.
-    Session rows use a small, muted status bullet for alignment; the explicit
-    `Check Out` action is a neutral log-out icon with an accessible text label,
+    Active Work rows omit decorative status bullets; the explicit `Check Out`
+    action is a neutral log-out icon with an accessible text label,
     and paused rows expose an icon-only `Resume` action. A fully paused batch
     keeps the history-clock identity and uses only a low-saturation ochre icon
     color on the normal transparent surface; it has no additional pause badge
@@ -100,13 +101,13 @@ Layering, innermost first:
     tracked—then Running when populated and the By Task tree. There is no
     Analytics/chart view, By Day chart, category view, or visible chart axis;
     hierarchy and numeric columns stay unchanged while borders remain light.
-  - Current-session rows use a shared grid with the status point and title on
-    row one, metadata on row two, and actions spanning both rows. Alignment is
+  - Current-work rows use a shared grid with the title on row one, metadata on
+    row two, and actions spanning both rows. Alignment is
     structural (`display: contents` plus explicit grid tracks), not a margin
     offset, so Chinese/English and one/two-line metadata share one geometry.
 - The topbar's visible Pomodoro timer is one persisted shared cycle, not a
-  per-session target: the first confirmed Running Session freezes the threshold
-  and action instant, parallel changes retain it, and a confirmed empty state,
+  per-session target: the first confirmed Focused CLOCK freezes the threshold
+  and action instant, seamless task switches retain it, and a confirmed empty state,
   Pause All, Clock Out All, or final Check Out clears it. Resume starts one new
   cycle for the resumed batch. Legacy per-session target fields are compatibility
   only. The Roam sync indicator is host-owned and must not be selected by the
@@ -124,8 +125,8 @@ While a Pause Batch exists, confirmed user clock-in/clock-out actions are observ
 through a small clock-action seam. A paused Task explicitly replaced or finished
 during the break is marked as reconciled and is consumed by Resume All rather than
 being created a second time; resume-originated and pause-originated writes are
-tagged so they do not self-reconcile. Running units remain Sessions; paused batch
-units remain Tasks.
+tagged so they do not self-reconcile. The one running unit is Focused Work;
+historical intervals remain Sessions and paused batch units remain Tasks.
 
 ## Testing
 

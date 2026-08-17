@@ -50,6 +50,40 @@ const install = () => {
     };
 };
 
+const seedOpenClock = (taskUid, clockUid, start = '2026-08-15 Sat 09:01') => {
+    const drawerUid = `${clockUid}-drawer`;
+    graph.store.set(drawerUid, {
+        uid: drawerUid,
+        string: 'LOGBOOK::',
+        parent: taskUid,
+        order: 0,
+        open: false,
+        page: 'Test Page',
+    });
+    graph.store.set(clockUid, {
+        uid: clockUid,
+        string: `CLOCK:: [${start}]`,
+        parent: drawerUid,
+        order: 0,
+        open: true,
+        page: 'Test Page',
+    });
+};
+
+const savePausedSurfaceItem = () => {
+    settingsStore.set(
+        'pausedBatch',
+        JSON.stringify({
+            version: 2,
+            data: {
+                items: [{ taskUid: OTHER.uid, title: 'another action task', pausedAtMs: 1 }],
+                pendingResume: [],
+            },
+        })
+    );
+    paused.load();
+};
+
 install();
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
@@ -124,8 +158,8 @@ test('context menu does not offer Clock In on a direct DONE Task', async () => {
 
 test('Clock Out All requires a second confirmation and resets when the popover closes', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
-    assert.equal(clock.getRunning().length, 2);
+    savePausedSurfaceItem();
+    assert.equal(clock.getRunning().length, 1);
 
     openPopover();
     const first = footerAction('Clock Out All');
@@ -134,7 +168,7 @@ test('Clock Out All requires a second confirmation and resets when the popover c
     click(first);
     await settle();
 
-    assert.equal(clock.getRunning().length, 2, 'the first click must not write to the graph');
+    assert.equal(clock.getRunning().length, 1, 'the first click must not write to the graph');
     const confirm = footerAction('Confirm Clock Out All');
     assert.ok(confirm);
     assert.match(confirm.title, /confirm/i);
@@ -148,7 +182,7 @@ test('Clock Out All requires a second confirmation and resets when the popover c
 
     click(footerAction('Clock Out All'));
     await settle();
-    assert.equal(clock.getRunning().length, 2);
+    assert.equal(clock.getRunning().length, 1);
     click(footerAction('Confirm Clock Out All'));
     await settle();
     assert.equal(clock.getRunning().length, 0, 'only the confirmed action may close all Sessions');
@@ -156,12 +190,11 @@ test('Clock Out All requires a second confirmation and resets when the popover c
 
 test('Command Palette Clock Out All requires a second invocation before writing', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
     const command = paletteCommands.get('Logbook: Clock out all running clocks');
 
     await command();
 
-    assert.equal(clock.getRunning().length, 2, 'the first command invocation must only arm confirmation');
+    assert.equal(clock.getRunning().length, 1, 'the first command invocation must only arm confirmation');
     assert.match(toasts.join(' '), /run again.*confirm/i);
 
     await command();
@@ -171,7 +204,8 @@ test('Command Palette Clock Out All requires a second invocation before writing'
 
 test('Command Palette reports a partial Clock Out All and retains the failed Session for retry', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+    seedOpenClock(OTHER.uid, 'action-legacy-other');
+    clock.refresh();
     const command = paletteCommands.get('Logbook: Clock out all running clocks');
     await command();
     toasts.length = 0;
@@ -197,43 +231,32 @@ test('Command Palette reports a partial Clock Out All and retains the failed Ses
     ]);
 });
 
-test('Popover reports the same partial Clock Out All exactly once', async () => {
+test('Popover reconciles legacy overlap before Clock Out All and reports the focused close once', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
-    const popover = openPopover();
+    seedOpenClock(OTHER.uid, 'action-popover-other');
+    clock.refresh();
+    savePausedSurfaceItem();
+    openPopover();
     click(footerAction('Clock Out All'));
     await settle();
     toasts.length = 0;
 
-    const originalUpdate = graph.api.data.block.update;
-    let updateCount = 0;
-    graph.api.data.block.update = async args => {
-        updateCount += 1;
-        if (updateCount === 2) throw new Error('second Session update failed');
-        return originalUpdate(args);
-    };
-    try {
-        click(footerAction('Confirm Clock Out All'));
-        await settle();
-    } finally {
-        graph.api.data.block.update = originalUpdate;
-    }
+    click(footerAction('Confirm Clock Out All'));
+    await settle();
 
-    assert.equal(updateCount, 2);
-    assert.equal(clock.getRunning().length, 1);
-    assert.deepEqual(toasts, [
-        '1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.',
-    ]);
+    assert.equal(clock.getRunning().length, 0);
+    assert.deepEqual(toasts, []);
     assert.deepEqual(
-        [...popover.querySelectorAll('.rlb-popover__notice')].map(node => node.textContent),
-        ['1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.']
+        [...document.querySelectorAll('body > .rlb-popover .rlb-popover__notice')],
+        []
     );
 });
 
 test('the public batch close helper uses the shared partial presenter contract', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
-    const failedUid = clock.getRunning().find(entry => entry.taskUid === OTHER.uid).clockUid;
+    seedOpenClock(OTHER.uid, 'action-helper-other');
+    clock.refresh();
+    const failedUid = 'action-helper-other';
     const originalUpdate = graph.api.data.block.update;
     graph.api.data.block.update = async args => {
         if (args.block.uid === failedUid) throw new Error('batch helper update failed');
@@ -310,18 +333,17 @@ test('topbar per-session action presents an uncertain mutation result', async ()
 test('Command Palette confirmation expires and unload resets the armed state', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
     const command = paletteCommands.get('Logbook: Clock out all running clocks');
 
     await command();
     t.mock.timers.tick(5_001);
     await command();
-    assert.equal(clock.getRunning().length, 2, 'an expired confirmation cannot execute');
+    assert.equal(clock.getRunning().length, 1, 'an expired confirmation cannot execute');
 
     extension.onunload();
     extension.onload({ extensionAPI });
     await paletteCommands.get('Logbook: Clock out all running clocks')();
-    assert.equal(clock.getRunning().length, 2, 'unload clears a pending command confirmation');
+    assert.equal(clock.getRunning().length, 1, 'unload clears a pending command confirmation');
 });
 
 test('single-session Pause remains a one-click recoverable action', async () => {

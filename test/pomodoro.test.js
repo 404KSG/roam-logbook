@@ -36,13 +36,13 @@ test.after(() => uninstallGraph());
 
 test('shared cycle uses one frozen threshold with exact boundary semantics', () => {
     const startedAt = Date.parse('2026-08-15T09:00:00Z');
-    const now = startedAt + 30 * 60_000;
+    const now = startedAt + 45 * 60_000;
     const cycle = pomodoro.reconcileCycle([cycleEntry('cycle-1', startedAt)], { now });
 
     assert.equal(cycle.startedAt, startedAt);
-    assert.equal(cycle.thresholdMinutes, 30);
+    assert.equal(cycle.thresholdMinutes, 45);
     assert.equal(pomodoro.cycleElapsedMs(startedAt + 3 * 60_000), 3 * 60_000);
-    assert.equal(pomodoro.isCycleOverrun(startedAt + 29 * 60_000 + 59_000), false);
+    assert.equal(pomodoro.isCycleOverrun(startedAt + 44 * 60_000 + 59_000), false);
     assert.equal(pomodoro.isCycleOverrun(now), true);
     assert.equal(pomodoro.isCycleOverrun(now + 1_000), true);
 });
@@ -62,7 +62,7 @@ test('historical totals and legacy per-clock targets cannot turn a short shared 
     assert.equal(pomodoro.targetMinutes('legacy-13-minute-target'), 13);
 });
 
-test('parallel Session changes retain one cycle, while empty running state resets it', () => {
+test('Focused clock changes retain one cycle, while empty running state resets it', () => {
     const startedAt = Date.parse('2026-08-15T09:00:00Z');
     const first = cycleEntry('parallel-1', startedAt);
     const second = cycleEntry('parallel-2', startedAt + 8 * 60_000);
@@ -144,10 +144,10 @@ test('the length falls back to the configured default', () => {
     assert.equal(pomodoro.targetMinutes('c1'), 45);
 });
 
-test('an unset or nonsense length still yields 30 minutes', () => {
+test('an unset or nonsense length still yields the 45-minute default', () => {
     useSettings({ pomodoroMinutes: 'not a number' });
     pomodoro.start('c1');
-    assert.equal(pomodoro.targetMinutes('c1'), 30);
+    assert.equal(pomodoro.targetMinutes('c1'), 45);
 });
 
 test('a suppressed assignment is durable and distinct from an active target', () => {
@@ -208,7 +208,7 @@ test('clocking out prunes the target through the clock subscription', async () =
 
     const { clockUid } = await clock.clockIn('taskone01', { now: new Date(2026, 7, 8, 9, 0) });
     assert.equal(pomodoro.isActive(clockUid), true);
-    assert.equal(pomodoro.targetMinutes(clockUid), 30, 'Clock In is assigned automatically');
+    assert.equal(pomodoro.targetMinutes(clockUid), 45, 'Clock In is assigned automatically');
 
     await clock.clockOut(clockUid, { now: new Date(2026, 7, 8, 10, 0) });
 

@@ -1,13 +1,13 @@
 {
   "name": "roam-logbook",
-  "version": "0.9.0-beta.21",
+  "version": "0.9.0-beta.22",
   "description": "org-mode style clock tracking (LOGBOOK / CLOCK) for Roam Research TODOs",
   "type": "module",
   "main": "extension.js",
   "scripts": {
     "build": "node build.js",
     "watch": "node build.js --watch",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "verify:live": "node scripts/verify-live.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "verify:workflow": "node scripts/verify-workflow.mjs",

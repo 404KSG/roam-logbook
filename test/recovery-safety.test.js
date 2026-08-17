@@ -64,6 +64,26 @@ const clockLines = taskUid => {
     return drawer ? graph.childrenOf(drawer.uid).map(block => block.string) : [];
 };
 
+const seedOpenClock = (taskUid, clockUid, start = '2026-08-15 Sat 09:01') => {
+    const drawerUid = `${clockUid}-drawer`;
+    graph.store.set(drawerUid, {
+        uid: drawerUid,
+        string: 'LOGBOOK::',
+        parent: taskUid,
+        order: 0,
+        open: false,
+        page: 'Test Page',
+    });
+    graph.store.set(clockUid, {
+        uid: clockUid,
+        string: `CLOCK:: [${start}]`,
+        parent: drawerUid,
+        order: 0,
+        open: true,
+        page: 'Test Page',
+    });
+};
+
 test.beforeEach(async () => {
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
@@ -76,12 +96,14 @@ test('Clock Out All retains only the still-running Pause Batch records after a p
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    seedOpenClock(OTHER.uid, 'recovery-initial-other');
+    clock.refresh();
     await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
 
     await clock.clockIn(TASK.uid, { now: new Date(T0.getTime() + 6 * 60_000) });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 6 * 60_000) });
-    const failedUid = clock.getRunning().find(entry => entry.taskUid === OTHER.uid).clockUid;
+    seedOpenClock(OTHER.uid, 'recovery-current-other', '2026-08-15 Sat 09:06');
+    clock.refresh();
+    const failedUid = 'recovery-current-other';
     const originalUpdate = graph.api.data.block.update;
     graph.api.data.block.update = async args => {
         if (args.block.uid === failedUid) throw new Error('one close failed');
@@ -118,9 +140,10 @@ test('automatic completion keeps Pause Batch recovery until every tree Session i
     await clock.clockIn(PAUSED_CHILD.uid, { now: T0 });
     await paused.pauseAll({ now: new Date(T0.getTime() + 60_000) });
     await clock.clockIn(RUNNING_CHILD.uid, { now: new Date(T0.getTime() + 2 * 60_000) });
-    await clock.clockIn(RUNNING_SIBLING.uid, { now: new Date(T0.getTime() + 3 * 60_000) });
+    seedOpenClock(RUNNING_SIBLING.uid, 'recovery-tree-sibling', '2026-08-15 Sat 09:03');
+    clock.refresh();
 
-    const failedUid = clock.getRunning().find(entry => entry.taskUid === RUNNING_SIBLING.uid).clockUid;
+    const failedUid = 'recovery-tree-sibling';
     await graph.api.data.block.update({
         block: { uid: PARENT.uid, string: '{{[[DONE]]}} recovery parent' },
     });
@@ -259,8 +282,9 @@ test('Pause All returns a structured partial result and retries only the remaini
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
-    const failedUid = clock.getRunning().find(entry => entry.taskUid === OTHER.uid).clockUid;
+    seedOpenClock(OTHER.uid, 'recovery-pause-other');
+    clock.refresh();
+    const failedUid = 'recovery-pause-other';
     const originalUpdate = graph.api.data.block.update;
     let failed = true;
     let updateCount = 0;
@@ -326,7 +350,8 @@ test('Resume All returns a structured partial result and retries only the retain
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    seedOpenClock(OTHER.uid, 'recovery-resume-other');
+    clock.refresh();
     await paused.pauseAll({ now: new Date(T0.getTime() + 5 * 60_000) });
 
     const originalCreate = graph.api.data.block.create;
@@ -360,7 +385,7 @@ test('Resume All returns a structured partial result and retries only the retain
     assert.equal(retry.count, 1);
     assert.equal(retry.failed, 0);
     assert.equal(paused.getPaused().length, 0);
-    assert.equal(clock.getRunning().length, 2, 'retry adds only the retained Task');
+    assert.equal(clock.getRunning().length, 1, 'retry switches focus to the retained Task');
     assert.equal(
         graph.childrenOf(graph.childrenOf(TASK.uid).find(block => block.string === 'LOGBOOK::').uid).filter(block =>
             /^CLOCK:{1,2} \[/.test(block.string)
@@ -375,7 +400,8 @@ test('Clock Out All stops after a post-write refresh failure and keeps an exact 
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    seedOpenClock(OTHER.uid, 'recovery-close-other');
+    clock.refresh();
 
     const originalQuery = graph.api.data.q;
     const originalUpdate = graph.api.data.block.update;
@@ -417,7 +443,8 @@ test('Pause All stops after a post-write refresh failure and resumes the exact r
     const { setExtensionAPI } = await import('../src/settings.js');
     setExtensionAPI(extensionWithMultiple);
     await clock.clockIn(TASK.uid, { now: T0 });
-    await clock.clockIn(OTHER.uid, { now: new Date(T0.getTime() + 1_000) });
+    seedOpenClock(OTHER.uid, 'recovery-pause-refresh-other');
+    clock.refresh();
 
     const originalQuery = graph.api.data.q;
     const originalUpdate = graph.api.data.block.update;

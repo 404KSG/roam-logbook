@@ -52,6 +52,28 @@ const install = blocks => {
     };
 };
 
+const seedOpenClock = (taskUid, clockUid, start = '2026-08-16 Sun 09:00') => {
+    const drawerUid = `${clockUid}-drawer`;
+    graph.store.set(drawerUid, {
+        uid: drawerUid,
+        string: 'LOGBOOK::',
+        parent: taskUid,
+        order: 0,
+        open: false,
+        page: 'Test Page',
+    });
+    graph.store.set(clockUid, {
+        uid: clockUid,
+        string: `CLOCK:: [${start}]`,
+        parent: drawerUid,
+        order: 0,
+        open: true,
+        page: 'Test Page',
+    });
+};
+
+const refreshSeededClocks = () => clock.refresh();
+
 install([TASK]);
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
@@ -162,14 +184,15 @@ test('a failed old watcher detach blocks duplicate installation until cleanup su
     }
 });
 
-test('DONE on a parent clocks out the parent and its running child Sessions', async () => {
+test('DONE on a parent clocks out every Focused/legacy child CLOCK in its tree', async () => {
     install([PARENT, CHILD]);
     extension.onunload();
     extension.onload({ extensionAPI });
 
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': PARENT.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    assert.deepEqual(clock.getRunning().map(entry => entry.taskUid).sort(), [PARENT.uid, CHILD.uid].sort());
+    seedOpenClock(PARENT.uid, 'done-parent-clock', '2026-08-16 Sun 09:00');
+    seedOpenClock(CHILD.uid, 'done-child-clock', '2026-08-16 Sun 09:01');
+    refreshSeededClocks();
+    assert.deepEqual(clock.getRunning().map(entry => entry.taskUid), [CHILD.uid]);
 
     await graph.api.data.block.update({
         block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
@@ -179,14 +202,14 @@ test('DONE on a parent clocks out the parent and its running child Sessions', as
     assert.equal(clock.getRunning().length, 0);
 });
 
-test('a parent without its own Session is watched and leaves unrelated parallel work running', async () => {
+test('a parent without its own Focused CLOCK is watched and leaves unrelated work running', async () => {
     install([PARENT, CHILD, OTHER]);
     extension.onunload();
     extension.onload({ extensionAPI });
 
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': OTHER.uid });
     assert.ok(graph.pullWatchUids().includes(PARENT.uid), 'confirmed ancestors must be watched');
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': OTHER.uid });
 
     await graph.api.data.block.update({
         block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
@@ -196,32 +219,35 @@ test('a parent without its own Session is watched and leaves unrelated parallel 
     assert.deepEqual(clock.getRunning().map(entry => entry.taskUid), [OTHER.uid]);
 });
 
-test('DONE on a child does not clock out its parent or sibling Sessions', async () => {
+test('DONE on a child does not clock out its parent or sibling CLOCKs', async () => {
     install([PARENT, CHILD, SIBLING]);
     extension.onunload();
     extension.onload({ extensionAPI });
 
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': PARENT.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+    seedOpenClock(PARENT.uid, 'done-tree-parent-clock', '2026-08-16 Sun 09:00');
+    seedOpenClock(CHILD.uid, 'done-tree-child-clock', '2026-08-16 Sun 09:01');
+    seedOpenClock(SIBLING.uid, 'done-tree-sibling-clock', '2026-08-16 Sun 09:02');
+    refreshSeededClocks();
 
     await graph.api.data.block.update({
         block: { uid: CHILD.uid, string: '{{[[DONE]]}} child task' },
     });
     await settle();
 
-    assert.deepEqual(
-        clock.getRunning().map(entry => entry.taskUid).sort(),
-        [PARENT.uid, SIBLING.uid].sort()
-    );
+    assert.deepEqual(clock.getRunning().map(entry => entry.taskUid), [SIBLING.uid]);
+    assert.match(graph.childrenOf('done-tree-parent-clock-drawer')[0].string, /^CLOCK:: \[/);
+    assert.match(graph.childrenOf('done-tree-sibling-clock-drawer')[0].string, /^CLOCK:: \[/);
+    assert.match(graph.childrenOf('done-tree-child-clock-drawer')[0].string, /--/);
 });
 
 test('completion retries only failed auto-close Sessions and surfaces the partial result', async () => {
     install([PARENT, CHILD, SIBLING]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+    seedOpenClock(PARENT.uid, 'retry-parent-clock', '2026-08-16 Sun 09:00');
+    seedOpenClock(CHILD.uid, 'retry-child-clock', '2026-08-16 Sun 09:01');
+    seedOpenClock(SIBLING.uid, 'retry-sibling-clock', '2026-08-16 Sun 09:02');
+    refreshSeededClocks();
 
     const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
     const updateCounts = new Map();
@@ -250,7 +276,7 @@ test('completion retries only failed auto-close Sessions and surfaces the partia
     assert.equal(updateCounts.get(failedUid), 2, 'only the failed Session is retried');
     const successfulUid = clock.getRunning().find(entry => entry.taskUid === CHILD.uid)?.clockUid;
     assert.equal(successfulUid, undefined);
-    assert.equal(updateCounts.size, 3, 'the parent event and two Session writes are accounted for');
+    assert.equal(updateCounts.size, 4, 'the parent event and three tree CLOCK writes are accounted for');
     assert.equal(
         [...updateCounts.entries()].find(([uid]) => uid !== failedUid && uid !== PARENT.uid)?.[1],
         1,
@@ -263,8 +289,9 @@ test('completion retains a persistent auto-close failure without spinning or ret
     install([PARENT, CHILD, SIBLING]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+    seedOpenClock(CHILD.uid, 'malformed-child-clock', '2026-08-16 Sun 09:00');
+    seedOpenClock(SIBLING.uid, 'malformed-sibling-clock', '2026-08-16 Sun 09:01');
+    refreshSeededClocks();
 
     const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
     const updateCounts = new Map();
@@ -412,9 +439,12 @@ test('a malformed hierarchy component does not disable healthy completion watche
         graph.api.data.q = originalQuery;
     }
 
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(clock.getRunning()[0].taskUid, CHILD.uid);
-    assert.ok(graph.pullWatchUids().includes(SIBLING.uid));
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(
+        graph.pullWatchUids().includes(CHILD.uid),
+        false,
+        'the previously focused child is historical Recent work, not a running CLOCK watch'
+    );
 });
 
 test('an unrelated cyclic hierarchy component does not block a healthy DONE root', async () => {
@@ -486,7 +516,8 @@ test('automatic Clock Out closes duplicate open clocks for the same Task', async
     ]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    assert.equal(clock.getRunning().length, 2);
+    await settle();
+    assert.equal(clock.getRunning().length, 1);
 
     await graph.api.data.block.update({
         block: { uid: TASK.uid, string: '{{[[DONE]]}} finish this task' },
@@ -814,14 +845,13 @@ test('Clock In rejects a cyclic hierarchy instead of guessing its ancestor scope
     );
 });
 
-test('ordinary Clock Out closes only the selected Session, not its descendants', async () => {
+test('ordinary Clock Out closes the selected Focused CLOCK', async () => {
     install([PARENT, CHILD]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': PARENT.uid });
     await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    const parentClock = clock.getRunning().find(entry => entry.taskUid === PARENT.uid);
+    const childClock = clock.getRunning().find(entry => entry.taskUid === CHILD.uid);
 
-    assert.equal(await clock.clockOut(parentClock.clockUid), true);
-    assert.deepEqual(clock.getRunning().map(entry => entry.taskUid), [CHILD.uid]);
+    assert.equal(await clock.clockOut(childClock.clockUid), true);
+    assert.deepEqual(clock.getRunning(), []);
 });

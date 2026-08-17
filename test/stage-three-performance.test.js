@@ -168,7 +168,7 @@ test('the one-second tick updates existing DOM handles without a graph read or r
     assert.equal(queries, 0);
     assert.deepEqual([...button.children], children);
     assert.equal(button.querySelector('.rlb-topbar__time').textContent, '1:01');
-    assert.equal(button.querySelector('.rlb-topbar__parallel').textContent, '1 Session');
+    assert.equal(button.querySelector('.rlb-topbar__parallel').textContent, '1 Active');
     topbar.unmount();
 });
 

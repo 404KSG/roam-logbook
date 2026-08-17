@@ -7,12 +7,13 @@
  */
 
 import { readAllEntries, readHierarchy } from './entries.js';
+import { buildActiveWork, chooseFocusedEntry } from './active-work.js';
 import { DRAWER_LABEL, formatClockLine, isDrawerBlock, taskStatus } from './org.js';
 import { createBlock, deleteBlock, GraphReadError, getBlockString, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
 import { enqueueMutation, resetMutationQueue } from './mutations.js';
-import { allowMultipleClocks } from './settings.js';
 
 let running = [];
+let entriesSnapshot = [];
 let lastRefreshStatus = { ok: true, error: null };
 let notice = '';
 const listeners = new Set();
@@ -57,6 +58,16 @@ function publishAction(action) {
 
 export function getRunning() {
     return running;
+}
+
+/** The last confirmed graph snapshot used to derive Active Work. */
+export function getEntriesSnapshot() {
+    return entriesSnapshot.slice();
+}
+
+/** Derive the one Focused item plus the recent return set without a graph read. */
+export function getActiveWork(now = new Date()) {
+    return buildActiveWork(entriesSnapshot, { now });
 }
 
 export function getLastRefreshStatus() {
@@ -151,9 +162,16 @@ export function refresh({ entries, notify: shouldNotify = true } = {}) {
         bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
     }
 
-    running = all
-        .filter(entry => entry.running)
-        .map(entry => ({ ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }));
+    entriesSnapshot = all.map(entry =>
+        entry.running
+            ? { ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }
+            : { ...entry }
+    );
+    const focused = chooseFocusedEntry(entriesSnapshot);
+    // The graph may contain legacy overlapping CLOCKs. Keep the public running
+    // seam single-focused immediately; reconcileOpenClocks() then closes the
+    // other graph entries at the known focus-switch boundary.
+    running = focused ? [{ ...focused }] : [];
 
     lastRefreshStatus = { ok: true, error: null };
     notice = '';
@@ -183,6 +201,7 @@ export function refreshResult({ entries, notify: shouldNotify = true } = {}) {
 
 export function reset() {
     running = [];
+    entriesSnapshot = [];
     lastRefreshStatus = { ok: true, error: null };
     notice = '';
     listeners.clear();
@@ -348,28 +367,27 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
                 error.doneAncestorUid = doneAncestorUid;
                 throw error;
             }
-            if (allowMultipleClocks()) {
-                if (open.some(entry => entry.taskUid === taskUid)) {
-                    refresh();
-                    throw new Error('This task already has a running clock');
+            if (open.length === 1 && open[0].taskUid === taskUid) {
+                refresh({ entries, notify: false });
+                return { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+            }
+            // There is exactly one real CLOCK by design. A Clock In on another
+            // Task is an atomic focus switch: close every confirmed open legacy
+            // entry at this instant, then create the new Focused CLOCK.
+            if (open.length > 0) {
+                const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now, {
+                    publish: false,
+                });
+                if (outcome.uncertain) {
+                    return {
+                        taskUid,
+                        uncertain: true,
+                        partial: outcome.partial,
+                        notice: GRAPH_UNCERTAIN,
+                        retry: outcome.retry,
+                    };
                 }
-            } else {
-                // Org allows one clock at a time; closing the others keeps totals honest.
-                if (open.length > 0) {
-                    const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now, {
-                        publish: false,
-                    });
-                    if (outcome.uncertain) {
-                        return {
-                            taskUid,
-                            uncertain: true,
-                            partial: outcome.partial,
-                            notice: GRAPH_UNCERTAIN,
-                            retry: outcome.retry,
-                        };
-                    }
-                    if (outcome.failed > 0) throw outcome.results.find(result => result.error).error;
-                }
+                if (outcome.failed > 0) throw outcome.results.find(result => result.error).error;
             }
 
             const drawer = await ensureDrawer(taskUid);
@@ -413,6 +431,68 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             });
             notify();
             return result;
+        })
+    );
+}
+
+/**
+ * Reconcile legacy graphs that contain more than one open CLOCK on reload.
+ *
+ * The newest-started open entry is the deterministic Focused entry. Older
+ * entries are closed at that Focused start instant when possible, which avoids
+ * extending their unknown overlap into the new single-clock era while keeping
+ * every historical CLOCK block intact.
+ */
+export async function reconcileOpenClocks({
+    now = new Date(),
+    source = 'legacy-reconcile',
+    entries: suppliedEntries,
+} = {}) {
+    return enqueueMutation(() =>
+        withGraphGuard(async () => {
+            if (suppliedEntries !== undefined && !Array.isArray(suppliedEntries)) {
+                throw new GraphReadError('Clock reconciliation received an invalid entries snapshot');
+            }
+            const entries = suppliedEntries ?? readAllEntries();
+            const open = entries.filter(entry => entry.running);
+            if (open.length <= 1) {
+                refresh({ entries, notify: false });
+                return {
+                    action: 'reconcile-overlapping-clocks',
+                    ok: true,
+                    focused: open[0]?.clockUid || null,
+                    closed: 0,
+                    pending: 0,
+                    entries,
+                };
+            }
+
+            const focused = chooseFocusedEntry(open) || open[0];
+            const closeAt = focused?.start instanceof Date ? focused.start : now;
+            const outcome = await closeEntriesNow(
+                entries,
+                open.filter(entry => entry.clockUid !== focused.clockUid).map(entry => entry.clockUid),
+                closeAt,
+                { publish: false }
+            );
+            if (!outcome.uncertain) {
+                for (const closed of outcome.results.filter(item => item.closed)) {
+                    const entry = open.find(item => item.clockUid === closed.clockUid);
+                    publishAction({
+                        type: 'clock-out',
+                        source,
+                        clockUid: closed.clockUid,
+                        taskUid: entry?.taskUid,
+                    });
+                }
+            }
+            notify({ reason: 'reconcile-overlap', explicit: true });
+            return {
+                ...outcome,
+                action: 'reconcile-overlapping-clocks',
+                focused: focused.clockUid,
+                entries,
+            };
         })
     );
 }

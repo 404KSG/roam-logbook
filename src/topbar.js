@@ -27,11 +27,12 @@ const POPOVER_ID = 'roam-logbook-popover';
 const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
 const TOPBAR_SELECTOR = '.rm-topbar';
 const REFRESH_SUCCESS_DURATION = 1800;
-const REFRESH_LOADING_MESSAGE = 'Refreshing Sessions from graph…';
+const REFRESH_LOADING_MESSAGE = 'Refreshing Active Work from graph…';
 const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
 const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+export const activeCount = count => `${count} Active`;
 export const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
 
 export const sessionLoadTone = count => {
@@ -136,6 +137,7 @@ export function createTopbar({
     let pendingOpenRefresh = null;
     let refreshClearTimer = null;
     let refreshState = { state: 'idle', message: '' };
+    let activeSignature = '';
     let themeRuntime = null;
     const layoutHosts = new Set();
     const searchHosts = new Set();
@@ -245,15 +247,18 @@ export function createTopbar({
         popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
     };
 
-    const sessionModel = () =>
-        buildSessionSurfaceModel({
-            entries: clock.getRunning(),
+    const sessionModel = () => {
+        const activeWork = clock.getActiveWork(nowDate());
+        return buildSessionSurfaceModel({
+            entries: activeWork.focused ? [activeWork.focused] : [],
+            recentItems: activeWork.recent,
             pausedItems: paused.getPaused(),
             pendingItems: paused.getPendingResume(),
             recoveryState: paused.getRecoveryState(),
             now: nowDate(),
             staleHours: staleHours(),
         });
+    };
 
     const surfaceNotices = () =>
         actionNotice
@@ -303,6 +308,15 @@ export function createTopbar({
 
         const request = Promise.resolve()
             .then(() => clock.refreshResult())
+            .then(async result => {
+                if (!result?.ok) return result;
+                const snapshot = clock.getEntriesSnapshot();
+                const reconciliation = await clock.reconcileOpenClocks({
+                    source: 'refresh',
+                    entries: snapshot,
+                });
+                return { ...result, reconciliation };
+            })
             .then(
                 result => {
                     if (result?.ok) {
@@ -417,6 +431,7 @@ export function createTopbar({
                 closePopover({ restoreFocus: false });
                 void openBlock(taskUid);
             },
+            onFocusRecent: entry => void run(() => clock.clockIn(entry.taskUid, { source: 'active-work-switch' })),
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
             onResume: item => void run(() => paused.resumeOne(item.taskUid)),
             onRecovery: () => void run(() => paused.resumeAll()),
@@ -462,10 +477,10 @@ export function createTopbar({
         const options = surfaceOptions();
         options.emptyMessage =
             refreshState.state === 'loading'
-                ? 'Refreshing Session state from graph…'
+                ? 'Refreshing Active Work state from graph…'
                 : refreshStatus.ok
-                  ? 'No Session is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
-                  : 'Session state could not be confirmed. Retry after Roam finishes syncing.';
+                  ? 'No Focused Task is running. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                  : 'Active Work state could not be confirmed. Retry after Roam finishes syncing.';
         renderSessionSurface(popover, model, options);
         themeRuntime?.apply(popover);
     }
@@ -530,18 +545,31 @@ export function createTopbar({
         { reconcile = true } = {}
     ) => {
         if (!buttonNode) return;
+        const derived = clock.getActiveWork(now);
+        const focused = derived.focused || entries[0] || null;
+        const activeWork = focused === derived.focused
+            ? derived
+            : focused
+              ? { focused, recent: [], items: [focused], count: 1 }
+              : { focused: null, recent: [], items: [], count: 0 };
+        const focusedEntries = focused ? [focused] : [];
         const pausedItems = paused.getPaused();
         const recoveryItems = paused
             .getPendingResume()
             .filter(item => item?.recoveryState === 'conflict');
         const finalizingRecovery = paused.getRecoveryState();
         const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
-        const running = entries.length > 0;
-        if (running && reconcile) pomodoro.reconcileCycle(entries, { now });
+        const running = focusedEntries.length > 0;
+        if (running && reconcile) pomodoro.reconcileCycle(focusedEntries, { now });
         const cycleElapsed = pomodoro.cycleElapsedMs(now);
         const overrun = pomodoro.isCycleOverrun(now);
-        const stale = findStaleClocks(entries, now, staleHours()).length > 0;
-        const loadTone = sessionLoadTone(running ? entries.length : 0);
+        const stale = findStaleClocks(focusedEntries, now, staleHours()).length > 0;
+        const loadTone = sessionLoadTone(activeWork.count);
+        const signature = activeWork.items
+            .map(item => `${item.activeKind || 'focused'}:${item.taskUid}`)
+            .join('|');
+        const activeChanged = signature !== activeSignature;
+        activeSignature = signature;
         parallelNode.className =
             loadTone === 'neutral'
                 ? 'rlb-topbar__parallel'
@@ -576,34 +604,41 @@ export function createTopbar({
 
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
         buttonNode.classList.remove('rlb-topbar__button--paused');
-        const [first] = entries;
+        const [first] = focusedEntries;
         // The topbar is a timing-state entry, not a task summary. Overrun
         // outranks stale, matching the previous status priority without putting
         // either state on the whole button.
         const state = overrun ? 'overrun' : stale ? 'stale' : 'neutral';
         timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
         timeNode.textContent = formatElapsed(cycleElapsed);
-        // Keep the running count visible even for a single Session. The
-        // icon-only state is reserved for zero running Sessions; once timing
-        // is active, the topbar should always expose the same count contract.
+        // Keep the Active count visible even for a single focused Task. The
+        // icon-only state is reserved for zero focused Tasks.
         buttonNode.classList.add('rlb-topbar__button--parallel');
-        parallelNode.textContent = sessionCount(entries.length);
+        parallelNode.textContent = activeCount(activeWork.count);
         separatorNode.textContent = '';
         syncButtonLayout('parallel');
 
-        if (entries.length > 1) {
+        if (activeWork.count > 1) {
+            const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
-                `${sessionCount(entries.length)} Running\n` +
+                `${activeCount(activeWork.count)}\n` +
                 `Primary timer: ${first.title}\n` +
                 `Shared cycle ${formatElapsed(cycleElapsed)}` +
+                (threshold
+                    ? `\nPomodoro cycle ${formatElapsed(threshold * 60_000)} — ${
+                          overrun
+                              ? `over by ${formatElapsed(pomodoro.cycleOverrunMs(now))}`
+                              : `${formatElapsed(threshold * 60_000 - cycleElapsed)} left`
+                      }`
+                    : '') +
                 (overrun ? '\nA Pomodoro is over its target.' : '') +
                 (!overrun && stale ? '\nA clock is likely forgotten.' : '') +
                 '\nClick for all clock details.';
         } else {
-            const totalMinutes = first.priorMinutes + Math.floor((now - first.start.getTime()) / 60_000);
+            const totalMinutes = (first.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 60_000);
             const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
-                `${sessionCount(entries.length)} Running\n` +
+                `${activeCount(activeWork.count)}\n` +
                 `Clocked in: ${first.title}\n` +
                 `Shared cycle ${formatElapsed(cycleElapsed)} · ${formatMinutesHuman(totalMinutes)} on this task in total` +
                 (threshold
@@ -616,6 +651,7 @@ export function createTopbar({
                 (!overrun && stale ? '\nThis clock is likely forgotten.' : '');
         }
         buttonNode.setAttribute('aria-label', buttonNode.title);
+        if (activeChanged && popover) renderPopover();
     };
 
     const tick = () => {

@@ -20,7 +20,6 @@ import {
     normalizePositiveMinutes,
     normalizeSelected,
     setExtensionAPI,
-    SETTING_MULTIPLE,
     SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
     SETTING_TODO_ONLY,
@@ -110,7 +109,7 @@ function createController({ extensionAPI }) {
                 {
                     id: SETTING_TOPBAR,
                     name: 'Show topbar widget',
-                    description: 'The live counter and its running Session list in Roam’s left navigation.',
+                    description: 'The shared work-cycle timer and Active Work list in Roam’s left navigation.',
                     action: {
                         type: 'switch',
                         defaultValue: true,
@@ -132,26 +131,14 @@ function createController({ extensionAPI }) {
                     },
                 },
                 {
-                    id: SETTING_MULTIPLE,
-                    name: 'Allow multiple clocks at once',
-                    description:
-                        'Off (org-mode behaviour): clocking in closes the running clock. On: several tasks run in parallel.',
-                    action: {
-                        type: 'switch',
-                        defaultValue: false,
-                        onChange: event =>
-                            extensionAPI.settings.set(SETTING_MULTIPLE, normalizeChecked(event)),
-                    },
-                },
-                {
                     id: SETTING_POMODORO_MINUTES,
                     name: 'Pomodoro duration (minutes)',
                     description:
-                        'Sets the shared cycle threshold captured when the first Session starts. Passing it turns elapsed time red; the cycle keeps running.',
+                        'Sets the shared work-cycle threshold. Passing it turns elapsed time red; seamless Task switches keep the cycle running.',
                     action: {
                         type: 'input',
-                        placeholder: '30',
-                        defaultValue: '30',
+                        placeholder: '45',
+                        defaultValue: '45',
                         onChange: event => {
                             extensionAPI.settings.set(
                                 SETTING_POMODORO_MINUTES,
@@ -238,6 +225,10 @@ function createController({ extensionAPI }) {
             // The graph is the source of truth, so a reload picks any clock left
             // running — including one abandoned days ago — straight back up.
             clock.refresh();
+            const snapshot = clock.getEntriesSnapshot();
+            if (snapshot.filter(entry => entry.running).length > 1) {
+                void clock.reconcileOpenClocks({ entries: snapshot });
+            }
         },
         destroy() {
             if (destroyed) return;

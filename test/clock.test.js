@@ -13,6 +13,7 @@ const OTHER = { uid: 'tasktwo02', string: '{{[[TODO]]}} another task', parent: n
 
 const AT_1558 = new Date(2026, 7, 5, 15, 58);
 const AT_1658 = new Date(2026, 7, 5, 16, 58);
+const AT_1005 = new Date(2026, 7, 17, 10, 5);
 
 /** Rebuild the graph and the clock module's derived state. */
 function seed(blocks) {
@@ -130,16 +131,40 @@ test('by default a new clock closes the running one', async () => {
     assert.equal(clock.getRunning()[0].taskUid, 'tasktwo02');
 });
 
-test('multiple clocks run in parallel when the setting allows it', async () => {
+test('clocking in another task always closes the previous Focused CLOCK', async () => {
     setExtensionAPI({ settings: { get: key => (key === 'allowMultipleClocks' ? true : undefined) } });
-    seed([TASK, OTHER]);
+    const graph = seed([TASK, OTHER]);
 
     await clock.clockIn('taskone01', { now: AT_1558 });
     await clock.clockIn('tasktwo02', { now: AT_1658 });
 
-    assert.equal(clock.getRunning().length, 2);
-    // Clocking the same task twice would double-count it.
-    await assert.rejects(() => clock.clockIn('taskone01', { now: AT_1658 }), /already has a running clock/);
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, 'tasktwo02');
+    assert.deepEqual(clockLinesOf(graph, 'taskone01'), [
+        'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
+    ]);
+});
+
+test('reload reconciliation closes legacy overlapping CLOCKs and keeps the newest Focused one', async () => {
+    const graph = seed([
+        TASK,
+        OTHER,
+        { uid: 'legacy-drawer-1', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'legacy-clock-1', string: 'CLOCK: [2026-08-17 Mon 09:00]', parent: 'legacy-drawer-1' },
+        { uid: 'legacy-drawer-2', string: 'LOGBOOK::', parent: OTHER.uid },
+        { uid: 'legacy-clock-2', string: 'CLOCK: [2026-08-17 Mon 10:00]', parent: 'legacy-drawer-2' },
+    ]);
+
+    const result = await clock.reconcileOpenClocks({ now: AT_1005 });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.closed, 1);
+    assert.equal(clock.getRunning().length, 1);
+    assert.equal(clock.getRunning()[0].taskUid, OTHER.uid);
+    assert.equal(
+        graph.store.get('legacy-clock-1').string,
+        'CLOCK: [2026-08-17 Mon 09:00]--[2026-08-17 Mon 10:00] => 1:00'
+    );
 });
 
 test('clocking out a block finds its running entry', async () => {

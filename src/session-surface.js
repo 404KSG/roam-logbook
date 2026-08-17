@@ -12,17 +12,17 @@ import { findStaleClocks } from './stats.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
-const taskCount = count => `${count} Task${count === 1 ? '' : 's'}`;
-const SURFACE_TITLE = 'Roam Logbook';
+const SURFACE_TITLE = 'ACTIVE WORK';
 
 const rowFigures = (entry, now) => {
     const elapsed = now.getTime() - entry.start.getTime();
-    const total = entry.priorMinutes + Math.floor(elapsed / 60_000);
+    const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 60_000);
     return `${formatElapsed(elapsed)} · ${formatMinutesHuman(total)} total`;
 };
 
 const fullTaskLabel = title => `Open this block: ${title}`;
-const refreshLabel = 'Refresh Sessions from graph';
+const focusRecentLabel = title => `Focus this recent Task: ${title}`;
+const refreshLabel = 'Refresh Active Work from graph';
 
 const appendMetaNodes = (meta, nodes) => {
     nodes.forEach((node, index) => {
@@ -35,15 +35,24 @@ const appendMetaNodes = (meta, nodes) => {
     });
 };
 
-const renderTitle = (row, onOpenTask) => {
+const renderTitle = (row, onOpenTask, onFocusRecent) => {
     const title = row.title || row.taskUid;
+    const recent = row.kind === 'recent';
     const taskButton = button(
-        'bp3-button bp3-minimal rlb-run__title',
+        `bp3-button bp3-minimal rlb-run__title${recent ? ' rlb-run__title--recent' : ''}`,
         title,
-        event => onOpenTask?.(row.taskUid, event),
-        { title: fullTaskLabel(title) }
+        event => {
+            if (recent && !event?.shiftKey) {
+                event.stopPropagation();
+                void onFocusRecent?.(row.entry, event);
+                return;
+            }
+            onOpenTask?.(row.taskUid, event);
+        },
+        { title: recent ? focusRecentLabel(title) : fullTaskLabel(title) }
     );
-    taskButton.setAttribute('aria-label', fullTaskLabel(title));
+    taskButton.setAttribute('aria-label', recent ? focusRecentLabel(title) : fullTaskLabel(title));
+    if (recent) taskButton.dataset.action = 'focus-recent';
     return taskButton;
 };
 
@@ -71,7 +80,7 @@ const renderRunningRow = (row, now, options) => {
     startedNode.setAttribute('aria-label', startedDetails);
     if (started.datetime) startedNode.dateTime = started.datetime;
     appendMetaNodes(meta, [primary, startedNode]);
-    body.append(renderTitle(row, options.onOpenTask), meta);
+    body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
 
     const actions = el('div', 'rlb-run__actions');
     const checkout = button(
@@ -101,6 +110,29 @@ const renderRunningRow = (row, now, options) => {
     discard.dataset.action = 'discard';
     actions.append(checkout, discard);
     node.append(body, actions);
+    return node;
+};
+
+const renderRecentRow = (row, now, options) => {
+    const entry = row.entry;
+    const node = el('div', 'rlb-run rlb-run--recent rlb-run--inline-meta');
+    node.dataset.sessionState = 'recent';
+    node.dataset.taskUid = entry.taskUid;
+    node.dataset.clockUid = entry.clockUid;
+
+    const body = el('div', 'rlb-run__body');
+    const meta = el('div', 'rlb-run__meta');
+    const ended = formatStarted(entry.end, now);
+    const lastActive = ended.valid ? `${ended.dateLabel} ${ended.timeLabel}` : ended.raw;
+    const total = formatMinutesHuman(entry.priorMinutes || entry.minutes || 0);
+    const primary = el('div', 'rlb-run__meta-line rlb-run__meta-primary', `Recent · ${total} total`);
+    const endedNode = el('time', 'rlb-run__meta-line rlb-run__started', `Last active ${lastActive}`);
+    endedNode.title = `Last active ${ended.raw}`;
+    endedNode.setAttribute('aria-label', endedNode.title);
+    if (ended.datetime) endedNode.dateTime = ended.datetime;
+    appendMetaNodes(meta, [primary, endedNode]);
+    body.append(renderTitle(row, options.onOpenTask, options.onFocusRecent), meta);
+    node.appendChild(body);
     return node;
 };
 
@@ -178,6 +210,7 @@ const renderRecoveryRow = (row, options) => {
 /** Build the small, shared model consumed by both the popover and sidebar. */
 export function buildSessionSurfaceModel({
     entries = [],
+    recentItems = [],
     pausedItems = [],
     pendingItems = [],
     recoveryState = null,
@@ -186,8 +219,15 @@ export function buildSessionSurfaceModel({
 }) {
     const currentNow = now instanceof Date ? now : new Date(now);
     const runningRows = entries.map(entry => ({
-        kind: 'running',
-        key: `running:${entry.clockUid}`,
+        kind: 'focused',
+        key: `focused:${entry.clockUid}`,
+        taskUid: entry.taskUid,
+        title: entry.title,
+        entry,
+    }));
+    const recentRows = recentItems.map(entry => ({
+        kind: 'recent',
+        key: `recent:${entry.taskUid}`,
         taskUid: entry.taskUid,
         title: entry.title,
         entry,
@@ -214,24 +254,27 @@ export function buildSessionSurfaceModel({
         pausedItems: pausedItems.slice(),
         pendingItems: pendingItems.slice(),
         recoveryState: recoveryState ? { ...recoveryState } : null,
-        rows: [...runningRows, ...pausedRows, ...recoveryRows],
-        runningCount: entries.length,
+        rows: [...runningRows, ...recentRows, ...pausedRows, ...recoveryRows],
+        focusedRows: runningRows,
+        recentRows,
+        pausedRows,
+        recoveryRows,
+        focusedCount: runningRows.length,
+        activeCount: runningRows.length + recentRows.length,
+        runningCount: runningRows.length,
         pausedCount: pausedItems.length,
         recoveryCount: recoveryRows.length,
         staleEntries: findStaleClocks(entries, currentNow, staleHours),
     };
 }
 
-const surfaceTitle = model =>
-    model.runningCount > 0
-        ? `${sessionCount(model.runningCount)} Running`
-        : model.pausedCount > 0
-          ? `${taskCount(model.pausedCount)} Paused`
-          : model.recoveryCount > 0
-            ? `${model.recoveryCount} Recover${model.recoveryCount === 1 ? 'y' : 'ies'} Required`
-            : model.recoveryState
-              ? 'Pause Batch Recovery Required'
-          : SURFACE_TITLE;
+const surfaceTitle = () => SURFACE_TITLE;
+
+const appendSection = (list, label, rows, renderRow) => {
+    if (!rows.length) return;
+    list.appendChild(el('div', 'rlb-surface__section-label', label));
+    for (const row of rows) list.appendChild(renderRow(row));
+};
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
 export function renderSessionSurface(root, model, options = {}) {
@@ -255,12 +298,12 @@ export function renderSessionSurface(root, model, options = {}) {
 
     const sessionList = el('div', 'rlb-surface__list');
     sessionList.setAttribute('role', 'group');
-    sessionList.setAttribute('aria-label', 'Current Sessions');
+    sessionList.setAttribute('aria-label', 'Active Work');
     root.appendChild(sessionList);
 
     if (model.rows.length === 0) {
         sessionList.appendChild(
-            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Session is running.')
+            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Focused Task is running.')
         );
     } else {
         if (model.staleEntries.length > 0) {
@@ -274,15 +317,18 @@ export function renderSessionSurface(root, model, options = {}) {
                 )
             );
         }
-        for (const row of model.rows) {
-            sessionList.appendChild(
-                row.kind === 'running'
-                    ? renderRunningRow(row, model.now, options)
-                    : row.kind === 'paused'
-                      ? renderPausedRow(row, model.now, options)
-                      : renderRecoveryRow(row, options)
-            );
-        }
+        appendSection(sessionList, 'FOCUSED', model.focusedRows, row =>
+            renderRunningRow(row, model.now, options)
+        );
+        appendSection(sessionList, 'RECENT', model.recentRows, row =>
+            renderRecentRow(row, model.now, options)
+        );
+        appendSection(sessionList, 'PAUSED', model.pausedRows, row =>
+            renderPausedRow(row, model.now, options)
+        );
+        appendSection(sessionList, 'RECOVERY', model.recoveryRows, row =>
+            renderRecoveryRow(row, options)
+        );
     }
 
     for (const notice of options.notices || []) {

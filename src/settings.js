@@ -26,7 +26,7 @@ const DEFAULTS = {
     [SETTING_MULTIPLE]: false,
     [SETTING_TODO_ONLY]: true,
     [SETTING_STALE_HOURS]: '8',
-    [SETTING_POMODORO_MINUTES]: '30',
+    [SETTING_POMODORO_MINUTES]: '45',
 };
 
 let extensionAPI = null;
@@ -71,7 +71,7 @@ export function staleHours() {
 
 export function pomodoroMinutes() {
     const parsed = Number(read(SETTING_POMODORO_MINUTES));
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 45;
 }
 
 /** Raw access, for state the extension persists rather than the user edits. */
@@ -129,5 +129,5 @@ export function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
     const parsed = Number(normalizeSelected(event).trim());
     const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     const rounded = Number(candidate.toFixed(6));
-    return String(rounded > 0 ? rounded : 30);
+    return String(rounded > 0 ? rounded : 45);
 }
