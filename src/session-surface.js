@@ -14,7 +14,7 @@ import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
 const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
-const SURFACE_TITLE = 'ACTIVE WORK';
+const SURFACE_TITLE = 'ACTIVE THREADS';
 
 const rowFigures = (entry, now) => {
     const elapsed = now.getTime() - entry.start.getTime();
@@ -308,7 +308,7 @@ export function renderSessionSurface(root, model, options = {}) {
 
     const sessionList = el('div', 'rlb-surface__list');
     sessionList.setAttribute('role', 'group');
-    sessionList.setAttribute('aria-label', 'Active Work');
+    sessionList.setAttribute('aria-label', 'Active Threads');
     root.appendChild(sessionList);
 
     if (model.rows.length === 0) {

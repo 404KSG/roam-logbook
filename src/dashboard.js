@@ -403,12 +403,8 @@ export function createDashboard({
         const wrapper = el('dl', 'rlb-overview rlb-overview--compact');
         wrapper.setAttribute('aria-label', `${DASHBOARD_TITLE} overview`);
         const rangeLabel = getRange(model.rangeId).label;
-        const todayContext =
-            model.running.length > 0
-                ? `${model.running.length} active Session${model.running.length === 1 ? '' : 's'}`
-                : 'No active Sessions';
         const metrics = [
-            ['Today', formatMinutesHuman(model.todayMinutes), todayContext, 'today'],
+            ['Today', formatMinutesHuman(model.todayMinutes), null, 'today'],
             [rangeLabel, formatMinutesHuman(model.totalMinutes), null, 'selected'],
             ['Sessions', String(model.sessionMetrics?.sessions || 0), rangeLabel, 'sessions'],
             ['Tasks tracked', String(model.tasks.length), rangeLabel, 'tasks'],

@@ -966,7 +966,7 @@ test('Refresh reconciles an external graph CLOCK into Recent Active Work without
 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 2');
     assert.match(popover.textContent, /External graph task/);
 });
 
@@ -1092,7 +1092,7 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     assert.ok(list, 'Active Work rows share one accessible surface');
     assert.equal(surface.querySelectorAll('.rlb-surface__list').length, 1);
     assert.equal(list.getAttribute('role'), 'group');
-    assert.equal(list.getAttribute('aria-label'), 'Active Work');
+    assert.equal(list.getAttribute('aria-label'), 'Active Threads');
     assert.deepEqual(
         [...list.querySelectorAll('.rlb-surface__section-label')].map(node => node.textContent),
         ['TIMING', 'PARALLEL THREADS · 1Leave after 45m without focus']
@@ -1106,7 +1106,7 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
         parallelLabel.querySelector('.rlb-surface__section-context').textContent,
         'Leave after 45m without focus'
     );
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 2');
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 2');
     assert.equal(
         list.querySelector('.rlb-surface__section--open-lines').getAttribute('aria-label'),
         'PARALLEL THREADS · 1, Leave after 45m without focus'
@@ -1566,7 +1566,7 @@ test('topbar shows a running Session for a confirmed open CLOCK', async () => {
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
     await settlePostPaint();
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
     assert.ok(popover.querySelector('.rlb-run'));
     assert.doesNotMatch(popover.textContent, /No Session is running/);
 });
@@ -1620,7 +1620,7 @@ test('popover is a labelled dialog and returns focus to its trigger on every clo
     assert.ok(popover.getAttribute('aria-labelledby'));
     assert.equal(
         document.getElementById(popover.getAttribute('aria-labelledby')).textContent,
-        'ACTIVE WORK · 1'
+        'ACTIVE THREADS · 1'
     );
     assert.equal(document.activeElement, popover.querySelector('button'));
 

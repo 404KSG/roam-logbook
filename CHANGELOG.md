@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.37 — 2026-08-18
+
+- Renamed the shared current-session surface heading from `ACTIVE WORK · N` to
+  `ACTIVE THREADS · N` and updated its accessible group label to match the
+  Thread vocabulary.
+- Simplified the Dashboard Today metric to show only its label and elapsed
+  value; the Running section still keeps its `N Session(s)` list count.
+- Preserved timing, the 45-minute Active Work window, Pomodoro, navigation,
+  persistence, and all other Dashboard metrics and sections.
+
 ## 0.9.0-beta.36 — 2026-08-18
 
 - Added icon-only Play actions to unfinished Dashboard By Task rows, with a

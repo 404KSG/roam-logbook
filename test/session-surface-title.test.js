@@ -31,6 +31,25 @@ test('Active Work display titles use the existing normalized title and UID fallb
     );
 });
 
+test('empty shared surface uses the Active Threads heading and accessible group label', () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="surface"></div></body></html>');
+    globalThis.document = dom.window.document;
+    const root = document.getElementById('surface');
+
+    renderSessionSurface(
+        root,
+        { rows: [], focusedRows: [], recentRows: [], runningCount: 0, staleEntries: [], now: Date.now() },
+        {}
+    );
+
+    assert.equal(root.querySelector('.rlb-popover__title')?.textContent, 'ACTIVE THREADS · 0');
+    assert.equal(root.querySelector('.rlb-surface__list')?.getAttribute('aria-label'), 'Active Threads');
+    assert.match(root.textContent, /No Timing Line is active/);
+
+    dom.window.close();
+    delete globalThis.document;
+});
+
 test('Timing and Parallel Thread buttons expose the same bracket-preserving visible and accessible titles', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="surface"></div></body></html>');
     globalThis.document = dom.window.document;

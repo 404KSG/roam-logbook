@@ -76,6 +76,11 @@ test('Dashboard live elapsed updates only running cells without graph reads or t
     assert.ok(tick, 'opening a Dashboard with a Running Session starts the injected timer');
     assert.equal(elapsed.dataset.clockUid, clock.getRunning()[0].clockUid);
     assert.equal(elapsed.dataset.startMs, String(nowMs));
+    const today = [...document.querySelectorAll('.rlb-overview__item')].find(
+        item => item.querySelector('.rlb-overview__label')?.textContent === 'Today'
+    );
+    assert.equal(today.querySelector('.rlb-overview__context'), null);
+    assert.equal(document.querySelector('.rlb-running .rlb-panel__count')?.textContent, '1 Session');
 
     const beforeQueries = queryCount;
     const toggle = document.querySelector('.rlb-tree__toggle');
@@ -695,13 +700,13 @@ test('Dashboard overview names the active date range without abstract helper cop
     dashboard.destroy();
 });
 
-test('beta.10 zero-time overview uses a quiet empty context instead of a primary visual', () => {
+test('Dashboard Today metric omits active Session context when empty', () => {
     const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
     dashboard.open();
 
     const today = document.querySelector('.rlb-overview__item');
     assert.equal(today.querySelector('.rlb-overview__number').textContent, '0m');
-    assert.match(today.querySelector('.rlb-overview__context').textContent, /No active Sessions/);
+    assert.equal(today.querySelector('.rlb-overview__context'), null);
 
     dashboard.destroy();
 });

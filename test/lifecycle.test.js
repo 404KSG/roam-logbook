@@ -346,7 +346,7 @@ test('the shared overrun state takes priority over stale metadata', () => {
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
     assert.match(popover.textContent, /1 Session has been open for over 8h/);
     assert.doesNotMatch(popover.textContent, /clock has been open/i);
     click(topbarWidget().querySelector('button'));
@@ -426,7 +426,7 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
-        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 3');
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 3');
         const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
         assert.deepEqual(headerActions.map(node => node.dataset.action || 'refresh-cell'), [
             'dashboard',
@@ -464,7 +464,7 @@ test('the popover lists the running clock', () => {
 
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
     const taskTitle = popover.querySelector('.rlb-run__title');
     assert.ok(taskTitle);
     assert.equal(taskTitle.tagName, 'BUTTON');

@@ -2100,7 +2100,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.36";
+var PLUGIN_VERSION = "0.9.0-beta.37";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -3043,9 +3043,8 @@ function createDashboard({
     const wrapper = el("dl", "rlb-overview rlb-overview--compact");
     wrapper.setAttribute("aria-label", `${DASHBOARD_TITLE} overview`);
     const rangeLabel = getRange(model.rangeId).label;
-    const todayContext = model.running.length > 0 ? `${model.running.length} active Session${model.running.length === 1 ? "" : "s"}` : "No active Sessions";
     const metrics = [
-      ["Today", formatMinutesHuman(model.todayMinutes), todayContext, "today"],
+      ["Today", formatMinutesHuman(model.todayMinutes), null, "today"],
       [rangeLabel, formatMinutesHuman(model.totalMinutes), null, "selected"],
       ["Sessions", String(model.sessionMetrics?.sessions || 0), rangeLabel, "sessions"],
       ["Tasks tracked", String(model.tasks.length), rangeLabel, "tasks"]
@@ -5889,7 +5888,7 @@ var STYLES = `
 
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-var SURFACE_TITLE = "ACTIVE WORK";
+var SURFACE_TITLE = "ACTIVE THREADS";
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
   const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 6e4);
@@ -6159,7 +6158,7 @@ function renderSessionSurface(root, model, options = {}) {
   root.replaceChildren(header);
   const sessionList = el("div", "rlb-surface__list");
   sessionList.setAttribute("role", "group");
-  sessionList.setAttribute("aria-label", "Active Work");
+  sessionList.setAttribute("aria-label", "Active Threads");
   root.appendChild(sessionList);
   if (model.rows.length === 0) {
     sessionList.appendChild(
