@@ -28,6 +28,40 @@ const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
 const dashboardLabel = 'Open Roam Logbook Dashboard';
+const ACTIVE_WORK_TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
+
+const stripRoamMacros = string => {
+    let cleaned = '';
+    let depth = 0;
+    for (let index = 0; index < string.length; index += 1) {
+        const pair = string.slice(index, index + 2);
+        if (pair === '{{') {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if (pair === '}}' && depth > 0) {
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if (depth === 0) cleaned += string[index];
+    }
+    return cleaned;
+};
+
+/** Display-only Task text for Active Work; canonical taskTitle() stays untouched. */
+export function activeWorkDisplayTitle({ taskString, title, taskUid } = {}) {
+    const fallback = String(title || taskUid || '(untitled)').trim() || '(untitled)';
+    if (typeof taskString !== 'string' || taskString.trim() === '') return fallback;
+    const cleaned = stripRoamMacros(taskString.replace(ACTIVE_WORK_TASK_MARKER_RE, ''))
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, '')
+        .replace(/\^\^|\*\*|__|~~/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return cleaned || fallback;
+}
 
 const appendMetaNodes = (meta, nodes) => {
     nodes.forEach((node, index) => {
@@ -53,7 +87,7 @@ const renderRunningFigures = (entry, now) => {
 };
 
 const renderTitle = (row, onOpenTask) => {
-    const title = row.title || row.taskUid;
+    const title = activeWorkDisplayTitle(row);
     const recent = row.kind === 'recent';
     const taskButton = button(
         `bp3-button bp3-minimal rlb-run__title${recent ? ' rlb-run__title--recent' : ''}`,
@@ -163,7 +197,7 @@ const renderRecentRow = (row, now, options) => {
             event.stopPropagation();
             void options.onFocusRecent?.(entry, event);
         },
-        { title: focusRecentLabel(row.title || row.taskUid) }
+        { title: focusRecentLabel(activeWorkDisplayTitle(row)) }
     );
     focus.dataset.action = 'focus-recent';
     actions.appendChild(focus);
@@ -187,6 +221,7 @@ export function buildSessionSurfaceModel({
         kind: 'focused',
         key: `focused:${entry.clockUid}`,
         taskUid: entry.taskUid,
+        taskString: entry.taskString,
         title: entry.title,
         entry,
     }));
@@ -194,6 +229,7 @@ export function buildSessionSurfaceModel({
         kind: 'recent',
         key: `recent:${entry.taskUid}`,
         taskUid: entry.taskUid,
+        taskString: entry.taskString,
         title: entry.title,
         entry,
     }));

@@ -102,6 +102,10 @@ test('onload mounts the topbar widget and registers every command', () => {
     );
     assert.equal(timingLineSidebarSetting.action.type, 'switch');
     assert.equal(timingLineSidebarSetting.action.defaultValue, true);
+    const staleHoursSetting = settingsPanel.settings.find(setting => setting.id === 'staleHours');
+    assert.equal(staleHoursSetting.name, 'Flag unfinished clocks after (hours)');
+    assert.deepEqual(staleHoursSetting.action.items, ['2', '4', '8', '12', '24']);
+    assert.equal(staleHoursSetting.action.defaultValue, '8');
 });
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
@@ -116,7 +120,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /--rlb-surface-link:\s*#316a9f/);
     assert.match(css, /--rlb-session-running:\s*#7eb794/);
     assert.doesNotMatch(css, /#2d72d2|rgba\(45, 114, 210/);
-    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:hover[\s\S]*?text-decoration-color: currentColor/);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title\s*\{[^}]*text-decoration: none/s);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:hover,[\s\S]*?text-decoration: none/);
+    assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:focus-visible\s*\{[^}]*outline: 2px solid currentColor/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header\.bp3-dialog-header\s*{[^}]*min-height: 48px[^}]*height: auto[^}]*overflow: visible[^}]*padding: 6px 14px 6px 16px/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__heading\s*{[^}]*overflow: visible/s);
     assert.match(css, /\.rlb-dashboard \.rlb-header__title\.bp3-heading\s*{[^}]*font-size: 17px[^}]*font-weight: 600[^}]*line-height: 1\.35[^}]*overflow: visible[^}]*white-space: normal/s);

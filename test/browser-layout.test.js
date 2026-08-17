@@ -176,7 +176,7 @@ test('Session count keeps 0–3 neutral while higher load uses boundary colors',
     }
 });
 
-test('Session title links inherit Roam theme colors and keep a current-color underline', async t => {
+test('Active Work titles inherit Roam colors without resting or keyboard-focus underlines', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
         htmlWithLateHost(
@@ -184,21 +184,23 @@ test('Session title links inherit Roam theme colors and keep a current-color und
         ),
         `(() => {
             const title = document.querySelector('.rlb-run__title');
-            const normalColor = getComputedStyle(title).color;
+            const normal = getComputedStyle(title);
+            const normalColor = normal.color;
+            const normalDecoration = normal.textDecorationLine;
             title.focus();
             const style = getComputedStyle(title);
             return {
                 normalColor,
+                normalDecoration,
                 color: style.color,
-                underline: style.textDecorationColor,
                 decoration: style.textDecorationLine,
                 outline: style.outlineColor,
             };
         })()`
     );
     assert.equal(geometry.normalColor, 'rgb(123, 45, 67)', JSON.stringify(geometry));
-    assert.match(geometry.decoration, /underline/, JSON.stringify(geometry));
-    assert.equal(geometry.underline, geometry.color, JSON.stringify(geometry));
+    assert.equal(geometry.normalDecoration, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.decoration, 'none', JSON.stringify(geometry));
     assert.equal(geometry.outline, geometry.color, JSON.stringify(geometry));
 });
 
