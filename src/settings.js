@@ -29,10 +29,26 @@ const DEFAULTS = {
     [SETTING_TIMING_LINE_SIDEBAR]: true,
 };
 
+const DEFAULT_ON_SWITCHES = [
+    SETTING_TOPBAR,
+    SETTING_TODO_ONLY,
+    SETTING_TIMING_LINE_SIDEBAR,
+];
+
 let extensionAPI = null;
 
 export function setExtensionAPI(api) {
     extensionAPI = api;
+}
+
+/** Persist only missing user-facing default-on switches before Roam builds Settings UI. */
+export function initializeDefaultOnSwitches() {
+    for (const key of DEFAULT_ON_SWITCHES) {
+        const value = extensionAPI?.settings?.get(key);
+        if (value === undefined || value === null) {
+            extensionAPI?.settings?.set(key, true);
+        }
+    }
 }
 
 function read(key) {

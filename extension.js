@@ -2095,7 +2095,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.31";
+var PLUGIN_VERSION = "0.9.0-beta.32";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -2120,9 +2120,22 @@ var DEFAULTS = {
   [SETTING_POMODORO_MINUTES]: "45",
   [SETTING_TIMING_LINE_SIDEBAR]: true
 };
+var DEFAULT_ON_SWITCHES = [
+  SETTING_TOPBAR,
+  SETTING_TODO_ONLY,
+  SETTING_TIMING_LINE_SIDEBAR
+];
 var extensionAPI = null;
 function setExtensionAPI(api) {
   extensionAPI = api;
+}
+function initializeDefaultOnSwitches() {
+  for (const key of DEFAULT_ON_SWITCHES) {
+    const value = extensionAPI?.settings?.get(key);
+    if (value === void 0 || value === null) {
+      extensionAPI?.settings?.set(key, true);
+    }
+  }
 }
 function read(key) {
   const value = extensionAPI?.settings?.get(key);
@@ -7464,6 +7477,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
   return {
     init() {
       setExtensionAPI(extensionAPI2);
+      initializeDefaultOnSwitches();
       timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
       detachTimingLineSidebar = subscribeActions(
         timingLineSidebar.handleAction

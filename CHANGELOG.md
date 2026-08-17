@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-beta.32 — 2026-08-17
+
+- Persisted the three missing default-on switch values before Roam creates the
+  Settings panel, so a fresh installation now shows the same enabled state the
+  runtime already uses.
+- Preserved every existing user choice, including boolean and legacy string
+  `false` values; deprecated, input, and select settings are not initialized by
+  this repair.
+
 ## 0.9.0-beta.31 — 2026-08-17
 
 - Preserved visible Roam page and tag references such as `[[Roam Logbook]]`

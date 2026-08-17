@@ -3,8 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
     allowMultipleClocks,
+    initializeDefaultOnSwitches,
     keepTimingLineAtTopOfRightSidebar,
+    SETTING_MULTIPLE,
+    SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
+    SETTING_TIMING_LINE_SIDEBAR,
+    SETTING_TODO_ONLY,
+    SETTING_TOPBAR,
     setExtensionAPI,
     showTopbarWidget,
     staleHours,
@@ -49,4 +55,56 @@ test('unfinished-clock hours keep the existing storage key, values, and default'
     }
     setExtensionAPI({ settings: { get: () => undefined } });
     assert.equal(staleHours(), 8);
+});
+
+test('default-on switches are persisted only when their keys are missing', () => {
+    const values = new Map();
+    const writes = [];
+    setExtensionAPI({
+        settings: {
+            get: key => values.get(key),
+            set: (key, value) => {
+                writes.push([key, value]);
+                values.set(key, value);
+            },
+        },
+    });
+
+    initializeDefaultOnSwitches();
+
+    assert.deepEqual(writes, [
+        [SETTING_TOPBAR, true],
+        [SETTING_TODO_ONLY, true],
+        [SETTING_TIMING_LINE_SIDEBAR, true],
+    ]);
+    assert.equal(values.has(SETTING_MULTIPLE), false);
+    assert.equal(values.has(SETTING_STALE_HOURS), false);
+    assert.equal(values.has(SETTING_POMODORO_MINUTES), false);
+});
+
+test('default-on switch initialization never overwrites existing boolean or string values', () => {
+    const values = new Map([
+        [SETTING_TOPBAR, false],
+        [SETTING_TODO_ONLY, 'false'],
+        [SETTING_TIMING_LINE_SIDEBAR, true],
+    ]);
+    const writes = [];
+    setExtensionAPI({
+        settings: {
+            get: key => values.get(key),
+            set: (key, value) => {
+                writes.push([key, value]);
+                values.set(key, value);
+            },
+        },
+    });
+
+    initializeDefaultOnSwitches();
+
+    assert.deepEqual(writes, []);
+    assert.deepEqual([...values], [
+        [SETTING_TOPBAR, false],
+        [SETTING_TODO_ONLY, 'false'],
+        [SETTING_TIMING_LINE_SIDEBAR, true],
+    ]);
 });

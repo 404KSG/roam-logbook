@@ -32,12 +32,20 @@ const paletteCommands = new Map();
 const paletteCommandSpecs = new Map();
 const settingsStore = new Map();
 let settingsPanel = null;
+let settingsAtPanelCreate = null;
 
 const extensionAPI = {
     settings: {
         get: key => settingsStore.get(key),
         set: (key, value) => settingsStore.set(key, value),
-        panel: { create: config => (settingsPanel = config) },
+        panel: {
+            create: config => {
+                settingsAtPanelCreate = new Map(
+                    config.settings.map(setting => [setting.id, settingsStore.get(setting.id)])
+                );
+                settingsPanel = config;
+            },
+        },
     },
     ui: {
         commandPalette: {
@@ -82,6 +90,18 @@ test('onload mounts the topbar widget and registers every command', () => {
     assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.equal(settingsPanel.tabTitle, 'Roam Logbook');
+    assert.deepEqual(
+        ['showTopbarWidget', 'todoBlocksOnly', 'keepTimingLineAtTopOfRightSidebar'].map(key => [
+            key,
+            settingsStore.get(key),
+            settingsAtPanelCreate.get(key),
+        ]),
+        [
+            ['showTopbarWidget', true, true],
+            ['todoBlocksOnly', true, true],
+            ['keepTimingLineAtTopOfRightSidebar', true, true],
+        ]
+    );
     assert.equal(paletteCommands.size, 5);
     assert.equal(paletteCommands.has('Logbook: Start pomodoro on current block'), false);
     assert.deepEqual(

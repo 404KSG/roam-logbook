@@ -15,6 +15,7 @@ import { isTaskBlock, taskStatus } from './org.js';
 import * as pomodoro from './pomodoro.js';
 import { mutationResultNotice, presentMutationResult } from './action-result.js';
 import {
+    initializeDefaultOnSwitches,
     normalizeChecked,
     normalizePositiveMinutes,
     normalizeSelected,
@@ -229,6 +230,7 @@ function createController({ extensionAPI }) {
     return {
         init() {
             setExtensionAPI(extensionAPI);
+            initializeDefaultOnSwitches();
             timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
             detachTimingLineSidebar = clock.subscribeActions(
                 timingLineSidebar.handleAction
