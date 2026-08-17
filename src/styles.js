@@ -1459,8 +1459,15 @@ export const STYLES = `
 }
 
 .rlb-by-task {
-    --rlb-task-toolbar-height: 34px;
     overflow: visible;
+}
+
+/* The task toolbar and table header belong to the document flow. Keeping them
+   static prevents a dashboard scroll from turning them into an opaque banner
+   over the task rows. */
+.rlb-by-task > .rlb-section__heading,
+.rlb-by-task .rlb-task-table thead th {
+    position: static;
 }
 
 .rlb-task-count {
@@ -1577,28 +1584,6 @@ export const STYLES = `
     border-bottom: 0;
     color: var(--rlb-muted);
     font-size: 10px;
-}
-
-@media (min-width: 721px) {
-    .rlb-by-task > .rlb-section__heading {
-        position: sticky;
-        z-index: 5;
-        top: 0;
-        height: var(--rlb-task-toolbar-height);
-        min-height: var(--rlb-task-toolbar-height);
-        margin: -12px -14px 6px;
-        padding: 4px 14px;
-        border-bottom: 1px solid var(--rlb-border-light);
-        background: var(--rlb-surface);
-    }
-
-    .rlb-by-task .rlb-task-table thead th {
-        position: sticky;
-        z-index: 4;
-        top: var(--rlb-task-toolbar-height);
-        border-bottom: 1px solid var(--rlb-border-light);
-        background: var(--rlb-surface);
-    }
 }
 
 .rlb-dashboard .rlb-table td {

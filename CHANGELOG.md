@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-beta.28 — 2026-08-17
+
+- Removed the desktop Dashboard's sticky By Task toolbar and sticky column
+  headers. Both now scroll naturally with the task list instead of becoming an
+  opaque banner over task rows.
+- Added Chromium layout coverage at desktop, 340px, and 320px widths, including
+  a real scroll assertion that prevents the sticky-banner regression from
+  returning while preserving filters, sorting, and narrow-screen wrapping.
+
 ## 0.9.0-beta.27 — 2026-08-17
 
 - Moved the Active Work Dashboard and Refresh actions from the footer into a

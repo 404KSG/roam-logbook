@@ -927,7 +927,7 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
     });
 });
 
-test('Dashboard task controls wrap on narrow screens and use a non-overlapping sticky stack on desktop', async t => {
+test('Dashboard task controls flow naturally at every width without overlap', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const markup = `
         <div class="rlb-root rlb-root--open rlb-dashboard">
@@ -974,6 +974,12 @@ test('Dashboard task controls wrap on narrow screens and use a non-overlapping s
         const body = document.querySelector('.rlb-body');
         const toolbarStyle = getComputedStyle(toolbar);
         const headerStyle = getComputedStyle(tableHeader);
+        const beforeToolbarTop = toolbar.getBoundingClientRect().top;
+        const beforeHeaderTop = tableHeader.getBoundingClientRect().top;
+        const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+        body.scrollTop = Math.min(160, maxScrollTop);
+        const afterToolbarTop = toolbar.getBoundingClientRect().top;
+        const afterHeaderTop = tableHeader.getBoundingClientRect().top;
         return {
             toolbar: rect(toolbar),
             controls: controlRects,
@@ -983,6 +989,9 @@ test('Dashboard task controls wrap on narrow screens and use a non-overlapping s
             toolbarTop: toolbarStyle.top,
             tableHeaderPosition: headerStyle.position,
             tableHeaderTop: headerStyle.top,
+            bodyScrollTop: body.scrollTop,
+            toolbarMovedWithBody: afterToolbarTop < beforeToolbarTop,
+            tableHeaderMovedWithBody: afterHeaderTop < beforeHeaderTop,
             byTaskOverflow: getComputedStyle(byTask).overflow,
             bodyOverflowY: getComputedStyle(body).overflowY,
         };
@@ -1002,10 +1011,11 @@ test('Dashboard task controls wrap on narrow screens and use a non-overlapping s
 
     const desktop = await withChromium(htmlWithLateHost(markup), expression, { width: 960, height: 600 });
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ desktop }));
-    assert.equal(desktop.toolbarPosition, 'sticky', JSON.stringify(desktop));
-    assert.equal(desktop.tableHeaderPosition, 'sticky', JSON.stringify(desktop));
-    assert.equal(desktop.toolbarTop, '0px', JSON.stringify(desktop));
-    assert.equal(desktop.tableHeaderTop, '34px', JSON.stringify(desktop));
+    assert.equal(desktop.toolbarPosition, 'static', JSON.stringify(desktop));
+    assert.equal(desktop.tableHeaderPosition, 'static', JSON.stringify(desktop));
+    assert.equal(desktop.bodyScrollTop > 0, true, JSON.stringify(desktop));
+    assert.equal(desktop.toolbarMovedWithBody, true, JSON.stringify(desktop));
+    assert.equal(desktop.tableHeaderMovedWithBody, true, JSON.stringify(desktop));
     assert.equal(desktop.byTaskOverflow, 'visible', JSON.stringify(desktop));
     assert.equal(desktop.bodyOverflowY, 'auto', JSON.stringify(desktop));
 });
