@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0-beta.30 — 2026-08-17
+
+- Added a default-on `Keep Timing Line at top of right sidebar` setting. A
+  confirmed user Clock In now opens the focused block at native sidebar order
+  0, or moves and expands its existing window without duplicating or removing
+  unrelated sidebar content.
+- Covered Command Palette, TODO context-menu, Active Work switching, and
+  repeated Clock In on the already focused Task. Background reload, Refresh,
+  reconciliation, and repair paths do not move the sidebar.
+- Made rapid switches last-intent-wins and kept sidebar failures non-blocking:
+  Clock data remains confirmed even if Roam cannot update the sidebar, with a
+  concise warning instead of a rollback.
+
 ## 0.9.0-beta.29 — 2026-08-17
 
 - Clarified the Active Work model as one `TIMING` line plus switchable

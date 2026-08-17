@@ -461,6 +461,87 @@ async function openBlock(uid) {
   }
 }
 var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
+var blockSidebarWindow = (uid, order) => {
+  const sidebarWindow = { type: "block", "block-uid": uid };
+  if (Number.isFinite(order))
+    sidebarWindow.order = order;
+  return sidebarWindow;
+};
+var sidebarFailure = (reason, message, error) => ({
+  ok: false,
+  reason,
+  message,
+  ...error ? { error } : {}
+});
+async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
+  if (typeof uid !== "string" || uid.length === 0) {
+    return sidebarFailure("missing-uid", "This Timing Line has no block UID.");
+  }
+  const sidebar = getApi()?.ui?.rightSidebar;
+  if (typeof sidebar?.addWindow !== "function") {
+    return sidebarFailure(
+      "unavailable",
+      "Roam right-sidebar block windows are unavailable."
+    );
+  }
+  const target = blockSidebarWindow(uid);
+  try {
+    await sidebar.open?.();
+    if (!isCurrent())
+      return { ok: false, skipped: true, reason: "superseded" };
+    if (typeof sidebar.getWindows === "function") {
+      const windows = await sidebar.getWindows();
+      if (!isCurrent())
+        return { ok: false, skipped: true, reason: "superseded" };
+      const existing = Array.isArray(windows) ? windows.find(
+        (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
+      ) : null;
+      if (existing) {
+        if (typeof sidebar.setWindowOrder !== "function") {
+          return sidebarFailure(
+            "order-unavailable",
+            "Roam could not move the Timing Line sidebar window to the top."
+          );
+        }
+        await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        if (typeof sidebar.expandWindow === "function") {
+          await sidebar.expandWindow({ window: target });
+        }
+        return { ok: true, deduped: true, reordered: true };
+      }
+      if (!isCurrent())
+        return { ok: false, skipped: true, reason: "superseded" };
+      await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+      return { ok: true, added: true };
+    }
+    let requested = requestedSidebarBlocks.get(sidebar);
+    if (!requested) {
+      requested = /* @__PURE__ */ new Set();
+      requestedSidebarBlocks.set(sidebar, requested);
+    }
+    if (requested.has(uid))
+      return { ok: true, deduped: true };
+    if (!isCurrent())
+      return { ok: false, skipped: true, reason: "superseded" };
+    try {
+      await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+      requested.add(uid);
+    } catch (error) {
+      requested.delete(uid);
+      throw error;
+    }
+    return { ok: true, added: true };
+  } catch (error) {
+    console.debug("[roam-logbook] could not front Timing Line in right sidebar", uid, error);
+    return sidebarFailure(
+      "sidebar-front-failed",
+      error?.message || "Roam could not move the Timing Line to the top of the right sidebar.",
+      error
+    );
+  }
+}
 async function openBlockInRightSidebar(uid) {
   if (typeof uid !== "string" || uid.length === 0) {
     return { ok: false, reason: "missing-uid", message: "This Task has no block UID." };
@@ -1153,7 +1234,17 @@ async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "u
       }
       if (open.length === 1 && open[0].taskUid === taskUid) {
         refresh({ entries, notify: false });
-        return { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+        const result2 = { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+        publishAction({
+          type: "clock-in",
+          source,
+          clockUid: open[0].clockUid,
+          taskUid,
+          alreadyFocused: true,
+          newCycle: false,
+          cycleStartedAt: null
+        });
+        return result2;
       }
       if (open.length > 0) {
         const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
@@ -2004,7 +2095,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.29";
+var PLUGIN_VERSION = "0.9.0-beta.30";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -2017,6 +2108,7 @@ var SETTING_MULTIPLE = "allowMultipleClocks";
 var SETTING_TODO_ONLY = "todoBlocksOnly";
 var SETTING_STALE_HOURS = "staleHours";
 var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
+var SETTING_TIMING_LINE_SIDEBAR = "keepTimingLineAtTopOfRightSidebar";
 var SETTING_POMODORO_STATE = "pomodoroTargets";
 var SETTING_POMODORO_CYCLE = "pomodoroCycle";
 var SETTING_STATE_BACKUPS = "stateBackups";
@@ -2025,7 +2117,8 @@ var DEFAULTS = {
   [SETTING_MULTIPLE]: false,
   [SETTING_TODO_ONLY]: true,
   [SETTING_STALE_HOURS]: "8",
-  [SETTING_POMODORO_MINUTES]: "45"
+  [SETTING_POMODORO_MINUTES]: "45",
+  [SETTING_TIMING_LINE_SIDEBAR]: true
 };
 var extensionAPI = null;
 function setExtensionAPI(api) {
@@ -2055,6 +2148,9 @@ function showTopbarWidget() {
 }
 function todoBlocksOnly() {
   return booleanSetting(SETTING_TODO_ONLY);
+}
+function keepTimingLineAtTopOfRightSidebar() {
+  return booleanSetting(SETTING_TIMING_LINE_SIDEBAR);
 }
 function staleHours() {
   const parsed = Number(read(SETTING_STALE_HOURS));
@@ -7106,6 +7202,60 @@ function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {})
   };
 }
 
+// src/timing-line-sidebar.js
+var USER_CLOCK_IN_SOURCES = /* @__PURE__ */ new Set(["user", "active-work-switch"]);
+var DEFAULT_FAILURE_NOTICE = "Timing Line started, but Roam could not move it to the top of the right sidebar.";
+function isTimingLineFrontIntent(action) {
+  return action?.type === "clock-in" && USER_CLOCK_IN_SOURCES.has(action.source) && typeof action.taskUid === "string" && action.taskUid.length > 0;
+}
+function createTimingLineSidebarFronting({
+  frontBlock = frontBlockInRightSidebar,
+  isEnabled = keepTimingLineAtTopOfRightSidebar,
+  onNotice = () => {
+  }
+} = {}) {
+  let latestIntent = 0;
+  let queue = Promise.resolve();
+  let disposed = false;
+  const isCurrent = (intent) => !disposed && intent === latestIntent && Boolean(isEnabled());
+  const handleAction = (action) => {
+    if (disposed || !isTimingLineFrontIntent(action) || !isEnabled())
+      return false;
+    const intent = ++latestIntent;
+    queue = queue.catch(() => void 0).then(async () => {
+      if (!isCurrent(intent)) {
+        return { ok: false, skipped: true, reason: "superseded" };
+      }
+      let result;
+      try {
+        result = await frontBlock(action.taskUid, {
+          isCurrent: () => isCurrent(intent)
+        });
+      } catch (error) {
+        result = {
+          ok: false,
+          reason: "sidebar-front-failed",
+          message: error?.message || DEFAULT_FAILURE_NOTICE,
+          error
+        };
+      }
+      if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
+        onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+      }
+      return result;
+    });
+    return true;
+  };
+  return {
+    handleAction,
+    whenIdle: () => queue,
+    dispose() {
+      disposed = true;
+      latestIntent += 1;
+    }
+  };
+}
+
 // src/extension.js
 var CONTEXT_CLOCK_IN = "Logbook: Clock in";
 var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
@@ -7128,6 +7278,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
   let destroyed = false;
   let detachPomodoro = null;
   let detachCompletion = null;
+  let detachTimingLineSidebar = null;
+  let timingLineSidebar = null;
   const targetString = (context) => {
     const uid = resolveTaskUid(context?.["block-uid"]);
     return getBlockString(uid) ?? context?.["block-string"] ?? "";
@@ -7193,6 +7345,19 @@ function createController({ extensionAPI: extensionAPI2 }) {
             type: "switch",
             defaultValue: true,
             onChange: (event) => extensionAPI2.settings.set(SETTING_TODO_ONLY, normalizeChecked(event))
+          }
+        },
+        {
+          id: SETTING_TIMING_LINE_SIDEBAR,
+          name: "Keep Timing Line at top of right sidebar",
+          description: "After a successful Clock In, open or move that block to the top of Roam\u2019s right sidebar.",
+          action: {
+            type: "switch",
+            defaultValue: true,
+            onChange: (event) => extensionAPI2.settings.set(
+              SETTING_TIMING_LINE_SIDEBAR,
+              normalizeChecked(event)
+            )
           }
         },
         {
@@ -7272,6 +7437,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
   return {
     init() {
       setExtensionAPI(extensionAPI2);
+      timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
+      detachTimingLineSidebar = subscribeActions(
+        timingLineSidebar.handleAction
+      );
       injectStyles(STYLE_ID, STYLES);
       registerSettings();
       registerCommands();
@@ -7292,6 +7461,10 @@ function createController({ extensionAPI: extensionAPI2 }) {
         return;
       destroyed = true;
       confirmation.reset();
+      detachTimingLineSidebar?.();
+      detachTimingLineSidebar = null;
+      timingLineSidebar?.dispose();
+      timingLineSidebar = null;
       detachCompletion?.();
       detachCompletion = null;
       detachPomodoro?.();

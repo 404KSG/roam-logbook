@@ -93,6 +93,15 @@ test('onload mounts the topbar widget and registers every command', () => {
     assert.equal(pomodoroSetting.action.type, 'input');
     assert.equal(pomodoroSetting.action.placeholder, '45');
     assert.equal(pomodoroSetting.action.defaultValue, '45');
+    const timingLineSidebarSetting = settingsPanel.settings.find(
+        setting => setting.id === 'keepTimingLineAtTopOfRightSidebar'
+    );
+    assert.equal(
+        timingLineSidebarSetting.name,
+        'Keep Timing Line at top of right sidebar'
+    );
+    assert.equal(timingLineSidebarSetting.action.type, 'switch');
+    assert.equal(timingLineSidebarSetting.action.defaultValue, true);
 });
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
@@ -184,8 +193,49 @@ test('the context menu offers clock in on a TODO block only', () => {
     assert.equal(clockIn['display-conditional']({ 'block-uid': 'plain0001' }), false);
 });
 
+test('command-palette Clock In fronts the confirmed Timing Line at order 0', async () => {
+    const calls = [];
+    const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
+    const previousFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: async () => calls.push('open'),
+        getWindows: () => [],
+        addWindow: async spec => calls.push(spec),
+    };
+    window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
+    try {
+        await paletteCommands.get('Logbook: Clock in current block')();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(calls, [
+            'open',
+            { window: { type: 'block', 'block-uid': 'taskone01', order: 0 } },
+        ]);
+        await clock.discardClock(clock.getRunning()[0].clockUid);
+    } finally {
+        window.roamAlphaAPI.ui.getFocusedBlock = previousFocusedBlock;
+        window.roamAlphaAPI.ui.rightSidebar = previousSidebar;
+    }
+});
+
 test('clocking in shows elapsed time and a singular Active count in the topbar', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
+    const sidebarCalls = [];
+    const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: async () => sidebarCalls.push('open'),
+        getWindows: () => [],
+        addWindow: async spec => sidebarCalls.push(spec),
+    };
+    try {
+        await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
+        await new Promise(resolve => setImmediate(resolve));
+    } finally {
+        window.roamAlphaAPI.ui.rightSidebar = previousSidebar;
+    }
+
+    assert.deepEqual(sidebarCalls, [
+        'open',
+        { window: { type: 'block', 'block-uid': 'taskone01', order: 0 } },
+    ]);
 
     const drawer = graph.childrenOf('taskone01')[0];
     assert.equal(drawer.string, 'LOGBOOK::');

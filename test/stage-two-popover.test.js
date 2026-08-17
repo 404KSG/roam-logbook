@@ -1168,8 +1168,37 @@ test('the Recent Focus action switches it to the one Focused CLOCK', async t => 
         '.rlb-surface__section--recent [data-action="focus-recent"]'
     );
     assert.equal(recentFocus.getAttribute('aria-label'), 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
-    click(recentFocus);
-    await settle();
+    const sidebarCalls = [];
+    const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: async () => sidebarCalls.push({ action: 'open' }),
+        getWindows: () => [
+            { type: 'block', 'block-uid': 'popover-task-01', order: 2, 'collapsed?': true },
+        ],
+        addWindow: async spec => sidebarCalls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => sidebarCalls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => sidebarCalls.push({ action: 'expandWindow', spec }),
+    };
+    try {
+        click(recentFocus);
+        await settle();
+    } finally {
+        window.roamAlphaAPI.ui.rightSidebar = previousSidebar;
+    }
+
+    assert.deepEqual(sidebarCalls, [
+        { action: 'open' },
+        {
+            action: 'setWindowOrder',
+            spec: {
+                window: { type: 'block', 'block-uid': 'popover-task-01', order: 0 },
+            },
+        },
+        {
+            action: 'expandWindow',
+            spec: { window: { type: 'block', 'block-uid': 'popover-task-01' } },
+        },
+    ]);
 
     assert.equal(clock.getRunning().length, 1);
     assert.equal(clock.getRunning()[0].taskUid, 'popover-task-01');
@@ -1373,12 +1402,13 @@ test('Topbar Shift+Click is inert and cannot open a popover or sidebar', async t
 
 test('Shift+Click on a Session task uses Roam native block-sidebar API and action icons do not navigate', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+
     const nativeCalls = [];
     window.roamAlphaAPI.ui.rightSidebar = {
         open: () => nativeCalls.push({ action: 'open' }),
         addWindow: async spec => nativeCalls.push({ action: 'addWindow', spec }),
     };
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
     const popover = openPopover();
     const row = popover.querySelector('.rlb-run');

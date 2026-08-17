@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.29**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.30**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -38,6 +38,12 @@ is reported as uncertain.
 ## Use
 
 **Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
+
+By default, a successful user Clock In also opens that Timing Line in Roam's
+native right sidebar at order 0. Switching work moves an existing block window
+back to the top instead of duplicating it, while preserving every other sidebar
+window. Reload, Refresh, and graph reconciliation never move the sidebar. This
+behavior can be disabled in Settings without changing any Clock data.
 
 **Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. While work is focused, it shows the shared continuous work-cycle time and the Active Work count:
 
@@ -115,6 +121,7 @@ Clocking in another Task always closes the current Focused `CLOCK` at the same a
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Show topbar widget | on | The left-navigation history icon, live counter, and running-task list |
+| Keep Timing Line at top of right sidebar | on | A user Clock In opens or moves that block to order 0 without disturbing other sidebar windows |
 | Pomodoro duration (minutes) | 45 | Shared cycle threshold captured when the first Focused Task of a cycle starts; passing it only changes elapsed colour |
 | Only offer clock in on TODO blocks | on | Off lets any block be clocked |
 | Flag unfinished clocks after | 8h | When a running clock is called out as forgotten |

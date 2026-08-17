@@ -322,6 +322,103 @@ export async function openBlock(uid) {
 // same block windows when an older Roam build does not dedupe addWindow itself.
 const requestedSidebarBlocks = new WeakMap();
 
+const blockSidebarWindow = (uid, order) => {
+    const sidebarWindow = { type: 'block', 'block-uid': uid };
+    if (Number.isFinite(order)) sidebarWindow.order = order;
+    return sidebarWindow;
+};
+
+const sidebarFailure = (reason, message, error) => ({
+    ok: false,
+    reason,
+    message,
+    ...(error ? { error } : {}),
+});
+
+/**
+ * Put a block at order 0 in Roam's native right sidebar without changing focus.
+ *
+ * `isCurrent` lets the UI orchestration layer cancel a superseded intent after
+ * asynchronous native reads. This adapter never closes, pins, removes, focuses,
+ * or reorders an unrelated window.
+ */
+export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
+    if (typeof uid !== 'string' || uid.length === 0) {
+        return sidebarFailure('missing-uid', 'This Timing Line has no block UID.');
+    }
+
+    const sidebar = getApi()?.ui?.rightSidebar;
+    if (typeof sidebar?.addWindow !== 'function') {
+        return sidebarFailure(
+            'unavailable',
+            'Roam right-sidebar block windows are unavailable.'
+        );
+    }
+
+    const target = blockSidebarWindow(uid);
+    try {
+        await sidebar.open?.();
+        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+
+        if (typeof sidebar.getWindows === 'function') {
+            const windows = await sidebar.getWindows();
+            if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+            const existing = Array.isArray(windows)
+                ? windows.find(
+                      sidebarWindow =>
+                          sidebarWindow?.type === 'block' &&
+                          sidebarWindow?.['block-uid'] === uid
+                  )
+                : null;
+
+            if (existing) {
+                if (typeof sidebar.setWindowOrder !== 'function') {
+                    return sidebarFailure(
+                        'order-unavailable',
+                        'Roam could not move the Timing Line sidebar window to the top.'
+                    );
+                }
+                await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+                if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+                if (typeof sidebar.expandWindow === 'function') {
+                    await sidebar.expandWindow({ window: target });
+                }
+                return { ok: true, deduped: true, reordered: true };
+            }
+
+            if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+            await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+            return { ok: true, added: true };
+        }
+
+        // Older Roam builds have no authoritative window list. Reuse the
+        // existing best-effort dedupe marker and include order 0 on first open.
+        let requested = requestedSidebarBlocks.get(sidebar);
+        if (!requested) {
+            requested = new Set();
+            requestedSidebarBlocks.set(sidebar, requested);
+        }
+        if (requested.has(uid)) return { ok: true, deduped: true };
+        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+
+        try {
+            await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+            requested.add(uid);
+        } catch (error) {
+            requested.delete(uid);
+            throw error;
+        }
+        return { ok: true, added: true };
+    } catch (error) {
+        console.debug('[roam-logbook] could not front Timing Line in right sidebar', uid, error);
+        return sidebarFailure(
+            'sidebar-front-failed',
+            error?.message || 'Roam could not move the Timing Line to the top of the right sidebar.',
+            error
+        );
+    }
+}
+
 /** Open a task in Roam's native right-sidebar block window. */
 export async function openBlockInRightSidebar(uid) {
     if (typeof uid !== 'string' || uid.length === 0) {

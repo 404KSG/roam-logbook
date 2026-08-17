@@ -12,6 +12,7 @@ export const SETTING_MULTIPLE = 'allowMultipleClocks';
 export const SETTING_TODO_ONLY = 'todoBlocksOnly';
 export const SETTING_STALE_HOURS = 'staleHours';
 export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
+export const SETTING_TIMING_LINE_SIDEBAR = 'keepTimingLineAtTopOfRightSidebar';
 /** Deprecated compatibility state: old per-clock Pomodoro assignments. */
 export const SETTING_POMODORO_STATE = 'pomodoroTargets';
 /** Internal shared Pomodoro cycle: one threshold for the active work cycle. */
@@ -25,6 +26,7 @@ const DEFAULTS = {
     [SETTING_TODO_ONLY]: true,
     [SETTING_STALE_HOURS]: '8',
     [SETTING_POMODORO_MINUTES]: '45',
+    [SETTING_TIMING_LINE_SIDEBAR]: true,
 };
 
 let extensionAPI = null;
@@ -60,6 +62,10 @@ export function allowMultipleClocks() {
 
 export function todoBlocksOnly() {
     return booleanSetting(SETTING_TODO_ONLY);
+}
+
+export function keepTimingLineAtTopOfRightSidebar() {
+    return booleanSetting(SETTING_TIMING_LINE_SIDEBAR);
 }
 
 export function staleHours() {

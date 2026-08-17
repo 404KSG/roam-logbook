@@ -1,0 +1,248 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { frontBlockInRightSidebar } from '../src/roam.js';
+import {
+    createTimingLineSidebarFronting,
+    isTimingLineFrontIntent,
+} from '../src/timing-line-sidebar.js';
+
+const installSidebar = rightSidebar => {
+    const forbidden = [];
+    globalThis.window = {
+        roamAlphaAPI: {
+            ui: {
+                rightSidebar: {
+                    removeWindow: () => forbidden.push('removeWindow'),
+                    pinWindow: () => forbidden.push('pinWindow'),
+                    unpinWindow: () => forbidden.push('unpinWindow'),
+                    close: () => forbidden.push('close'),
+                    ...rightSidebar,
+                },
+                setBlockFocusAndSelection: () => forbidden.push('focus'),
+            },
+        },
+    };
+    return forbidden;
+};
+
+test.afterEach(() => {
+    delete globalThis.window;
+});
+
+test('a new Timing Line opens at native sidebar order 0 without unrelated UI operations', async () => {
+    const calls = [];
+    const forbidden = installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return [{ type: 'block', 'block-uid': 'other-task', order: 0 }];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+    assert.deepEqual(forbidden, []);
+});
+
+test('an existing Timing Line is reordered and expanded without duplication', async () => {
+    const calls = [];
+    const forbidden = installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => [
+            { type: 'block', 'block-uid': 'other-task', order: 0 },
+            { type: 'block', 'block-uid': 'timing-task', order: 3, 'collapsed?': true },
+        ],
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+    });
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        {
+            action: 'setWindowOrder',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        {
+            action: 'expandWindow',
+            spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
+        },
+    ]);
+    assert.deepEqual(forbidden, []);
+});
+
+test('legacy sidebar fallback includes order 0 and preserves dedupe', async () => {
+    const calls = [];
+    installSidebar({
+        open: async () => calls.push('open'),
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    assert.equal((await frontBlockInRightSidebar('timing-task')).ok, true);
+    assert.equal((await frontBlockInRightSidebar('timing-task')).deduped, true);
+    assert.deepEqual(calls, [
+        'open',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        'open',
+    ]);
+});
+
+test('fronting accepts only confirmed user and Active Work Clock In sources', async () => {
+    const calls = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async uid => {
+            calls.push(uid);
+            return { ok: true };
+        },
+        isEnabled: () => true,
+    });
+
+    for (const action of [
+        { type: 'clock-in', source: 'refresh', taskUid: 'refresh-task' },
+        { type: 'clock-in', source: 'legacy-reconcile', taskUid: 'legacy-task' },
+        { type: 'clock-out', source: 'user', taskUid: 'closed-task' },
+    ]) {
+        assert.equal(isTimingLineFrontIntent(action), false);
+        assert.equal(fronting.handleAction(action), false);
+    }
+
+    assert.equal(
+        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'palette-task' }),
+        true
+    );
+    await fronting.whenIdle();
+    assert.equal(
+        fronting.handleAction({
+            type: 'clock-in',
+            source: 'active-work-switch',
+            taskUid: 'open-line-task',
+        }),
+        true
+    );
+    await fronting.whenIdle();
+    assert.deepEqual(calls, ['palette-task', 'open-line-task']);
+});
+
+test('disabled fronting performs no sidebar work', async () => {
+    let calls = 0;
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async () => {
+            calls += 1;
+            return { ok: true };
+        },
+        isEnabled: () => false,
+    });
+
+    assert.equal(
+        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'timing-task' }),
+        false
+    );
+    await fronting.whenIdle();
+    assert.equal(calls, 0);
+});
+
+test('sidebar failures stay isolated and emit one concise non-blocking notice', async () => {
+    const notices = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async () => ({
+            ok: false,
+            reason: 'sidebar-front-failed',
+            message: 'Native sidebar is temporarily unavailable.',
+        }),
+        isEnabled: () => true,
+        onNotice: message => notices.push(message),
+    });
+
+    assert.equal(
+        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'timing-task' }),
+        true
+    );
+    await assert.doesNotReject(fronting.whenIdle());
+    assert.deepEqual(notices, ['Native sidebar is temporarily unavailable.']);
+});
+
+test('rapid switches serialize side effects so the newest intent finishes last', async () => {
+    const calls = [];
+    const applied = [];
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise(resolve => {
+        markFirstStarted = resolve;
+    });
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: uid => {
+            calls.push(uid);
+            if (uid === 'task-a') {
+                markFirstStarted();
+                return new Promise(resolve => {
+                    releaseFirst = () => {
+                        applied.push(uid);
+                        resolve({ ok: true });
+                    };
+                });
+            }
+            applied.push(uid);
+            return Promise.resolve({ ok: true });
+        },
+        isEnabled: () => true,
+    });
+
+    fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'task-a' });
+    await firstStarted;
+    fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'task-b' });
+    releaseFirst();
+    await fronting.whenIdle();
+
+    assert.deepEqual(calls, ['task-a', 'task-b']);
+    assert.deepEqual(applied, ['task-a', 'task-b']);
+    assert.equal(applied.at(-1), 'task-b');
+});
+
+test('repeating a confirmed Clock In can front the same block again', async () => {
+    const calls = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async uid => {
+            calls.push(uid);
+            return { ok: true };
+        },
+        isEnabled: () => true,
+    });
+    const action = {
+        type: 'clock-in',
+        source: 'user',
+        taskUid: 'timing-task',
+        alreadyFocused: true,
+    };
+
+    fronting.handleAction(action);
+    await fronting.whenIdle();
+    fronting.handleAction(action);
+    await fronting.whenIdle();
+    assert.deepEqual(calls, ['timing-task', 'timing-task']);
+});

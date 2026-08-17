@@ -344,7 +344,17 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             }
             if (open.length === 1 && open[0].taskUid === taskUid) {
                 refresh({ entries, notify: false });
-                return { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+                const result = { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
+                publishAction({
+                    type: 'clock-in',
+                    source,
+                    clockUid: open[0].clockUid,
+                    taskUid,
+                    alreadyFocused: true,
+                    newCycle: false,
+                    cycleStartedAt: null,
+                });
+                return result;
             }
             // There is exactly one real CLOCK by design. A Clock In on another
             // Task is an atomic focus switch: close every confirmed open legacy

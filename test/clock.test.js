@@ -44,6 +44,26 @@ test('clocking in creates the drawer and a running entry', async () => {
     assert.equal(clock.getRunning()[0].title, 'this is a test task');
 });
 
+test('repeating Clock In on the confirmed Timing Line publishes a user action', async () => {
+    seed([TASK]);
+    const actions = [];
+    const unsubscribe = clock.subscribeActions(action => actions.push(action));
+    try {
+        await clock.clockIn(TASK.uid, { now: AT_1558 });
+        const repeated = await clock.clockIn(TASK.uid, { now: AT_1658 });
+
+        assert.equal(repeated.alreadyFocused, true);
+        assert.equal(actions.length, 2);
+        assert.equal(actions[1].type, 'clock-in');
+        assert.equal(actions[1].source, 'user');
+        assert.equal(actions[1].taskUid, TASK.uid);
+        assert.equal(actions[1].alreadyFocused, true);
+        assert.equal(actions[1].newCycle, false);
+    } finally {
+        unsubscribe();
+    }
+});
+
 test('the drawer sits directly under the task, as in org', async () => {
     const graph = seed([TASK]);
     await clock.clockIn('taskone01', { now: AT_1558 });

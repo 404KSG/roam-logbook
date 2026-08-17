@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     allowMultipleClocks,
+    keepTimingLineAtTopOfRightSidebar,
     setExtensionAPI,
     showTopbarWidget,
     todoBlocksOnly,
@@ -18,6 +19,7 @@ test('switch getters normalize Roam boolean storage shapes consistently', () => 
         assert.equal(allowMultipleClocks(), true);
         assert.equal(showTopbarWidget(), true);
         assert.equal(todoBlocksOnly(), true);
+        assert.equal(keepTimingLineAtTopOfRightSidebar(), true);
     }
 
     for (const value of [false, 'false', 0, '0']) {
@@ -25,6 +27,7 @@ test('switch getters normalize Roam boolean storage shapes consistently', () => 
         assert.equal(allowMultipleClocks(), false);
         assert.equal(showTopbarWidget(), false);
         assert.equal(todoBlocksOnly(), false);
+        assert.equal(keepTimingLineAtTopOfRightSidebar(), false);
     }
 });
 
@@ -33,5 +36,5 @@ test('missing switch values use each setting default', () => {
     assert.equal(allowMultipleClocks(), false);
     assert.equal(showTopbarWidget(), true);
     assert.equal(todoBlocksOnly(), true);
+    assert.equal(keepTimingLineAtTopOfRightSidebar(), true);
 });
-

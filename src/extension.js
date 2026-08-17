@@ -21,6 +21,7 @@ import {
     setExtensionAPI,
     SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
+    SETTING_TIMING_LINE_SIDEBAR,
     SETTING_TODO_ONLY,
     SETTING_TOPBAR,
     todoBlocksOnly,
@@ -29,6 +30,7 @@ import { STYLES, STYLE_ID } from './styles.js';
 import { createTopbar } from './topbar.js';
 import { PLUGIN_VERSION } from './version.js';
 import { attachCompletionHandling } from './completion.js';
+import { createTimingLineSidebarFronting } from './timing-line-sidebar.js';
 
 const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
 const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
@@ -53,6 +55,8 @@ function createController({ extensionAPI }) {
     let destroyed = false;
     let detachPomodoro = null;
     let detachCompletion = null;
+    let detachTimingLineSidebar = null;
+    let timingLineSidebar = null;
 
     /** Task text of the block a menu entry was opened on, following references. */
     const targetString = context => {
@@ -127,6 +131,21 @@ function createController({ extensionAPI }) {
                         defaultValue: true,
                         onChange: event =>
                             extensionAPI.settings.set(SETTING_TODO_ONLY, normalizeChecked(event)),
+                    },
+                },
+                {
+                    id: SETTING_TIMING_LINE_SIDEBAR,
+                    name: 'Keep Timing Line at top of right sidebar',
+                    description:
+                        'After a successful Clock In, open or move that block to the top of Roam’s right sidebar.',
+                    action: {
+                        type: 'switch',
+                        defaultValue: true,
+                        onChange: event =>
+                            extensionAPI.settings.set(
+                                SETTING_TIMING_LINE_SIDEBAR,
+                                normalizeChecked(event)
+                            ),
                     },
                 },
                 {
@@ -210,6 +229,10 @@ function createController({ extensionAPI }) {
     return {
         init() {
             setExtensionAPI(extensionAPI);
+            timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
+            detachTimingLineSidebar = clock.subscribeActions(
+                timingLineSidebar.handleAction
+            );
             injectStyles(STYLE_ID, STYLES);
             registerSettings();
             registerCommands();
@@ -231,6 +254,10 @@ function createController({ extensionAPI }) {
             if (destroyed) return;
             destroyed = true;
             confirmation.reset();
+            detachTimingLineSidebar?.();
+            detachTimingLineSidebar = null;
+            timingLineSidebar?.dispose();
+            timingLineSidebar = null;
             detachCompletion?.();
             detachCompletion = null;
             detachPomodoro?.();
