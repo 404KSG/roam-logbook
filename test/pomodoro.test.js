@@ -75,9 +75,9 @@ test('Focused clock changes retain one cycle, while empty running state resets i
     assert.equal(pomodoro.reconcileCycle([]), null);
     assert.equal(pomodoro.getCycle(), null);
 
-    const resumed = pomodoro.reconcileCycle([third], { now: startedAt + 20 * 60_000 });
-    assert.equal(resumed.startedAt, third.start.getTime());
-    assert.notEqual(resumed.startedAt, initial.startedAt);
+    const switchedCycle = pomodoro.reconcileCycle([third], { now: startedAt + 20 * 60_000 });
+    assert.equal(switchedCycle.startedAt, third.start.getTime());
+    assert.notEqual(switchedCycle.startedAt, initial.startedAt);
 });
 
 test('cycle reload restores a valid persisted cycle and falls back to the earliest open CLOCK', () => {

@@ -9,7 +9,6 @@ import * as clock from './clock.js';
 import { createConfirmationController } from './confirmation.js';
 import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
-import * as paused from './paused.js';
 import { formatElapsed, formatMinutesHuman } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { showTopbarWidget, staleHours } from './settings.js';
@@ -123,7 +122,6 @@ export function createTopbar({
     let observedTopbar = null;
     let ticker = null;
     let unsubscribe = null;
-    let unsubscribePaused = null;
     let destroyed = false;
     let discardConfirmUid = null;
     let discardConfirmTimer = null;
@@ -248,19 +246,10 @@ export function createTopbar({
     };
 
     const sessionModel = () => {
-        const pausedItems = paused.getPaused();
-        const recoveryItems = paused
-            .getPendingResume()
-            .filter(item => item?.recoveryState === 'conflict');
-        const recoveryTaskUids = new Set(recoveryItems.map(item => item.taskUid));
-        const visiblePausedItems = pausedItems.filter(item => !recoveryTaskUids.has(item.taskUid));
-        const activeWork = clock.getActiveWork(nowDate(), { pausedItems, recoveryItems });
+        const activeWork = clock.getActiveWork(nowDate());
         return buildSessionSurfaceModel({
             entries: activeWork.focused ? [activeWork.focused] : [],
             recentItems: activeWork.recent,
-            pausedItems: visiblePausedItems,
-            pendingItems: recoveryItems,
-            recoveryState: paused.getRecoveryState(),
             now: nowDate(),
             staleHours: staleHours(),
         });
@@ -269,7 +258,7 @@ export function createTopbar({
     const surfaceNotices = () =>
         actionNotice
             ? [{ message: actionNotice, role: 'alert' }]
-            : [clock.getNotice(), paused.getNotice()]
+            : [clock.getNotice()]
                   .filter(Boolean)
                   .map(message => ({ message, role: 'status' }));
 
@@ -439,9 +428,6 @@ export function createTopbar({
             },
             onFocusRecent: entry => void run(() => clock.clockIn(entry.taskUid, { source: 'active-work-switch' })),
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
-            onResume: item => void run(() => paused.resumeOne(item.taskUid)),
-            onRecovery: () => void run(() => paused.resumeAll()),
-            onRetryRecovery: () => void run(() => paused.retryFinalizing()),
             onDiscard: entry => {
                 if (discardConfirmUid !== entry.clockUid) {
                     discardConfirmUid = entry.clockUid;
@@ -460,15 +446,13 @@ export function createTopbar({
                 closePopover({ restoreFocus: false });
                 onOpenDashboard?.(buttonNode);
             },
-            onPauseAll: () => void run(() => paused.pauseAll()),
-            onResumeAll: () => void run(() => paused.resumeAll()),
             onClockOutAll: () => {
                 if (!confirmation?.arm('clock-out-all', scope)) {
                     renderSurfaces();
                     return;
                 }
                 resetClockOutConfirmation();
-                void run(() => paused.clockOutAll());
+                void run(() => clock.clockOutAll());
             },
             onClose: null,
             discardingClockUid: discardConfirmUid,
@@ -539,7 +523,6 @@ export function createTopbar({
     const syncButtonLayout = mode => {
         if (layoutMode === mode) return;
         if (mode === 'idle') buttonNode.replaceChildren(iconNode);
-        else if (mode === 'paused') buttonNode.replaceChildren(iconNode);
         else if (mode === 'active') buttonNode.replaceChildren(iconNode, parallelNode);
         else if (mode === 'parallel') buttonNode.replaceChildren(timeNode, separatorNode, parallelNode);
         else buttonNode.replaceChildren(timeNode);
@@ -552,13 +535,7 @@ export function createTopbar({
         { reconcile = true } = {}
     ) => {
         if (!buttonNode) return;
-        const pausedItems = paused.getPaused();
-        const recoveryItems = paused
-            .getPendingResume()
-            .filter(item => item?.recoveryState === 'conflict');
-        const finalizingRecovery = paused.getRecoveryState();
-        const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
-        const derived = clock.getActiveWork(now, { pausedItems, recoveryItems });
+        const derived = clock.getActiveWork(now);
         const focused = derived.focused || entries[0] || null;
         const activeWork = focused === derived.focused
             ? derived
@@ -587,26 +564,15 @@ export function createTopbar({
             buttonNode.classList.toggle('rlb-topbar__button--icon-only', !hasActiveWork);
             buttonNode.classList.toggle('rlb-topbar__button--active', hasActiveWork);
             buttonNode.classList.remove('rlb-topbar__button--parallel');
-            buttonNode.classList.toggle(
-                'rlb-topbar__button--paused',
-                pausedItems.length > 0 || recoveryItems.length > 0 || Boolean(finalizingRecovery)
-            );
             iconNode.className = 'bp3-icon bp3-icon-history rlb-topbar__icon';
             timeNode.textContent = '';
             timeNode.className = 'rlb-topbar__time';
             parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : '';
             separatorNode.textContent = '';
             syncButtonLayout(hasActiveWork ? 'active' : 'idle');
-            buttonNode.title = pausedItems.length
-                ? `${taskCount(pausedItems.length)} Paused — click to resume or review.` +
-                  (recoveryItems.length > 0
-                      ? `\n${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? '' : 's'} require review.`
-                      : '')
-                : recoveryCount > 0
-                  ? `${recoveryCount} Recovery item${recoveryCount === 1 ? '' : 's'} require review — click to retry.`
-                  : hasActiveWork
-                    ? `${activeCount(activeWork.count)} — no Session is currently timing. Click for details.`
-                    : 'Roam Logbook — no Session running. Click for details.';
+            buttonNode.title = hasActiveWork
+                ? `${activeCount(activeWork.count)} — no Session is currently timing. Click for details.`
+                : 'Roam Logbook — no Session running. Click for details.';
             buttonNode.setAttribute('aria-label', buttonNode.title);
             if (activeChanged && popover) renderPopover();
             return;
@@ -614,7 +580,6 @@ export function createTopbar({
 
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
         buttonNode.classList.remove('rlb-topbar__button--active');
-        buttonNode.classList.remove('rlb-topbar__button--paused');
         const [first] = focusedEntries;
         // The topbar is a timing-state entry, not a task summary. Overrun
         // outranks stale, matching the previous status priority without putting
@@ -686,12 +651,12 @@ export function createTopbar({
     const stopAttachmentObservers = () => {
         observer?.disconnect();
         observer = null;
+        hostObserver?.disconnect();
+        hostObserver = null;
         recoveryObserver?.disconnect();
         recoveryObserver = null;
         outerRecoveryObserver?.disconnect();
         outerRecoveryObserver = null;
-        hostObserver?.disconnect();
-        hostObserver = null;
         recoveryTarget = null;
         outerRecoveryTarget = null;
         observedTopbar = null;
@@ -764,7 +729,7 @@ export function createTopbar({
         if (isPluginNode(record.target)) return false;
         const nodes = [...record.addedNodes, ...record.removedNodes];
         // Inserting or updating our widget is expected to happen inside the
-        // observed host. Do not let that self-mutation enter the recovery path.
+        // observed host. Do not let that self-mutation trigger a re-attach.
         if (nodes.length > 0 && nodes.every(isPluginNode)) return false;
         if (record.target?.closest?.(TOPBAR_SELECTOR)) return true;
         return nodes.some(
@@ -802,7 +767,7 @@ export function createTopbar({
      * Roam has not mounted its shell yet. Once the shell exists, its immediate
      * parent is enough to notice replacement; the topbar's own descendants are
      * handled by hostObserver above. This keeps ordinary page mutations out of
-     * the recovery path altogether.
+     * the re-attach path altogether.
      */
     const observeRecoveryTarget = topbar => {
         const target = topbar?.parentElement || document.body;
@@ -969,10 +934,6 @@ export function createTopbar({
                 renderButton();
                 renderSurfaces();
             });
-            unsubscribePaused = paused.subscribe(() => {
-                renderButton();
-                renderSurfaces();
-            });
             attach();
         },
         refresh: attach,
@@ -987,8 +948,6 @@ export function createTopbar({
             refreshInFlight = null;
             unsubscribe?.();
             unsubscribe = null;
-            unsubscribePaused?.();
-            unsubscribePaused = null;
             stopTicker();
             stopAttachmentObservers();
             attachQueued = false;

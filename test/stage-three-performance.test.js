@@ -72,7 +72,7 @@ test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
     topbar.unmount();
 });
 
-test('disabling the topbar stops its ticker and recovery observer before re-enabling once', async () => {
+test('disabling the topbar stops its ticker and host observer before re-enabling once', async () => {
     settings.set('showTopbarWidget', true);
     const timers = [];
     const cleared = [];
@@ -99,7 +99,7 @@ test('disabling the topbar stops its ticker and recovery observer before re-enab
     assert.equal(
         topbar.getPerformanceSnapshot().attachCount,
         disabledAttachCount,
-        'the recovery observer is disconnected while disabled'
+        'the host observer is disconnected while disabled'
     );
 
     settings.set('showTopbarWidget', true);
@@ -132,6 +132,31 @@ test('outer navigation shell replacement is recovered with one debounced attach'
 
     assert.equal(topbar.getPerformanceSnapshot().attachCount, initial + 1);
     assert.ok(document.querySelector('.rm-topbar #roam-logbook-topbar'));
+    topbar.unmount();
+});
+
+test('direct Roam topbar replacement is recovered without an attach loop', async () => {
+    const topbar = createTopbar({ onOpenDashboard: () => {} });
+    topbar.mount();
+    const initial = topbar.getPerformanceSnapshot().attachCount;
+    const parent = document.querySelector('.rm-topbar').parentElement;
+    const replacement = document.createElement('div');
+    replacement.className = 'rm-topbar';
+    replacement.innerHTML =
+        '<button aria-label="Back"></button><button aria-label="Forward"></button>' +
+        '<input aria-label="Find or Create Page">';
+    parent.replaceChildren(replacement);
+    await settleMutations();
+
+    assert.equal(topbar.getPerformanceSnapshot().attachCount, initial + 1);
+    assert.ok(replacement.querySelector('#roam-logbook-topbar'));
+
+    await settleMutations();
+    assert.equal(
+        topbar.getPerformanceSnapshot().attachCount,
+        initial + 1,
+        're-attaching into the replacement host does not create an attach loop'
+    );
     topbar.unmount();
 });
 

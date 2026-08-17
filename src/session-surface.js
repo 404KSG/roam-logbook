@@ -163,84 +163,10 @@ const renderRecentRow = (row, now, options) => {
     return node;
 };
 
-const renderPausedRow = (row, now, options) => {
-    const item = row.item;
-    const node = el('div', 'rlb-run rlb-run--paused');
-    node.dataset.sessionState = 'paused';
-    node.dataset.taskUid = item.taskUid;
-
-    const body = el('div', 'rlb-run__body');
-    const meta = el('div', 'rlb-run__meta');
-    const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
-    const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : 'Paused Task';
-    const pausedNode = el(
-        'time',
-        'rlb-run__meta-line rlb-run__started',
-        pausedAt.valid ? `${pausedAt.dateLabel} ${pausedAt.timeLabel}` : pausedDetails
-    );
-    pausedNode.title = pausedDetails;
-    pausedNode.setAttribute('aria-label', pausedDetails);
-    if (pausedAt.datetime) pausedNode.dateTime = pausedAt.datetime;
-    meta.appendChild(pausedNode);
-    body.append(renderTitle(row, options.onOpenTask), meta);
-
-    const actions = el('div', 'rlb-run__actions');
-    const resume = button(
-        'bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume',
-        '',
-        event => {
-            event.stopPropagation();
-            void options.onResume?.(item, event);
-        },
-        { title: 'Resume' }
-    );
-    resume.dataset.action = 'resume';
-    actions.appendChild(resume);
-    node.append(body, actions);
-    return node;
-};
-
-const renderRecoveryRow = (row, options) => {
-    const item = row.item;
-    const node = el('div', 'rlb-run rlb-run--recovery');
-    node.dataset.sessionState = 'recovery';
-    node.dataset.recoveryState = item.recoveryState || 'conflict';
-    node.dataset.taskUid = item.taskUid;
-
-    const body = el('div', 'rlb-run__body');
-    const meta = el('div', 'rlb-run__meta');
-    const reason = item.recoveryIssue === 'missing-clockUid'
-        ? 'Exact Session association is missing.'
-        : 'Exact Session association needs review.';
-    meta.append(
-        el('div', 'rlb-run__meta-line rlb-run__meta-primary', 'Recovery required'),
-        el('div', 'rlb-run__meta-line rlb-run__started', reason)
-    );
-    body.append(renderTitle(row, options.onOpenTask), meta);
-
-    const actions = el('div', 'rlb-run__actions');
-    const retry = button(
-        'bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-run__recovery',
-        '',
-        event => {
-            event.stopPropagation();
-            void options.onRecovery?.(item, event);
-        },
-        { title: 'Retry Recovery' }
-    );
-    retry.dataset.action = 'recovery';
-    actions.appendChild(retry);
-    node.append(body, actions);
-    return node;
-};
-
 /** Build the small, shared model consumed by both the popover and sidebar. */
 export function buildSessionSurfaceModel({
     entries = [],
     recentItems = [],
-    pausedItems = [],
-    pendingItems = [],
-    recoveryState = null,
     now,
     staleHours = 8,
 }) {
@@ -259,38 +185,15 @@ export function buildSessionSurfaceModel({
         title: entry.title,
         entry,
     }));
-    const pausedRows = pausedItems.map(item => ({
-        kind: 'paused',
-        key: `paused:${item.taskUid}`,
-        taskUid: item.taskUid,
-        title: item.title,
-        item,
-    }));
-    const recoveryRows = pendingItems
-        .filter(item => item?.recoveryState === 'conflict')
-        .map(item => ({
-            kind: 'recovery',
-            key: `recovery:${item.taskUid}`,
-            taskUid: item.taskUid,
-            title: item.title,
-            item,
-        }));
     return {
         now: currentNow,
         entries: entries.slice(),
-        pausedItems: pausedItems.slice(),
-        pendingItems: pendingItems.slice(),
-        recoveryState: recoveryState ? { ...recoveryState } : null,
-        rows: [...runningRows, ...recentRows, ...pausedRows, ...recoveryRows],
+        rows: [...runningRows, ...recentRows],
         focusedRows: runningRows,
         recentRows,
-        pausedRows,
-        recoveryRows,
         focusedCount: runningRows.length,
         activeCount: runningRows.length + recentRows.length,
         runningCount: runningRows.length,
-        pausedCount: pausedItems.length,
-        recoveryCount: recoveryRows.length,
         staleEntries: findStaleClocks(entries, currentNow, staleHours),
     };
 }
@@ -362,20 +265,6 @@ export function renderSessionSurface(root, model, options = {}) {
             row => renderRecentRow(row, model.now, options),
             'rlb-surface__section--recent'
         );
-        appendSection(
-            sessionList,
-            'PAUSED',
-            model.pausedRows,
-            row => renderPausedRow(row, model.now, options),
-            'rlb-surface__section--paused'
-        );
-        appendSection(
-            sessionList,
-            'RECOVERY',
-            model.recoveryRows,
-            row => renderRecoveryRow(row, options),
-            'rlb-surface__section--recovery'
-        );
     }
 
     for (const notice of options.notices || []) {
@@ -389,7 +278,7 @@ export function renderSessionSurface(root, model, options = {}) {
         root.appendChild(node);
     }
 
-    const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
+    const singleRunning = model.runningCount === 1;
     const footerModifiers = [
         model.rows.length === 0 ? 'rlb-popover__footer--empty' : '',
         singleRunning ? 'rlb-popover__footer--single-running' : '',
@@ -400,54 +289,18 @@ export function renderSessionSurface(root, model, options = {}) {
             title: 'Open Roam Logbook Dashboard',
         })
     );
-    if (model.recoveryState) {
-        const recovery = button(
-            'bp3-button bp3-small',
-            'Retry Pause Batch cleanup',
-            () => options.onRetryRecovery?.(),
-            {
-                title: 'Commit the saved Pause Batch cleanup without resuming paused Tasks',
-            }
+    if (model.runningCount > 1) {
+        const confirming = Boolean(options.clockOutAllConfirm);
+        footer.appendChild(
+            button(
+                `bp3-button bp3-small${confirming ? ' bp3-intent-danger' : ''}`,
+                confirming ? 'Confirm Clock Out All' : 'Clock Out All',
+                () => options.onClockOutAll?.(),
+                {
+                    title: confirming ? 'Confirm permanent Clock Out All' : 'Close all running Sessions',
+                }
+            )
         );
-        recovery.dataset.action = 'retry-pause-batch';
-        footer.appendChild(recovery);
-    }
-    if (model.runningCount > 0 || model.pausedCount > 0 || model.recoveryState) {
-        if (model.runningCount > 0) {
-            footer.appendChild(
-                button('bp3-button bp3-small', singleRunning ? 'Pause' : 'Pause All', () => options.onPauseAll?.(), {
-                    title: singleRunning ? 'Pause the running Session' : 'Pause all running Sessions',
-                })
-            );
-        }
-        if (model.pausedCount > 0) {
-            const resumeLabel = model.pausedCount === 1 ? 'Resume' : 'Resume All';
-            const resumeTitle = model.pausedCount === 1
-                ? 'Resume the paused Task'
-                : 'Resume all paused Tasks';
-            const resumeAll = button('bp3-button bp3-small', resumeLabel, () => options.onResumeAll?.(), {
-                title: resumeTitle,
-            });
-            resumeAll.dataset.action = 'resume-all';
-            footer.appendChild(
-                resumeAll
-            );
-        }
-        if (model.runningCount > 1 || model.pausedCount > 0) {
-            const confirming = Boolean(options.clockOutAllConfirm);
-            footer.appendChild(
-                button(
-                    `bp3-button bp3-small${confirming ? ' bp3-intent-danger' : ''}`,
-                    confirming ? 'Confirm Clock Out All' : 'Clock Out All',
-                    () => options.onClockOutAll?.(),
-                    {
-                        title: confirming
-                            ? 'Confirm permanent Clock Out All'
-                            : 'Permanently close all running Sessions and clear the Pause Batch',
-                    }
-                )
-            );
-        }
     }
     if (options.onRefresh) {
         const refreshState = options.refreshState || {};

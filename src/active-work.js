@@ -39,8 +39,6 @@ export function buildActiveWork(
     {
         now = Date.now(),
         windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
-        pausedItems = [],
-        recoveryItems = [],
     } = {}
 ) {
     const snapshot = Array.isArray(entries) ? entries : [];
@@ -59,18 +57,12 @@ export function buildActiveWork(
         );
     }
 
-    const pausedTaskUids = new Set(
-        [...pausedItems, ...recoveryItems]
-            .map(item => item?.taskUid)
-            .filter(Boolean)
-    );
     const recentByTask = new Map();
     for (const candidate of snapshot) {
         if (
             !candidate ||
             candidate.running ||
-            candidate.taskUid === focusedEntry?.taskUid ||
-            pausedTaskUids.has(candidate.taskUid)
+            candidate.taskUid === focusedEntry?.taskUid
         ) continue;
         const endedAt = instantOf(candidate.end);
         if (endedAt === null) continue;
@@ -95,16 +87,11 @@ export function buildActiveWork(
         priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
         activeKind: 'recent',
     }));
-    const pausedActiveItems = [...pausedItems, ...recoveryItems]
-        .filter(item => item?.taskUid)
-        .map(item => ({ ...item, activeKind: item.recoveryState ? 'recovery' : 'paused' }));
-    const allItems = [focused, ...recentItems, ...pausedActiveItems].filter(Boolean);
+    const allItems = [focused, ...recentItems].filter(Boolean);
     const uniqueItems = [...new Map(allItems.map(item => [item.taskUid, item])).values()];
     return {
         focused,
         recent: recentItems,
-        paused: pausedItems.slice(),
-        recovery: recoveryItems.slice(),
         items: uniqueItems,
         count: uniqueItems.length,
         windowMinutes: normalizedWindow,

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Removed the Pause/Resume state machine and Pause Batch runtime completely.
+  Clock Out is now the only stop action; ended work remains in the 45-minute
+  Recent Active Work window and can be restarted with its independent Focus
+  action. Historical graph CLOCK records are unchanged.
+
 ## 0.9.0-beta.25 — 2026-08-17
 
 - Separated Recent Task navigation from Focus switching: clicking a title opens

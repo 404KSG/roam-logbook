@@ -16,8 +16,6 @@ const PARENT = { uid: 'done-parent', string: '{{[[TODO]]}} parent task', parent:
 const CHILD = { uid: 'done-child', string: '{{[[TODO]]}} child task', parent: 'done-parent' };
 const SIBLING = { uid: 'done-sibling', string: '{{[[TODO]]}} sibling task', parent: 'done-parent' };
 const OTHER = { uid: 'done-other', string: '{{[[TODO]]}} unrelated task', parent: null };
-const PAUSED_CHILD = { uid: 'done-paused', string: '{{[[TODO]]}} paused child', parent: 'done-parent' };
-const RUNNING_CHILD = { uid: 'done-running', string: '{{[[TODO]]}} running child', parent: 'done-parent' };
 const contextCommands = new Map();
 const paletteCommands = new Map();
 const settingsStore = new Map([['allowMultipleClocks', true]]);
@@ -77,7 +75,6 @@ const refreshSeededClocks = () => clock.refresh();
 install([TASK]);
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
-const paused = await import('../src/paused.js');
 const roam = await import('../src/roam.js');
 
 test.beforeEach(() => {
@@ -174,7 +171,7 @@ test('a failed old watcher detach blocks duplicate installation until cleanup su
         failRemove = false;
         graph.api.data.removePullWatch = originalRemove;
         clock.refresh();
-        assert.equal(addAttempts, 1, 'watch installation resumes after old cleanup succeeds');
+        assert.equal(addAttempts, 1, 'watch installation continues after old cleanup succeeds');
         assert.equal(graph.pullWatchCount(), 1);
     } finally {
         failRemove = false;
@@ -356,26 +353,6 @@ test('an explicit refresh retries the remaining DONE Session after bounded autom
     assert.equal(clock.getRunning().length, 0);
 });
 
-test('parent DONE prunes paused descendants before Resume can reopen them', async () => {
-    install([PARENT, PAUSED_CHILD, RUNNING_CHILD]);
-    extension.onunload();
-    extension.onload({ extensionAPI });
-
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': PAUSED_CHILD.uid });
-    await paused.pauseAll({ now: new Date('2026-08-16T09:01:00') });
-    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [PAUSED_CHILD.uid]);
-
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': RUNNING_CHILD.uid });
-    await graph.api.data.block.update({
-        block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
-    });
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.deepEqual(paused.getPaused(), []);
-    assert.deepEqual(paused.getPendingResume(), []);
-});
-
 test('reload reconciliation closes an open child whose parent is already DONE', async () => {
     install([
         { ...PARENT, string: '{{[[DONE]]}} parent task' },
@@ -389,30 +366,6 @@ test('reload reconciliation closes an open child whose parent is already DONE', 
 
     assert.equal(clock.getRunning().length, 0);
     assert.match(graph.childrenOf('reload-drawer')[0].string, /--/);
-});
-
-test('reload reconciliation prunes a paused-only Task whose parent is already DONE', async () => {
-    install([
-        PARENT,
-        { ...PAUSED_CHILD, string: '{{[[DONE]]}} paused child' },
-    ]);
-    extension.onunload();
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [{ taskUid: PAUSED_CHILD.uid, title: 'paused child', pausedAtMs: 1 }],
-                pendingResume: [],
-            },
-        })
-    );
-    extension.onload({ extensionAPI });
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.deepEqual(paused.getPaused(), []);
-    assert.deepEqual(JSON.parse(settingsStore.get('pausedBatch')).data.items, []);
 });
 
 test('a malformed hierarchy component does not disable healthy completion watches', async () => {
@@ -728,66 +681,6 @@ test('completion remains idle until a public Pull Watch update arrives', async (
     await settle();
     assert.equal(clock.getRunning().length, 0);
     assert.equal(graphWrites, 2);
-});
-
-test('DONE parent prunes a pending Resume association on reload', async () => {
-    install([PARENT, CHILD]);
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [],
-                pendingResume: [
-                    {
-                        taskUid: CHILD.uid,
-                        title: 'child task',
-                        pausedAtMs: 1,
-                        clockUid: null,
-                        sourceVersion: 2,
-                    },
-                ],
-            },
-        })
-    );
-    extension.onunload();
-    extension.onload({ extensionAPI });
-    assert.ok(graph.pullWatchUids().includes(PARENT.uid));
-
-    await graph.api.data.block.update({
-        block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
-    });
-    await settle();
-
-    assert.deepEqual(paused.getPendingResume(), []);
-    assert.deepEqual(JSON.parse(settingsStore.get('pausedBatch')).data.pendingResume, []);
-});
-
-test('Resume One prunes a paused Task when its ancestor is already DONE', async () => {
-    install([
-        { ...PARENT, string: '{{[[DONE]]}} parent task' },
-        CHILD,
-    ]);
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [{ taskUid: CHILD.uid, title: 'child task', pausedAtMs: 1 }],
-                pendingResume: [],
-            },
-        })
-    );
-    extension.onunload();
-    extension.onload({ extensionAPI });
-
-    const result = await paused.resumeOne(CHILD.uid);
-
-    assert.equal(result.ok, true);
-    assert.equal(result.reconciled, true);
-    assert.deepEqual(paused.getPaused(), []);
-    assert.deepEqual(paused.getPendingResume(), []);
-    assert.equal(graph.childrenOf(CHILD.uid).length, 0);
 });
 
 test('an ambiguous parent hierarchy withholds the cascade and performs zero clock writes', async () => {

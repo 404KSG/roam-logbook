@@ -137,8 +137,6 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.bp3-dark \.rlb-topbar\s*\{[^}]*--rlb-topbar-load-yellow:\s*#e6c35c[^}]*--rlb-topbar-load-red:\s*#ff7373/s);
     assert.match(css, /\.rlb-topbar__icon[^}]*color: #5c7080/s);
     assert.match(css, /\.bp3-dark \.rlb-topbar__icon[^}]*color: #a7b6c2/s);
-    assert.match(css, /\.rlb-topbar__button--paused\s*{[^}]*background: transparent/s);
-    assert.match(css, /\.rlb-topbar__button--paused > \.rlb-topbar__icon\s*{[^}]*color: var\(--rlb-topbar-load-yellow\)/s);
     assert.match(css, /\.rlb-topbar__parallel--load-yellow\s*{[^}]*color: var\(--rlb-topbar-load-yellow\)/s);
     assert.match(css, /\.rlb-topbar__parallel--load-red\s*{[^}]*color: var\(--rlb-topbar-load-red\)/s);
     assert.match(css, /\.rlb-topbar__parallel\s*{[^}]*color: #5c7080/s);
@@ -353,10 +351,9 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         const footer = [...popover.querySelectorAll('.rlb-popover__footer button')];
         assert.deepEqual(footer.map(node => node.textContent), [
             'Dashboard',
-            'Pause',
             '',
         ]);
-        assert.ok(footer.slice(0, 2).every(node => !/\bbp3-icon-/.test(node.className)));
+        assert.ok(footer.slice(0, 1).every(node => !/\bbp3-icon-/.test(node.className)));
         const footerRefresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');
         assert.match(footerRefresh.className, /\bbp3-icon-refresh\b/);
         assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
@@ -409,10 +406,9 @@ test('the popover lists the running clock', () => {
     const footerActions = [...popover.querySelectorAll('.rlb-popover__footer button')];
     assert.deepEqual(footerActions.map(action => action.textContent), [
         'Dashboard',
-        'Pause',
         '',
     ]);
-    for (const action of footerActions.slice(0, 2)) {
+    for (const action of footerActions.slice(0, 1)) {
         assert.doesNotMatch(action.className, /\bbp3-icon-/);
     }
     const refresh = popover.querySelector('.rlb-popover__footer [data-action="refresh"]');

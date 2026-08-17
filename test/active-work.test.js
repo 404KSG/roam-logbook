@@ -57,20 +57,6 @@ test('Active Work keeps pure Recent history when there is no Focused CLOCK', () 
     assert.equal(model.count, 1);
 });
 
-test('Active Work prioritizes Paused and keeps other Recent Tasks without duplicates', () => {
-    const model = buildActiveWork([
-        entry({ taskUid: 'paused', start: '09:00', end: '10:00' }),
-        entry({ taskUid: 'recent', start: '09:20', end: '10:10' }),
-    ], {
-        now: at('10:20'),
-        pausedItems: [{ taskUid: 'paused', title: 'paused', pausedAtMs: at('10:15').getTime() }],
-    });
-
-    assert.deepEqual(model.recent.map(item => item.taskUid), ['recent']);
-    assert.deepEqual(model.items.map(item => item.taskUid), ['recent', 'paused']);
-    assert.equal(model.count, 2);
-});
-
 test('pure Recent Active Work expires without a running clock', () => {
     const entries = [entry({ taskUid: 'recent', start: '09:00', end: '10:00' })];
     assert.equal(buildActiveWork(entries, { now: at('10:44') }).count, 1);

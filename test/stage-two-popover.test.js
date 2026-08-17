@@ -45,10 +45,9 @@ install([]);
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
 const pomodoro = await import('../src/pomodoro.js');
-const paused = await import('../src/paused.js');
 const { createPostPaintScheduler, createTopbar, activeCount, sessionLoadTone } =
     await import('../src/topbar.js');
-const { updateSessionSurfaceElapsed } = await import('../src/session-surface.js');
+const { renderSessionSurface, updateSessionSurfaceElapsed } = await import('../src/session-surface.js');
 const { setExtensionAPI } = await import('../src/settings.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
@@ -473,7 +472,7 @@ test('empty Session surface keeps Dashboard and Refresh on one row', () => {
     assert.equal(footer.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
 });
 
-test('single Focused Task keeps Dashboard, Pause, and Refresh on one row', async t => {
+test('single Focused Task keeps Dashboard and Refresh on one row', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
 
@@ -496,9 +495,7 @@ test('single Focused Task keeps Dashboard, Pause, and Refresh on one row', async
     const actions = [...footer.querySelectorAll('button')];
 
     assert.ok(footer.classList.contains('rlb-popover__footer--single-running'));
-    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', 'Pause', '']);
-    assert.equal(actions[1].title, 'Pause the running Session');
-    assert.equal(actions[1].getAttribute('aria-label'), 'Pause the running Session');
+    assert.deepEqual(actions.map(action => action.textContent), ['Dashboard', '']);
     assert.equal(
         [...footer.querySelectorAll('button')].some(action => /Clock Out All/i.test(action.textContent)),
         false
@@ -506,10 +503,74 @@ test('single Focused Task keeps Dashboard, Pause, and Refresh on one row', async
     assert.ok(popover.querySelector('[data-action="clock-out"]'), 'individual Check Out remains available');
     assert.equal(actions.every(action => action.tabIndex === 0), true);
 
-    click(actions[1]);
-    await settle();
-    assert.equal(clock.getRunning().length, 0);
-    assert.equal(popover.querySelectorAll('[data-session-state="paused"]').length, 1);
+});
+
+test('multi-Active Work footer retains the explicit Clock Out All confirmation path', () => {
+    const root = document.createElement('div');
+    let clockOutAllCalls = 0;
+    const model = {
+        rows: [],
+        focusedRows: [],
+        recentRows: [],
+        runningCount: 2,
+        staleEntries: [],
+        now: Date.now(),
+    };
+
+    renderSessionSurface(root, model, {
+        onClockOutAll: () => {
+            clockOutAllCalls += 1;
+        },
+        onRefresh: () => {},
+    });
+
+    const footer = root.querySelector('.rlb-popover__footer');
+    const bulk = [...footer.querySelectorAll('button')].find(button =>
+        /Clock Out All/i.test(button.textContent)
+    );
+    assert.ok(bulk);
+    bulk.click();
+    assert.equal(clockOutAllCalls, 1);
+
+    renderSessionSurface(root, model, {
+        clockOutAllConfirm: true,
+        onClockOutAll: () => {},
+        onRefresh: () => {},
+    });
+    assert.match(root.textContent, /Confirm Clock Out All/);
+});
+
+test('multi-Active Work footer keeps Dashboard, bulk action, and Refresh controls distinct', () => {
+    const root = document.createElement('div');
+    renderSessionSurface(
+        root,
+        { rows: [], focusedRows: [], recentRows: [], runningCount: 2, staleEntries: [], now: Date.now() },
+        { onOpenDashboard: () => {}, onClockOutAll: () => {}, onRefresh: () => {} }
+    );
+
+    const footer = root.querySelector('.rlb-popover__footer');
+    assert.deepEqual(
+        [...footer.querySelectorAll('button')].map(button => button.textContent.trim()),
+        ['Dashboard', 'Clock Out All', '']
+    );
+    assert.equal(
+        footer.querySelector('[data-action="refresh"]')?.title,
+        'Refresh Active Work from graph'
+    );
+});
+
+test('Refresh loading state is disabled without changing the footer action contract', () => {
+    const root = document.createElement('div');
+    renderSessionSurface(
+        root,
+        { rows: [], focusedRows: [], recentRows: [], runningCount: 2, staleEntries: [], now: Date.now() },
+        { onRefresh: () => {}, refreshState: { state: 'loading' } }
+    );
+
+    const refresh = root.querySelector('[data-action="refresh"]');
+    assert.ok(refresh?.disabled);
+    assert.equal(refresh?.getAttribute('aria-busy'), 'true');
+    assert.equal(root.querySelector('.rlb-surface__refresh-cell')?.dataset.refreshState, 'loading');
 });
 
 test('Active Work count tones keep 0–3 neutral and color only higher-load boundaries', () => {
@@ -764,7 +825,7 @@ test('Active Work surfaces keep Refresh copy hidden while preserving accessible 
     assert.ok(live.classList.contains('rlb-visually-hidden'));
     assert.deepEqual(
         [...popover.querySelectorAll('.rlb-popover__footer button')].map(node => node.textContent),
-        ['Dashboard', 'Pause', '']
+        ['Dashboard', '']
     );
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
@@ -918,12 +979,11 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
     assert.equal(popover.querySelector('.rlb-popover__notice').getAttribute('aria-live'), 'assertive');
 });
 
-test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause state', async t => {
+test('Refresh does not mutate CLOCK data or the shared Pomodoro cycle', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const popover = openPopover();
     const cycleBefore = pomodoro.getCycle();
-    const pausedBefore = paused.getPaused();
     const clockStringsBefore = [...graph.store.values()]
         .filter(block => /^CLOCK:{1,2} \[/.test(String(block.string)))
         .map(block => [block.uid, block.string]);
@@ -949,7 +1009,6 @@ test('Refresh does not mutate CLOCK data, the shared Pomodoro cycle, or pause st
 
     assert.deepEqual(writes, { create: 0, update: 0, delete: 0 });
     assert.deepEqual(pomodoro.getCycle(), cycleBefore);
-    assert.deepEqual(paused.getPaused(), pausedBefore);
     assert.deepEqual(
         [...graph.store.values()]
             .filter(block => /^CLOCK:{1,2} \[/.test(String(block.string)))
@@ -1137,30 +1196,6 @@ test('Clock Out keeps the open popover and exposes the ended Focus plus prior Re
     assert.equal(topbarButton().textContent, '2 Active');
 });
 
-test('Pause keeps the paused Focus and other Recent Tasks without duplicating the paused task', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:00:00') });
-    addTask('popover-task-02', 'A prior Recent task');
-    addTask('popover-task-03', 'The current Focus task');
-
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T08:30:00') });
-    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T08:40:00') });
-    await clock.clockIn('popover-task-03', { now: new Date('2026-08-17T08:50:00') });
-
-    const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 1);
-    assert.equal(surface.querySelector('[data-session-state="paused"]').dataset.taskUid, 'popover-task-03');
-    assert.deepEqual(
-        [...surface.querySelectorAll('[data-session-state="recent"]')].map(row => row.dataset.taskUid),
-        ['popover-task-02']
-    );
-    assert.equal(surface.querySelectorAll('[data-task-uid="popover-task-03"]').length, 1);
-    assert.equal(topbarButton().querySelector('.rlb-topbar__parallel').textContent, '2 Active');
-});
-
 test('pure Recent Active Work expires on the ticker without another graph read', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:00:00') });
     const scheduler = createManualPostPaintScheduler();
@@ -1241,208 +1276,23 @@ test('pure Recent rows keep navigation and an independent Focus action', async t
     }
 });
 
-test('a paused row exposes an icon-only Resume action and restores one Focused Task', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
+test('Pause removal regression keeps commands and footer clean while Clock Out leaves Recent focusable', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:05:00') });
+    await clock.clockIn('popover-task-01', { now: new Date('2026-08-17T09:00:00') });
+    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T09:01:00') });
+
+    const registeredLabels = [...contextCommands.keys(), ...paletteCommands.keys()].join(' ');
+    assert.doesNotMatch(registeredLabels, /\b(?:Pause|Resume)\b/i);
 
     const surface = openPopover();
-    const pause = [...surface.querySelectorAll('.rlb-popover__footer button')].find(
-        node => node.textContent === 'Pause'
+    assert.doesNotMatch(surface.textContent, /\b(?:Pause|Resume)\b/i);
+    assert.doesNotMatch(
+        [...surface.querySelectorAll('.rlb-popover__footer button')].map(button => button.textContent).join(' '),
+        /\b(?:Pause|Resume)\b/i
     );
-    click(pause);
-    await settle();
-
-    const pausedRows = [...surface.querySelectorAll('[data-session-state="paused"]')];
-    assert.equal(pausedRows.length, 1);
-    assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__status')));
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
-    const resumeAll = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
-    assert.ok(resumeAll);
-    assert.equal(resumeAll.textContent, 'Resume');
-    assert.equal(resumeAll.title, 'Resume the paused Task');
-    assert.equal(resumeAll.getAttribute('aria-label'), 'Resume the paused Task');
-    assert.ok(pausedRows.every(row => row.querySelector('[data-action="resume"]')));
-    assert.ok(
-        pausedRows.every(row => {
-            const resume = row.querySelector('[data-action="resume"]');
-            return resume.textContent === '' && resume.classList.contains('bp3-icon-play') && resume.title === 'Resume' && resume.getAttribute('aria-label') === 'Resume';
-        })
-    );
-    assert.ok(pausedRows.every(row => !row.querySelector('.rlb-run__state')));
-    assert.ok(pausedRows.every(row => !/\bPaused\b/.test(row.textContent)));
-    assert.ok(
-        pausedRows.every(
-            row =>
-                row.querySelectorAll('.rlb-run__meta-line').length === 1 &&
-                row.querySelectorAll('.rlb-run__meta-separator').length === 0
-        )
-    );
-
-    const firstTaskUid = pausedRows[0].dataset.taskUid;
-    click(pausedRows[0].querySelector('[data-action="resume"]'));
-    await settle();
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(clock.getRunning()[0].taskUid, firstTaskUid);
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
-    assert.ok([...surface.querySelectorAll('.rlb-popover__footer button')].some(node => node.textContent === 'Pause'));
-    assert.equal(surface.querySelector('.rlb-popover__footer [data-action="resume-all"]'), null);
-});
-
-test('paused topbar keeps its clock identity while visibly distinguishing paused state from idle', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    const idleButton = topbarButton();
-    assert.equal(idleButton.classList.contains('rlb-topbar__button--paused'), false);
-    assert.equal(idleButton.querySelector('.rlb-topbar__pause-badge'), null);
-
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
-    await settle();
-
-    const pausedButton = topbarButton();
-    assert.equal(pausedButton.classList.contains('rlb-topbar__button--icon-only'), false);
-    assert.ok(pausedButton.classList.contains('rlb-topbar__button--active'));
-    assert.ok(pausedButton.classList.contains('rlb-topbar__button--paused'));
-    assert.ok(pausedButton.querySelector('.bp3-icon-history'), 'paused state keeps the clock identity');
-    assert.equal(pausedButton.querySelector('.rlb-topbar__pause-badge'), null);
-    assert.match(pausedButton.getAttribute('aria-label'), /1 Task Paused/i);
-    assert.equal(pausedButton.querySelector('.rlb-topbar__parallel').textContent, '1 Active');
-    assert.equal(pausedButton.querySelector('.rlb-topbar__time'), null);
-
-    const resume = surface.querySelector('.rlb-popover__footer [data-action="resume-all"]');
-    assert.ok(resume);
-    assert.equal(resume.textContent, 'Resume');
-    assert.equal(resume.title, 'Resume the paused Task');
-    assert.equal(resume.getAttribute('aria-label'), 'Resume the paused Task');
-});
-
-test('pending Resume conflicts stay visible as retryable Recovery rows', async () => {
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [],
-                pendingResume: [
-                    {
-                        taskUid: 'popover-task-01',
-                        title: 'Graph Engineering',
-                        pausedAtMs: Date.parse('2026-08-15T08:00:00Z'),
-                        clockUid: null,
-                    },
-                ],
-            },
-        })
-    );
-    extension.onunload();
-    extension.onload({ extensionAPI });
-
-    const surface = openPopover();
-    const recovery = surface.querySelector('[data-session-state="recovery"]');
-    assert.ok(recovery, 'a pending conflict is rendered instead of disappearing');
-    assert.equal(recovery.dataset.recoveryState, 'conflict');
-    assert.equal(recovery.classList.contains('rlb-run--inline-meta'), false);
-    assert.equal(recovery.querySelector('.rlb-run__status'), null);
-    assert.deepEqual([...recovery.querySelector('.rlb-run__meta').children].map(node => node.className), [
-        'rlb-run__meta-line rlb-run__meta-primary',
-        'rlb-run__meta-line rlb-run__started',
-    ]);
-    assert.equal(recovery.querySelectorAll('.rlb-run__meta-separator').length, 0);
-    assert.match(recovery.textContent, /Recovery required|Exact Session association/i);
-    const retry = recovery.querySelector('[data-action="recovery"]');
-    assert.equal(retry.title, 'Retry Recovery');
-    assert.equal(retry.getAttribute('aria-label'), 'Retry Recovery');
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE WORK');
-    assert.match(topbarButton().getAttribute('aria-label'), /Recovery item/i);
-
-    click(retry);
-    await settle();
-
-    assert.ok(surface.querySelector('[data-session-state="recovery"]'), 'retry keeps an unresolved conflict available');
-    const notice = surface.querySelector('.rlb-popover__notice');
-    assert.ok(notice);
-    assert.equal(notice.getAttribute('role'), 'alert');
-    assert.equal(notice.getAttribute('aria-live'), 'assertive');
-    assert.match(notice.textContent, /Retry after Roam finishes syncing/i);
-    assert.ok(surface.querySelector('[data-session-state="recovery"] [data-action="recovery"]'));
-});
-
-test('finalizing cleanup exposes a footer retry without resuming paused Tasks', async () => {
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [
-                    {
-                        taskUid: 'popover-task-01',
-                        title: 'Graph Engineering',
-                        pausedAtMs: Date.parse('2026-08-15T08:00:00Z'),
-                    },
-                ],
-                pendingResume: [],
-                finalizing: {
-                    action: 'clock-out-all',
-                    targets: [{ taskUid: 'popover-task-01', clockUid: 'closed-clock' }],
-                    scope: { items: [], pendingResume: [] },
-                },
-            },
-        })
-    );
-    extension.onunload();
-    extension.onload({ extensionAPI });
-
-    const surface = openPopover();
-    const retry = surface.querySelector('[data-action="retry-pause-batch"]');
-    assert.ok(retry, 'finalizing cleanup has an explicit recovery action');
-    assert.equal(retry.textContent, 'Retry Pause Batch cleanup');
-    assert.match(retry.title, /without resuming paused Tasks/i);
-
-    click(retry);
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.deepEqual(paused.getPaused().map(item => item.taskUid), ['popover-task-01']);
-    assert.equal(paused.getRecoveryState(), null);
-});
-
-test('individual Resume is idempotent under double click and retains the paused row after a write failure', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    settingsStore.set('allowMultipleClocks', true);
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
-    await settle();
-
-    const row = surface.querySelector('[data-session-state="paused"]');
-    const resume = row.querySelector('[data-action="resume"]');
-    click(resume);
-    click(resume);
-    await settle();
-    assert.equal(clock.getRunning().length, 1, 'double click does not create two running CLOCKs');
-    assert.equal(surface.querySelectorAll('[data-session-state="paused"]').length, 0);
-
-    await clock.clockOut(clock.getRunning()[0].clockUid);
-    await settle();
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
-    await settle();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
-    await settle();
-    const retryRow = surface.querySelector('[data-session-state="paused"]');
-    const originalCreate = graph.api.data.block.create;
-    graph.api.data.block.create = async () => {
-        throw new Error('individual resume write failed');
-    };
-    try {
-        click(retryRow.querySelector('[data-action="resume"]'));
-        await settle();
-    } finally {
-        graph.api.data.block.create = originalCreate;
-    }
-    assert.equal(clock.getRunning().length, 0);
-    assert.ok(surface.querySelector('[data-session-state="paused"] [data-action="resume"]'));
-    assert.match(surface.textContent, /individual resume write failed/i);
+    const recent = surface.querySelector('[data-session-state="recent"]');
+    assert.ok(recent, 'Clock Out retains the task in Recent');
+    assert.ok(recent.querySelector('[data-action="focus-recent"]'), 'Recent remains focusable');
 });
 
 test('Topbar Shift+Click is inert and cannot open a popover or sidebar', async t => {
@@ -1557,25 +1407,6 @@ test('Session Shift+Click shows a concise notice when Roam has no sidebar API', 
     assert.equal(event.defaultPrevented, true);
     assert.equal(document.querySelector('.rlb-popover'), popover);
     assert.match(popover.textContent, /right-sidebar block windows are unavailable/i);
-});
-
-test('external clock activity during a pause is not duplicated by individual Resume', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
-    settingsStore.set('allowMultipleClocks', true);
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    const surface = openPopover();
-    click([...surface.querySelectorAll('.rlb-popover__footer button')].find(node => node.textContent === 'Pause'));
-    await settle();
-
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:01:00') });
-    await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-15T09:02:00') });
-    await settle();
-    const resume = surface.querySelector('[data-session-state="paused"] [data-action="resume"]');
-    click(resume);
-    await settle();
-    assert.equal(clock.getRunning().length, 0);
-    assert.equal(surface.querySelector('[data-session-state="paused"]'), null);
-    assert.match(surface.textContent, /already clocked out|not reopened|reconciled/i);
 });
 
 test('extension unload removes the regular Session popover and topbar cleanly', async t => {

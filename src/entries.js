@@ -214,7 +214,7 @@ const readBlockStrings = uids => {
  *
  * Only supplied seed tasks and their ancestors are looked up, which keeps this
  * to a handful of small queries no matter how large the graph is. Callers may
- * seed paused or pending-resume Tasks as well as Tasks with clock entries. The
+ * seed Tasks as well as Tasks with clock entries. The
  * flip side is that a *parent* task's own mirrors are not followed — a
  * second-order case left for a later pass.
  */
@@ -227,9 +227,8 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
 
     if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf, issues };
 
-    // Seed Tasks may be paused-only and therefore absent from readAllEntries.
-    // Their own status still belongs in the confirmed hierarchy snapshot used
-    // by completion reconciliation.
+    // Seed Tasks may be absent from readAllEntries. Their own status still
+    // belongs in the confirmed hierarchy snapshot used by completion logic.
     if (includeSeedStrings) Object.assign(stringOf, readBlockStrings([...seeds]));
 
     let mirrorRows;

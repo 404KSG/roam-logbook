@@ -70,24 +70,9 @@ const seedOpenClock = (taskUid, clockUid, start = '2026-08-15 Sat 09:01') => {
     });
 };
 
-const savePausedSurfaceItem = () => {
-    settingsStore.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 2,
-            data: {
-                items: [{ taskUid: OTHER.uid, title: 'another action task', pausedAtMs: 1 }],
-                pendingResume: [],
-            },
-        })
-    );
-    paused.load();
-};
-
 install();
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
-const paused = await import('../src/paused.js');
 
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 const settle = async () => {
@@ -156,36 +141,11 @@ test('context menu does not offer Clock In on a direct DONE Task', async () => {
     assert.equal(command['display-conditional']({ 'block-uid': TASK.uid }), false);
 });
 
-test('Clock Out All requires a second confirmation and resets when the popover closes', async () => {
+test('single Focused surface omits the bulk Clock Out All action', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    savePausedSurfaceItem();
-    assert.equal(clock.getRunning().length, 1);
-
     openPopover();
-    const first = footerAction('Clock Out All');
-    assert.ok(first);
-    assert.match(first.getAttribute('aria-label'), /permanently close all running Sessions/i);
-    click(first);
-    await settle();
-
-    assert.equal(clock.getRunning().length, 1, 'the first click must not write to the graph');
-    const confirm = footerAction('Confirm Clock Out All');
-    assert.ok(confirm);
-    assert.match(confirm.title, /confirm/i);
-    assert.equal(confirm.getAttribute('aria-label'), confirm.title);
-
-    document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    assert.equal(document.querySelector('.rlb-popover'), null);
-    openPopover();
-    assert.ok(footerAction('Clock Out All'), 'closing the popover resets confirmation');
+    assert.equal(footerAction('Clock Out All'), undefined);
     assert.equal(footerAction('Confirm Clock Out All'), undefined);
-
-    click(footerAction('Clock Out All'));
-    await settle();
-    assert.equal(clock.getRunning().length, 1);
-    click(footerAction('Confirm Clock Out All'));
-    await settle();
-    assert.equal(clock.getRunning().length, 0, 'only the confirmed action may close all Sessions');
 });
 
 test('Command Palette Clock Out All requires a second invocation before writing', async () => {
@@ -225,31 +185,9 @@ test('Command Palette reports a partial Clock Out All and retains the failed Ses
 
     assert.equal(updateCount, 2);
     assert.equal(clock.getRunning().length, 1, 'the failed Session remains running');
-    assert.deepEqual(paused.getPaused().map(item => item.taskUid), [clock.getRunning()[0].taskUid]);
     assert.deepEqual(toasts, [
         '1 Session ended; 1 could not be updated. Retry after Roam finishes syncing.',
     ]);
-});
-
-test('Popover reconciles legacy overlap before Clock Out All and reports the focused close once', async () => {
-    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    seedOpenClock(OTHER.uid, 'action-popover-other');
-    clock.refresh();
-    savePausedSurfaceItem();
-    openPopover();
-    click(footerAction('Clock Out All'));
-    await settle();
-    toasts.length = 0;
-
-    click(footerAction('Confirm Clock Out All'));
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.deepEqual(toasts, []);
-    assert.deepEqual(
-        [...document.querySelectorAll('body > .rlb-popover .rlb-popover__notice')],
-        []
-    );
 });
 
 test('the public batch close helper uses the shared partial presenter contract', async () => {
@@ -344,19 +282,4 @@ test('Command Palette confirmation expires and unload resets the armed state', a
     extension.onload({ extensionAPI });
     await paletteCommands.get('Logbook: Clock out all running clocks')();
     assert.equal(clock.getRunning().length, 1, 'unload clears a pending command confirmation');
-});
-
-test('single-session Pause remains a one-click recoverable action', async () => {
-    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    openPopover();
-
-    click(footerAction('Pause'));
-    await settle();
-
-    assert.equal(clock.getRunning().length, 0);
-    assert.equal(paused.getPaused().length, 1);
-    const resume = document.querySelector('.rlb-popover__footer [data-action="resume-all"]');
-    assert.equal(resume?.textContent, 'Resume');
-    assert.equal(resume?.title, 'Resume the paused Task');
-    assert.equal(resume?.getAttribute('aria-label'), 'Resume the paused Task');
 });

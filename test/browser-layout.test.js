@@ -131,22 +131,20 @@ test('topbar visible glyphs keep equal space around the separator', async t => {
     assert.equal(geometry.separator.width, 3, JSON.stringify(geometry));
 });
 
-test('Session count keeps 0–3 neutral while higher load and paused clock retain their colors', async t => {
+test('Session count keeps 0–3 neutral while higher load uses boundary colors', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const theme of ['', 'bp3-dark']) {
         const geometry = await withChromium(
             htmlWithLateHost(
-                `<div class="${theme}"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><span class="rlb-topbar__parallel rlb-topbar__parallel--load-yellow">4 Sessions</span><span class="rlb-topbar__parallel rlb-topbar__parallel--load-red">7 Sessions</span></div></div>`
+                `<div class="${theme}"><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button><span class="rlb-topbar__parallel rlb-topbar__parallel--load-yellow">4 Sessions</span><span class="rlb-topbar__parallel rlb-topbar__parallel--load-red">7 Sessions</span></div></div>`
             ),
             `(() => {
                 const values = [...document.querySelectorAll('.rlb-topbar__parallel')];
-                const paused = document.querySelector('.rlb-topbar__button--paused .rlb-topbar__icon');
                 const separator = document.querySelector('.rlb-topbar__separator');
                 return {
                     neutral: getComputedStyle(values[0]).color,
                     yellow: getComputedStyle(values[1]).color,
                     red: getComputedStyle(values[2]).color,
-                    paused: getComputedStyle(paused).color,
                     separator: getComputedStyle(separator).color,
                     timer: getComputedStyle(document.querySelector('.rlb-topbar__time')).color,
                 };
@@ -170,7 +168,6 @@ test('Session count keeps 0–3 neutral while higher load and paused clock retai
                 neutral: expected.neutral,
                 yellow: expected.yellow,
                 red: expected.red,
-                paused: expected.yellow,
                 separator: expected.neutral,
                 timer: expected.neutral,
             },
@@ -416,7 +413,7 @@ test('beta.14 compact overview becomes two-by-two on mobile without overflow', a
 test('Session rows omit status bullets and align content in a two-column grid', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--paused" data-session-state="paused"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">Paused since [2026-08-15 Sat 12:38]</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__resume" title="Resume" aria-label="Resume"></button></div></div></div>`),
+        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title">一个需要完整保留且视觉省略的中文任务标题 Graph Engineering</button><div class="rlb-run__meta"><div class="rlb-run__meta-line">30m total · 4m ago</div><div class="rlb-run__meta-line">A second metadata line</div></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-minimal bp3-icon-play rlb-run__focus" title="Switch Focus" aria-label="Switch Focus"></button></div></div></div>`),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { top:r.top, bottom:r.bottom, left:r.left, right:r.right, width:r.width, height:r.height }; };
             const row = document.querySelector('.rlb-run');
@@ -515,47 +512,6 @@ test('Session task title is the restrained link target without a leading open ic
     assert.match(geometry.tooltip, /^Open this block:/, JSON.stringify(geometry));
 });
 
-test('paused icon-only topbar keeps clock identity with only a quiet background state', async t => {
-    if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook — no Session running"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only rlb-topbar__button--paused" aria-label="2 Tasks Paused — click to resume or review."><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div>`),
-        `(() => {
-            const buttons = [...document.querySelectorAll('.rlb-topbar__button')];
-            const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
-            const idle = buttons[0];
-            const paused = buttons[1];
-            const idleRect = rect(idle);
-            const pausedRect = rect(paused);
-            const idleIconStyle = getComputedStyle(idle.querySelector('.rlb-topbar__icon'));
-            const pausedIconStyle = getComputedStyle(paused.querySelector('.rlb-topbar__icon'));
-            const pausedStyle = getComputedStyle(paused);
-            return {
-                idle: idleRect,
-                paused: pausedRect,
-                idleHasBadge: Boolean(idle.querySelector('.rlb-topbar__pause-badge')),
-                pausedHasBadge: Boolean(paused.querySelector('.rlb-topbar__pause-badge')),
-                pausedHasClock: Boolean(paused.querySelector('.bp3-icon-history')),
-                pausedLabel: paused.getAttribute('aria-label'),
-                pausedBackground: pausedStyle.backgroundColor,
-                idleBackground: getComputedStyle(idle).backgroundColor,
-                idleIconColor: idleIconStyle.color,
-                pausedIconColor: pausedIconStyle.color,
-                pausedRing: pausedStyle.boxShadow,
-                square: Math.abs(pausedRect.width - pausedRect.height) <= 1
-            };
-        })()`
-    );
-    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
-    assert.equal(geometry.idleHasBadge, false, JSON.stringify(geometry));
-    assert.equal(geometry.pausedHasBadge, false, JSON.stringify(geometry));
-    assert.equal(geometry.pausedHasClock, true, JSON.stringify(geometry));
-    assert.match(geometry.pausedLabel, /2 Tasks Paused/i, JSON.stringify(geometry));
-    assert.equal(geometry.pausedBackground, geometry.idleBackground, JSON.stringify(geometry));
-    assert.notEqual(geometry.pausedIconColor, geometry.idleIconColor, JSON.stringify(geometry));
-    assert.equal(geometry.pausedRing, 'none', JSON.stringify(geometry));
-    assert.equal(geometry.square, true, JSON.stringify(geometry));
-});
-
 test('popover rows stay within 340px and 320px with two metadata nodes and a two-row footer', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [340, 320]) {
@@ -597,7 +553,7 @@ test('popover rows stay within 340px and 320px with two metadata nodes and a two
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">1 Session Running</div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
@@ -609,7 +565,7 @@ test('popover rows stay within 340px and 320px with two metadata nodes and a two
         assert.equal(geometry.rowHasDot, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.headerRefresh, false, JSON.stringify({ width, geometry }));
         assert.ok(geometry.refreshCenterDelta <= 1, JSON.stringify({ width, geometry }));
-        assert.deepEqual(geometry.footerLabels, ['Dashboard', 'Pause All', 'Clock Out All', ''], JSON.stringify({ width, geometry }));
+        assert.deepEqual(geometry.footerLabels, ['Dashboard', 'Clock Out All', ''], JSON.stringify({ width, geometry }));
         assert.equal(geometry.footerInside, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.footerOverlap, false, JSON.stringify({ width, geometry }));
         assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
@@ -637,15 +593,15 @@ test('Session metadata stays on one inline row without crowding actions', async 
                                 <button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button>
                             </div>
                         </div>
-                        <div class="rlb-run rlb-run--paused" data-session-state="paused">
+                        <div class="rlb-run rlb-run--recent" data-session-state="recent">
                             <div class="rlb-run__body">
                                 <button class="bp3-button bp3-minimal rlb-run__title" type="button" title="Open this block: Reading" aria-label="Open this block: Reading">Reading</button>
                                 <div class="rlb-run__meta">
-                                    <time class="rlb-run__meta-line rlb-run__started" datetime="2026-08-15T15:05" title="Paused since [2026-08-15 Sat 15:05]" aria-label="Paused since [2026-08-15 Sat 15:05]">Today 15:05</time>
+                                    <time class="rlb-run__meta-line rlb-run__started" datetime="2026-08-15T15:05" title="Last active [2026-08-15 Sat 15:05]" aria-label="Last active [2026-08-15 Sat 15:05]">Today 15:05</time>
                                 </div>
                             </div>
                             <div class="rlb-run__actions">
-                                <button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume" data-action="resume" title="Resume" aria-label="Resume"></button>
+                                <button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus" aria-label="Switch Focus"></button>
                             </div>
                         </div>
                     </div>
@@ -657,14 +613,12 @@ test('Session metadata stays on one inline row without crowding actions', async 
                     return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
                 };
                 const running = document.querySelector('[data-session-state="running"]');
-                const paused = document.querySelector('[data-session-state="paused"]');
                 const meta = running.querySelector('.rlb-run__meta');
                 const primary = running.querySelector('.rlb-run__meta-primary');
                 const separator = running.querySelector('.rlb-run__meta-separator');
                 const started = running.querySelector('.rlb-run__started');
                 const actions = running.querySelector('.rlb-run__actions');
                 const title = running.querySelector('.rlb-run__title');
-                const pausedMeta = paused.querySelector('.rlb-run__meta');
                 const metaItems = [primary, started].map(rect);
                 const metaRect = rect(meta);
                 const actionRect = rect(actions);
@@ -719,9 +673,6 @@ test('Session metadata stays on one inline row without crowding actions', async 
                     primaryNoScrollOverflow: primary.scrollWidth <= primary.clientWidth + 0.5,
                     startedNoScrollOverflow: started.scrollWidth <= started.clientWidth + 0.5,
                     actionsRemainUsable: actionRect.width >= 64,
-                    pausedSemanticNodeCount: pausedMeta.querySelectorAll('.rlb-run__meta-line').length,
-                    pausedSeparatorCount: pausedMeta.querySelectorAll('.rlb-run__meta-separator').length,
-                    pausedSameLine: rect(pausedMeta).height <= 20,
                 };
             })()`
         );
@@ -764,28 +715,25 @@ test('Session metadata stays on one inline row without crowding actions', async 
         assert.equal(geometry.primaryNoScrollOverflow, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.startedNoScrollOverflow, true, JSON.stringify({ width, geometry }));
         assert.equal(geometry.actionsRemainUsable, true, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.pausedSemanticNodeCount, 1, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.pausedSeparatorCount, 0, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.pausedSameLine, true, JSON.stringify({ width, geometry }));
     }
 });
 
 test('beta.9 surface footer uses one action height across both rows', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button></div></div>`),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
             const footer = document.querySelector('.rlb-popover__footer');
             const buttons = [...footer.querySelectorAll('button')];
             const rows = getComputedStyle(footer).gridTemplateRows.split(' ').map(value => parseFloat(value));
-            const refreshStyle = getComputedStyle(buttons[3]);
+            const refreshStyle = getComputedStyle(buttons[2]);
             const rects = buttons.map(rect);
             return {
                 rows,
                 heights: rects.map(item => item.height),
                 equal: Math.max(...rects.map(item => item.height)) - Math.min(...rects.map(item => item.height)) <= 1,
-                refreshCenter: Math.abs(rects[3].left + rects[3].width / 2 - (rects[1].left + rects[1].width / 2)) <= 1,
+                refreshCenter: Math.abs(rects[2].left + rects[2].width / 2 - (rects[1].left + rects[1].width / 2)) <= 1,
                 refreshGrid: [refreshStyle.gridColumnStart, refreshStyle.gridRowStart],
                 inside: rects.every(item => item.left >= rect(footer).left && item.right <= rect(footer).right + .5),
                 token: getComputedStyle(footer).getPropertyValue('--rlb-surface-action-height').trim()
@@ -802,57 +750,10 @@ test('beta.9 surface footer uses one action height across both rows', async t =>
     assert.match(geometry.token, /\d+px/, JSON.stringify(geometry));
 });
 
-test('paused Resume footer labels stay single-line at 320px and 340px', async t => {
-    if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    for (const width of [320, 340]) {
-        for (const scenario of [
-            { label: 'Resume', accessible: 'Resume the paused Task' },
-            { label: 'Resume All', accessible: 'Resume all paused Tasks' },
-        ]) {
-            const geometry = await withChromium(
-                htmlWithLateHost(
-                    `<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small" data-action="resume-all" title="${scenario.accessible}" aria-label="${scenario.accessible}">${scenario.label}</button><button class="bp3-button bp3-small">Clock Out All</button><div class="rlb-surface__refresh-cell"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh" data-action="refresh" title="Refresh Sessions from graph" aria-label="Refresh Sessions from graph"></button></div></div></div>`
-                ),
-                `(() => {
-                    const rect = node => { const value = node.getBoundingClientRect(); return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
-                    const popover = document.querySelector('.rlb-popover');
-                    const footer = document.querySelector('.rlb-popover__footer');
-                    const resume = footer.querySelector('[data-action="resume-all"]');
-                    const range = document.createRange();
-                    range.selectNodeContents(resume);
-                    const lines = [...range.getClientRects()];
-                    const resumeRect = rect(resume);
-                    return {
-                        label: resume.textContent,
-                        accessible: resume.getAttribute('aria-label'),
-                        whiteSpace: getComputedStyle(resume).whiteSpace,
-                        lineCount: lines.length,
-                        height: resumeRect.height,
-                        buttonOverflow: resume.scrollWidth > resume.clientWidth + 0.5,
-                        footerOverflow: footer.scrollWidth > footer.clientWidth + 0.5,
-                        popoverOverflow: popover.scrollWidth > popover.clientWidth + 0.5,
-                        inside: resumeRect.left >= rect(footer).left && resumeRect.right <= rect(footer).right + 0.5,
-                    };
-                })()`
-            );
-            if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.label, scenario.label, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.accessible, scenario.accessible, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.whiteSpace, 'nowrap', JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.lineCount, 1, JSON.stringify({ width, scenario, geometry }));
-            assert.ok(geometry.height >= 31 && geometry.height <= 32, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.buttonOverflow, false, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.footerOverflow, false, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.popoverOverflow, false, JSON.stringify({ width, scenario, geometry }));
-            assert.equal(geometry.inside, true, JSON.stringify({ width, scenario, geometry }));
-        }
-    }
-});
-
 test('beta.12 refresh states keep the footer geometry stable and the live status visually hidden', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause All</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--idle" data-action="refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button><span class="rlb-surface__refresh-status rlb-surface__refresh-status--idle rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div><div class="rlb-popover__notice" role="alert">Retry after Roam finishes syncing</div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:340px"><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--idle" data-action="refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button><span class="rlb-surface__refresh-status rlb-surface__refresh-status--idle rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div><div class="rlb-popover__notice" role="alert">Retry after Roam finishes syncing</div></div>`),
         `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
             const footer = document.querySelector('.rlb-popover__footer');
@@ -946,11 +847,11 @@ test('beta.15 empty Session footer stays on one row at narrow widths across Refr
     }
 });
 
-test('beta.16 single-running footer keeps Pause and Refresh aligned at narrow widths', async t => {
+test('beta.16 single-running footer keeps Dashboard and Refresh aligned at narrow widths', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [320, 360]) {
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__footer rlb-popover__footer--single-running"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause</button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--idle" data-action="refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><div class="rlb-popover__footer rlb-popover__footer--single-running"><button class="bp3-button bp3-small">Dashboard</button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__refresh rlb-surface__refresh--idle" data-action="refresh" aria-label="Refresh Sessions from graph" title="Refresh Sessions from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></div>`),
             `(() => {
                 const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
                 const popover = document.querySelector('.rlb-popover');
@@ -976,7 +877,7 @@ test('beta.16 single-running footer keeps Pause and Refresh aligned at narrow wi
             })()`
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
-        assert.deepEqual(geometry.labels, ['Dashboard', 'Pause', ''], JSON.stringify({ width, geometry }));
+        assert.deepEqual(geometry.labels, ['Dashboard', ''], JSON.stringify({ width, geometry }));
         assert.equal(geometry.rows.length, 1, JSON.stringify({ width, geometry }));
         assert.equal(geometry.columns.length, 3, JSON.stringify({ width, geometry }));
         assert.equal(geometry.aligned, true, JSON.stringify({ width, geometry }));
@@ -993,7 +894,7 @@ test('beta.24 Active Work uses a neutral Focused card and a flat Recent list', a
     const longTitle = 'A long Focused task title that remains accessible while ellipsizing visually';
     const recentTitle = 'A recent task that can be focused again';
     const markup = (theme, width) =>
-        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE WORK</div></header><div class="rlb-surface__list" role="group" aria-label="Active Work"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="FOCUSED"><div class="rlb-surface__section-label">FOCUSED</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--recent" aria-label="RECENT · 1"><div class="rlb-surface__section-label">RECENT · 1</div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="Last active [2026-08-15 Sat 09:09]" aria-label="30m total; last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · 4m ago</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small">Pause</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button></div></div></div>`;
+        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE WORK</div></header><div class="rlb-surface__list" role="group" aria-label="Active Work"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="FOCUSED"><div class="rlb-surface__section-label">FOCUSED</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--recent" aria-label="RECENT · 1"><div class="rlb-surface__section-label">RECENT · 1</div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="Last active [2026-08-15 Sat 09:09]" aria-label="30m total; last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · 4m ago</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><div class="rlb-popover__footer"><button class="bp3-button bp3-small">Dashboard</button><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button><button class="bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-surface__refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button></div></div></div>`;
 
     const expression = `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };

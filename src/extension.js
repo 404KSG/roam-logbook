@@ -13,7 +13,6 @@ import { injectStyles, removeStyles } from './dom.js';
 import { getBlockString, getFocusedBlockUid } from './roam.js';
 import { isTaskBlock, taskStatus } from './org.js';
 import * as pomodoro from './pomodoro.js';
-import * as paused from './paused.js';
 import { mutationResultNotice, presentMutationResult } from './action-result.js';
 import {
     normalizeChecked,
@@ -187,7 +186,7 @@ function createController({ extensionAPI }) {
                     notifyUser('Clock Out All is armed. Run again within 5 seconds to confirm.');
                     return;
                 }
-                return paused.clockOutAll();
+                return clock.clockOutAll();
             })
         );
         add(PALETTE_COMMANDS[3], () => dashboard.open());
@@ -215,10 +214,8 @@ function createController({ extensionAPI }) {
             registerSettings();
             registerCommands();
             pomodoro.load();
-            paused.load();
             detachPomodoro = pomodoro.attach();
             detachCompletion = attachCompletionHandling({
-                pauseApi: paused,
                 onResult: result => presentMutationResult(result, notifyUser),
             });
             topbar.mount();
@@ -242,7 +239,6 @@ function createController({ extensionAPI }) {
             topbar.unmount();
             dashboard.destroy();
             clock.reset();
-            paused.reset();
             removeStyles(STYLE_ID);
             for (const label of [CONTEXT_CLOCK_IN, CONTEXT_CLOCK_OUT]) {
                 try {

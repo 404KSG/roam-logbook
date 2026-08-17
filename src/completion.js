@@ -62,7 +62,7 @@ const ancestorsOf = (seed, parentOf) => {
     return result;
 };
 
-export function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIssue = null } = {}) {
+export function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {}) {
     let watchCleanupReady = retryOrphanedDetachers();
     let disposed = false;
     const watches = new Map();
@@ -115,11 +115,6 @@ export function attachCompletionHandling({ pauseApi = null, onResult = null, onW
                             const result = await clock.clockOutCompletedTask(taskUid, {
                                 source: 'auto-complete',
                                 retryClockUids: retry ? [...retry] : null,
-                                getPauseTaskUids: () => [
-                                    ...(pauseApi?.getPaused?.() || []),
-                                    ...(pauseApi?.getPendingResume?.() || []),
-                                ].map(item => item.taskUid),
-                                pruneCompleted: taskUids => pauseApi?.pruneCompleted?.(taskUids),
                             });
                             reportResult(result);
 
@@ -184,13 +179,7 @@ export function attachCompletionHandling({ pauseApi = null, onResult = null, onW
             watchCleanupReady = retryOrphanedDetachers();
             if (!watchCleanupReady) return;
         }
-        const pauseTaskUids = [
-            ...(pauseApi?.getPaused?.() || []),
-            ...(pauseApi?.getPendingResume?.() || []),
-        ].map(item => item.taskUid);
-        const seeds = [
-            ...new Set([...entries.map(entry => entry.taskUid), ...pauseTaskUids].filter(Boolean)),
-        ];
+        const seeds = [...new Set(entries.map(entry => entry.taskUid).filter(Boolean))];
         let hierarchy;
         try {
             hierarchy = readHierarchy(seeds, { includeSeedStrings: true });

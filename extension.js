@@ -1,9 +1,3 @@
-var __defProp = Object.defineProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-
 // src/time.js
 var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var MONTH_NAMES = [
@@ -828,9 +822,7 @@ function chooseFocusedEntry(entries = []) {
 }
 function buildActiveWork(entries = [], {
   now = Date.now(),
-  windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
-  pausedItems = [],
-  recoveryItems = []
+  windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
 } = {}) {
   const snapshot = Array.isArray(entries) ? entries : [];
   const nowMs = instantOf(now) ?? Date.now();
@@ -846,12 +838,9 @@ function buildActiveWork(entries = [], {
       (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
     );
   }
-  const pausedTaskUids = new Set(
-    [...pausedItems, ...recoveryItems].map((item) => item?.taskUid).filter(Boolean)
-  );
   const recentByTask = /* @__PURE__ */ new Map();
   for (const candidate of snapshot) {
-    if (!candidate || candidate.running || candidate.taskUid === focusedEntry?.taskUid || pausedTaskUids.has(candidate.taskUid))
+    if (!candidate || candidate.running || candidate.taskUid === focusedEntry?.taskUid)
       continue;
     const endedAt = instantOf(candidate.end);
     if (endedAt === null)
@@ -876,14 +865,11 @@ function buildActiveWork(entries = [], {
     priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
     activeKind: "recent"
   }));
-  const pausedActiveItems = [...pausedItems, ...recoveryItems].filter((item) => item?.taskUid).map((item) => ({ ...item, activeKind: item.recoveryState ? "recovery" : "paused" }));
-  const allItems = [focused, ...recentItems, ...pausedActiveItems].filter(Boolean);
+  const allItems = [focused, ...recentItems].filter(Boolean);
   const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
   return {
     focused,
     recent: recentItems,
-    paused: pausedItems.slice(),
-    recovery: recoveryItems.slice(),
     items: uniqueItems,
     count: uniqueItems.length,
     windowMinutes: normalizedWindow
@@ -972,8 +958,8 @@ function getRunning() {
 function getEntriesSnapshot() {
   return entriesSnapshot.slice();
 }
-function getActiveWork(now = /* @__PURE__ */ new Date(), options = {}) {
-  return buildActiveWork(entriesSnapshot, { now, ...options });
+function getActiveWork(now = /* @__PURE__ */ new Date()) {
+  return buildActiveWork(entriesSnapshot, { now });
 }
 function getLastRefreshStatus() {
   return { ...lastRefreshStatus };
@@ -1010,30 +996,6 @@ var uncertainCloseResult = (error, entries = running, { preflight = false } = {}
     retry: { action: "close", retryClockUids: pendingClockUids, writtenClockUids: [] },
     error,
     preflight
-  };
-};
-var uncertainPauseResult = (error) => {
-  const pendingClockUids = running.map((entry) => entry.clockUid);
-  return {
-    action: "pause-sessions",
-    ok: false,
-    item: "Session",
-    completedVerb: "paused",
-    entries: running,
-    records: [],
-    results: [],
-    closed: 0,
-    count: 0,
-    completed: 0,
-    failed: pendingClockUids.length,
-    pending: pendingClockUids.length,
-    pendingClockUids,
-    pendingTaskUids: running.map((entry) => entry.taskUid),
-    uncertain: true,
-    partial: false,
-    retry: { action: "pause", retryClockUids: pendingClockUids, retryTaskUids: running.map((entry) => entry.taskUid) },
-    error,
-    preflight: true
   };
 };
 function refresh({ entries, notify: shouldNotify = true } = {}) {
@@ -1393,41 +1355,42 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
     }
   });
 }
-async function pauseEntries({ now = /* @__PURE__ */ new Date(), prepare, source = "pause" } = {}) {
-  return enqueueMutation(async () => {
-    try {
-      return await withGraphGuard(async () => {
-        const allEntries = readAllEntries();
-        const entries = allEntries.filter((entry) => entry.running);
-        if (entries.length === 0)
-          refresh({ entries: allEntries, notify: false });
-        const records = prepare ? await prepare(entries.map((entry) => ({ ...entry }))) : [];
-        const outcome = await closeEntriesNow(
-          entries,
-          records.map((record) => record.clockUid),
-          now,
-          { publish: false }
-        );
-        const result = { entries, records, ...outcome };
-        if (!outcome.uncertain) {
-          for (const closed of outcome.results.filter((item) => item.closed)) {
-            const entry = entries.find((item) => item.clockUid === closed.clockUid);
-            publishAction({
-              type: "clock-out",
-              source,
-              clockUid: closed.clockUid,
-              taskUid: entry?.taskUid
-            });
-          }
-        }
-        notify();
-        return result;
-      });
-    } catch (error) {
-      notice = GRAPH_UNCERTAIN;
-      return uncertainPauseResult(error);
-    }
-  });
+async function clockOutAll({ now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
+  let outcome;
+  try {
+    outcome = await clockOutEntries(null, { now, source });
+  } catch (error) {
+    notice = GRAPH_UNCERTAIN;
+    const pendingClockUids = running.map((entry) => entry.clockUid);
+    return {
+      action: "clock-out-all",
+      ok: false,
+      item: "Session",
+      completedVerb: "ended",
+      count: 0,
+      completed: 0,
+      failed: pendingClockUids.length,
+      pending: pendingClockUids.length,
+      pendingClockUids,
+      uncertain: true,
+      partial: false,
+      retry: { action: "close", retryClockUids: pendingClockUids, writtenClockUids: [] },
+      error
+    };
+  }
+  if (outcome.uncertain) {
+    notice = GRAPH_UNCERTAIN;
+  } else if (outcome.failed > 0) {
+    notice = `${outcome.failed} Session${outcome.failed === 1 ? "" : "s"} could not be closed.`;
+  }
+  return {
+    ...outcome,
+    action: "clock-out-all",
+    item: "Session",
+    completedVerb: "ended",
+    count: outcome.closed,
+    completed: outcome.closed
+  };
 }
 async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
   return enqueueMutation(
@@ -1465,8 +1428,6 @@ async function clockOutBlock(blockUid, { now = /* @__PURE__ */ new Date(), sourc
 async function clockOutCompletedTask(taskUid, {
   now = /* @__PURE__ */ new Date(),
   source = "auto-complete",
-  getPauseTaskUids = null,
-  pruneCompleted: pruneCompleted2 = null,
   retryClockUids = null
 } = {}) {
   return enqueueMutation(async () => {
@@ -1474,17 +1435,7 @@ async function clockOutCompletedTask(taskUid, {
       return await withGraphGuard(async () => {
         const entries = readAllEntries();
         const runningEntries = entries.filter((entry) => entry.running);
-        const pauseTaskUids = getPauseTaskUids ? getPauseTaskUids() : [];
-        if (!Array.isArray(pauseTaskUids)) {
-          throw new GraphReadError("Paused Task scope could not be confirmed");
-        }
-        const taskUids = [
-          ...new Set([
-            taskUid,
-            ...runningEntries.map((entry) => entry.taskUid),
-            ...pauseTaskUids
-          ].filter(Boolean))
-        ];
+        const taskUids = [...new Set([taskUid, ...runningEntries.map((entry) => entry.taskUid)].filter(Boolean))];
         const hierarchy = readHierarchy(taskUids);
         const relevantHierarchyIssues = hierarchy.issues.filter(
           (issue) => hierarchyIssueAffectsTask(issue, taskUid, hierarchy.parentOf)
@@ -1525,13 +1476,7 @@ async function clockOutCompletedTask(taskUid, {
         const targetEntries = entries.filter(
           (entry) => entry.running && isTaskInConfirmedTree(entry.taskUid, taskUid, hierarchy.parentOf)
         );
-        const affectedTaskUids = [
-          taskUid,
-          ...targetEntries.map((entry) => entry.taskUid),
-          ...pauseTaskUids.filter(
-            (candidate) => isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
-          )
-        ];
+        const affectedTaskUids = [taskUid, ...targetEntries.map((entry) => entry.taskUid)];
         const targetClockUids = retryClockUids === null ? targetEntries.map((entry) => entry.clockUid) : targetEntries.filter((entry) => retryClockUids.includes(entry.clockUid)).map((entry) => entry.clockUid);
         const outcome = await closeEntriesNow(
           entries,
@@ -1548,29 +1493,6 @@ async function clockOutCompletedTask(taskUid, {
             taskUid: entry?.taskUid
           });
         }
-        const pauseResult = outcome.ok && pruneCompleted2 ? pruneCompleted2([...new Set(affectedTaskUids)]) : null;
-        if (pauseResult && pauseResult.ok === false) {
-          const result = {
-            ...outcome,
-            action: "auto-clock-out",
-            source,
-            triggerUid: taskUid,
-            taskUids: [...new Set(affectedTaskUids)],
-            pause: pauseResult,
-            ok: false,
-            uncertain: true,
-            partial: Boolean(outcome.partial || outcome.closed > 0),
-            retry: {
-              ...outcome.retry || { action: "auto-clock-out" },
-              action: "auto-clock-out",
-              taskUid,
-              retryClockUids: outcome.pendingClockUids
-            },
-            error: pauseResult.error
-          };
-          notify();
-          return result;
-        }
         notify();
         const retry = outcome.retry ? {
           ...outcome.retry,
@@ -1584,7 +1506,6 @@ async function clockOutCompletedTask(taskUid, {
           source,
           triggerUid: taskUid,
           taskUids: [...new Set(affectedTaskUids)],
-          pause: pauseResult,
           retry
         };
       });
@@ -1733,7 +1654,7 @@ function createConfirmationController({
   let active = null;
   let timer = null;
   let onChange = initialOnChange;
-  const reset4 = () => {
+  const reset3 = () => {
     if (timer !== null)
       clearTimeoutFn(timer);
     timer = null;
@@ -1742,12 +1663,12 @@ function createConfirmationController({
   };
   const arm = (key, source = "default") => {
     if (active?.key === key && active.source === source) {
-      reset4();
+      reset3();
       return true;
     }
-    reset4();
+    reset3();
     active = { key, source };
-    timer = setTimeoutFn(() => reset4(), timeoutMs);
+    timer = setTimeoutFn(() => reset3(), timeoutMs);
     onChange();
     return false;
   };
@@ -1756,7 +1677,7 @@ function createConfirmationController({
     onChange = typeof listener === "function" ? listener : () => {
     };
   };
-  return { arm, isArmed, reset: reset4, setOnChange };
+  return { arm, isArmed, reset: reset3, setOnChange };
 }
 
 // src/dom.js
@@ -2114,7 +2035,6 @@ function findStaleClocks(entries, now, staleHours2) {
 // src/version.js
 var PLUGIN_VERSION = "0.9.0-beta.25";
 var STATE_FORMATS = Object.freeze({
-  pauseBatch: 2,
   pomodoroTargets: 1,
   pomodoroCycle: 1,
   stateBackups: 1
@@ -2128,7 +2048,6 @@ var SETTING_STALE_HOURS = "staleHours";
 var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
 var SETTING_POMODORO_STATE = "pomodoroTargets";
 var SETTING_POMODORO_CYCLE = "pomodoroCycle";
-var SETTING_PAUSED_BATCH = "pausedBatch";
 var SETTING_STATE_BACKUPS = "stateBackups";
 var DEFAULTS = {
   [SETTING_TOPBAR]: true,
@@ -2564,7 +2483,7 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
     linkHover: state.page.hoverColor || state.page.color,
     sync: state.sync.color
   });
-  const notify3 = () => {
+  const notify2 = () => {
     const current = palette();
     for (const listener of state.listeners)
       listener(current);
@@ -2576,7 +2495,7 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
       state.page = page;
     if (sync.source !== "fallback" || state.sync.source === "fallback")
       state.sync = sync;
-    notify3();
+    notify2();
   };
   const scheduleRefresh = () => {
     if (state.scheduled)
@@ -2856,11 +2775,11 @@ function createDashboard({
     summaryNode.appendChild(overviewBar(model, now));
     bodyNode.replaceChildren();
     if (refreshNotice) {
-      const notice4 = el("div", "rlb-dashboard__notice", refreshNotice);
-      notice4.setAttribute("role", "status");
-      notice4.setAttribute("aria-live", "polite");
-      notice4.setAttribute("aria-atomic", "true");
-      bodyNode.appendChild(notice4);
+      const notice3 = el("div", "rlb-dashboard__notice", refreshNotice);
+      notice3.setAttribute("role", "status");
+      notice3.setAttribute("aria-live", "polite");
+      notice3.setAttribute("aria-atomic", "true");
+      bodyNode.appendChild(notice3);
     }
     const issues = [
       ...model.issues,
@@ -2902,17 +2821,17 @@ function createDashboard({
           summaryNode.hidden = false;
           summaryNode.setAttribute("aria-hidden", "false");
           summaryNode.replaceChildren();
-          const notice4 = el(
+          const notice3 = el(
             "div",
             "rlb-dashboard__notice",
             "Graph data could not be refreshed; no successful snapshot is available yet."
           );
-          notice4.setAttribute("role", "alert");
-          notice4.setAttribute("aria-live", "assertive");
-          notice4.setAttribute("aria-atomic", "true");
+          notice3.setAttribute("role", "alert");
+          notice3.setAttribute("aria-live", "assertive");
+          notice3.setAttribute("aria-atomic", "true");
           const issueRows = transientIssues.map(issueRow);
           bodyNode.replaceChildren(
-            notice4,
+            notice3,
             ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
           );
           lastModel = null;
@@ -3142,8 +3061,8 @@ function createDashboard({
     const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
     const heading = el("div", "rlb-section__heading rlb-panel__header");
     heading.appendChild(el("h3", "rlb-section__title", "By task"));
-    const taskCount2 = el("span", "rlb-task-count");
-    heading.appendChild(taskCount2);
+    const taskCount = el("span", "rlb-task-count");
+    heading.appendChild(taskCount);
     const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
     const info = button(
       "bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info",
@@ -3213,7 +3132,7 @@ function createDashboard({
         isCollapsed: (node) => viewCollapsed.has(node.taskUid)
       });
       const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
-      taskCount2.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
+      taskCount.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
       for (const filterButton of filterGroup.querySelectorAll("[data-filter]")) {
         filterButton.setAttribute(
           "aria-pressed",
@@ -3842,1271 +3761,6 @@ function reset2() {
   unsupportedCycleRaw = null;
 }
 
-// src/paused.js
-var paused_exports = {};
-__export(paused_exports, {
-  clear: () => clear,
-  clockOutAll: () => clockOutAll,
-  getNotice: () => getNotice2,
-  getPaused: () => getPaused,
-  getPendingResume: () => getPendingResume,
-  getRecoveryState: () => getRecoveryState,
-  load: () => load2,
-  pauseAll: () => pauseAll,
-  pruneCompleted: () => pruneCompleted,
-  reset: () => reset3,
-  resumeAll: () => resumeAll,
-  resumeOne: () => resumeOne,
-  retryFinalizing: () => retryFinalizing,
-  subscribe: () => subscribe2
-});
-var VERSION2 = STATE_FORMATS.pauseBatch;
-var LEGACY_VERSION = 1;
-var items = [];
-var pendingResume = [];
-var finalizing = null;
-var notice3 = "";
-var unsupportedRaw2 = null;
-var listeners2 = /* @__PURE__ */ new Set();
-var unsubscribeClockActions = null;
-var cleanRecord = (value) => {
-  if (!value || typeof value !== "object")
-    return null;
-  const taskUid = typeof value.taskUid === "string" ? value.taskUid.trim() : "";
-  const title = typeof value.title === "string" ? value.title : "";
-  const pausedAtMs = Number(value.pausedAtMs);
-  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
-  const reconciliationState = value.reconciliationState === "externally-replaced" || value.reconciliationState === "externally-clocked-out" ? value.reconciliationState : null;
-  const externalClockUid = typeof value.externalClockUid === "string" && value.externalClockUid ? value.externalClockUid : null;
-  if (!taskUid || !Number.isFinite(pausedAtMs) || pausedAtMs < 0)
-    return null;
-  return {
-    taskUid,
-    title,
-    pausedAtMs,
-    ...clockUid ? { clockUid } : {},
-    ...reconciliationState ? { reconciliationState } : {},
-    ...externalClockUid ? { externalClockUid } : {}
-  };
-};
-var cleanPending = (value, { version = VERSION2, legacy = false } = {}) => {
-  const record = cleanRecord(value);
-  if (!record)
-    return null;
-  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
-  const explicitLegacy = legacy || value.legacy === true || Number(value.sourceVersion) === LEGACY_VERSION;
-  const sourceVersion = explicitLegacy ? LEGACY_VERSION : Number.isInteger(Number(value.sourceVersion)) ? Number(value.sourceVersion) : version;
-  return {
-    ...record,
-    clockUid,
-    legacy: explicitLegacy,
-    sourceVersion,
-    ...clockUid ? {} : {
-      recoveryState: explicitLegacy ? "legacy-fallback" : "conflict",
-      ...explicitLegacy ? {} : { recoveryIssue: "missing-clockUid" }
-    }
-  };
-};
-var hasLegacyPomodoroFields = (value) => Boolean(value && ("pomodoroRemainingMs" in value || "pomodoroSuppressed" in value));
-var cleanFinalizingRecord = (value) => {
-  if (!value || typeof value !== "object" || typeof value.taskUid !== "string" || !value.taskUid)
-    return null;
-  const pausedAtMs = Number(value.pausedAtMs);
-  if (!Number.isFinite(pausedAtMs) || pausedAtMs < 0)
-    return null;
-  const clockUid = typeof value.clockUid === "string" && value.clockUid ? value.clockUid : null;
-  return { taskUid: value.taskUid, pausedAtMs, ...clockUid ? { clockUid } : {} };
-};
-var cleanFinalizingScope = (value) => {
-  if (!value || typeof value !== "object")
-    return null;
-  if (!Array.isArray(value.items) || !Array.isArray(value.pendingResume))
-    return null;
-  const items2 = value.items.map(cleanFinalizingRecord);
-  const pendingResume2 = value.pendingResume.map(cleanFinalizingRecord);
-  if (items2.some((item) => !item) || pendingResume2.some((item) => !item))
-    return null;
-  return { items: items2, pendingResume: pendingResume2 };
-};
-var cleanFinalizing = (value) => {
-  if (!value || typeof value !== "object" || value.action !== "clock-out-all")
-    return null;
-  if (!Array.isArray(value.targets))
-    return null;
-  const targets2 = [];
-  for (const target of value.targets) {
-    if (!target || typeof target.taskUid !== "string" || !target.taskUid)
-      return null;
-    if (typeof target.clockUid !== "string" || !target.clockUid)
-      return null;
-    const key = `${target.taskUid}\0${target.clockUid}`;
-    if (targets2.some((item) => `${item.taskUid}\0${item.clockUid}` === key))
-      continue;
-    targets2.push({ taskUid: target.taskUid, clockUid: target.clockUid });
-  }
-  const scope = "scope" in value ? cleanFinalizingScope(value.scope) : null;
-  if ("scope" in value && !scope)
-    return null;
-  return {
-    action: "clock-out-all",
-    targets: targets2,
-    ...scope ? { scope } : {}
-  };
-};
-var serialized2 = () => JSON.stringify({
-  version: VERSION2,
-  data: {
-    items,
-    pendingResume,
-    ...finalizing ? { finalizing } : {}
-  }
-});
-var finalizingScope = () => ({
-  items: items.map(cleanFinalizingRecord).filter(Boolean),
-  pendingResume: pendingResume.map(cleanFinalizingRecord).filter(Boolean)
-});
-var makeFinalizing = (entries) => ({
-  action: "clock-out-all",
-  targets: entries.filter((entry) => entry.running).map((entry) => ({ taskUid: entry.taskUid, clockUid: entry.clockUid })),
-  scope: finalizingScope()
-});
-var sameFinalizingRecord = (record, captured) => record?.taskUid === captured?.taskUid && Number(record?.pausedAtMs) === Number(captured?.pausedAtMs) && (captured?.clockUid ? record?.clockUid === captured.clockUid : !record?.clockUid);
-function persist() {
-  if (unsupportedRaw2 !== null)
-    return false;
-  try {
-    writeSetting(SETTING_PAUSED_BATCH, serialized2());
-    return true;
-  } catch (error) {
-    notice3 || (notice3 = "Pause Batch could not be saved yet; its recovery state was retained.");
-    console.warn("[roam-logbook] could not persist Pause Batch", error);
-    return false;
-  }
-}
-function notify2() {
-  for (const listener of listeners2) {
-    try {
-      listener(getPaused());
-    } catch (error) {
-      console.error("[roam-logbook] paused-batch listener failed", error);
-    }
-  }
-}
-var handleClockAction = (action) => {
-  if (!action || action.source === "pause" || action.source === "resume")
-    return;
-  const item = items.find((record) => record.taskUid === action.taskUid);
-  if (!item)
-    return;
-  if (action.type === "clock-in") {
-    item.reconciliationState = "externally-replaced";
-    item.externalClockUid = action.clockUid;
-    notice3 = "A paused Session was replaced by explicit clock activity; Resume All will not duplicate it.";
-    persist();
-    notify2();
-    return;
-  }
-  if (action.type === "clock-out" && item.externalClockUid === action.clockUid) {
-    item.reconciliationState = "externally-clocked-out";
-    notice3 = "A paused Session was explicitly clocked out; Resume All will not recreate it.";
-    persist();
-    notify2();
-  }
-};
-var ensureClockActionSubscription = () => {
-  unsubscribeClockActions?.();
-  unsubscribeClockActions = subscribeActions(handleClockAction);
-};
-function subscribe2(listener) {
-  listeners2.add(listener);
-  listener(getPaused());
-  return () => listeners2.delete(listener);
-}
-function getPaused() {
-  return items.map((item) => ({ ...item }));
-}
-function getPendingResume() {
-  return pendingResume.map((item) => ({ ...item }));
-}
-function getRecoveryState() {
-  if (!finalizing)
-    return null;
-  return {
-    kind: "finalizing",
-    action: "commit-pause-batch",
-    targets: finalizing.targets.map((target) => ({ ...target })),
-    pendingTaskUids: [...new Set(finalizing.targets.map((target) => target.taskUid))],
-    pendingClockUids: finalizing.targets.map((target) => target.clockUid)
-  };
-}
-function pruneCompleted(taskUids = []) {
-  const completedTaskUids = [...new Set(taskUids.filter((uid) => typeof uid === "string" && uid))];
-  if (unsupportedRaw2 !== null) {
-    notice3 = "Saved paused-task state is unsupported; completed Tasks were not pruned.";
-    notify2();
-    return {
-      action: "prune-completed-paused",
-      ok: false,
-      completedTaskUids,
-      removed: 0,
-      removedPaused: 0,
-      removedPending: 0,
-      uncertain: true,
-      error: new Error(notice3)
-    };
-  }
-  const scope = new Set(completedTaskUids);
-  const previousItems = items;
-  const previousPending = pendingResume;
-  items = items.filter((item) => !scope.has(item.taskUid));
-  pendingResume = pendingResume.filter((item) => !scope.has(item.taskUid));
-  const removedPaused = previousItems.length - items.length;
-  const removedPending = previousPending.length - pendingResume.length;
-  if (removedPaused > 0 || removedPending > 0) {
-    notice3 = "";
-    if (!persist()) {
-      items = previousItems;
-      pendingResume = previousPending;
-      notice3 = "Completed Tasks could not be removed from the saved Pause Batch; recovery state was kept.";
-      notify2();
-      return {
-        action: "prune-completed-paused",
-        ok: false,
-        completedTaskUids,
-        removed: 0,
-        removedPaused: 0,
-        removedPending: 0,
-        uncertain: true,
-        error: new Error(notice3)
-      };
-    }
-    notify2();
-  }
-  return {
-    action: "prune-completed-paused",
-    ok: true,
-    completedTaskUids,
-    removed: removedPaused + removedPending,
-    removedPaused,
-    removedPending,
-    uncertain: false,
-    error: null
-  };
-}
-function getNotice2() {
-  return notice3;
-}
-function load2() {
-  items = [];
-  pendingResume = [];
-  finalizing = null;
-  notice3 = "";
-  unsupportedRaw2 = null;
-  ensureClockActionSubscription();
-  const raw = readSetting(SETTING_PAUSED_BATCH);
-  if (!raw)
-    return getPaused();
-  let recoverableItems = [];
-  let recoverablePending = [];
-  let recoverableFinalizing = null;
-  try {
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (parsed?.version === VERSION2 && parsed.data && Array.isArray(parsed.data.items)) {
-      recoverableItems = parsed.data.items.map(cleanRecord).filter(Boolean);
-      if ("pendingResume" in parsed.data && !Array.isArray(parsed.data.pendingResume)) {
-        throw new Error("invalid pendingResume shape");
-      }
-      const needsMigration = parsed.data.items.some(hasLegacyPomodoroFields) || Array.isArray(parsed.data.pendingResume) && parsed.data.pendingResume.some(hasLegacyPomodoroFields);
-      const loadedItems = parsed.data.items.map(cleanRecord);
-      const loadedPending = Array.isArray(parsed.data.pendingResume) ? parsed.data.pendingResume.map((value) => cleanPending(value, { version: VERSION2 })) : [];
-      recoverablePending = loadedPending.filter(Boolean);
-      if (loadedItems.some((item) => !item) || loadedPending.some((item) => !item)) {
-        throw new Error("invalid paused-task record");
-      }
-      if ("finalizing" in parsed.data && parsed.data.finalizing !== null) {
-        recoverableFinalizing = cleanFinalizing(parsed.data.finalizing);
-        if (!recoverableFinalizing)
-          throw new Error("invalid finalizing Pause Batch marker");
-      }
-      const byTask = new Map(loadedItems.map((item) => [item.taskUid, item]));
-      const pendingByTask = new Map(loadedPending.map((item) => [item.taskUid, item]));
-      items = [...byTask.values()];
-      pendingResume = [...pendingByTask.values()];
-      finalizing = recoverableFinalizing;
-      if (pendingResume.some((item) => item.recoveryState === "conflict")) {
-        const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
-        notice3 = firstWarning ? "A current pending Resume has no exact Session association; it was retained as a conflict." : "";
-      }
-      if (needsMigration)
-        persist();
-      return getPaused();
-    }
-    if (parsed?.version === LEGACY_VERSION && Array.isArray(parsed.items)) {
-      recoverableItems = parsed.items.map(cleanRecord).filter(Boolean);
-      const loaded = parsed.items.map(cleanRecord);
-      const loadedPending = Array.isArray(parsed.pendingResume) ? parsed.pendingResume.map(
-        (value) => cleanPending(value, { version: LEGACY_VERSION, legacy: true })
-      ) : [];
-      recoverablePending = loadedPending.filter(Boolean);
-      if (loaded.some((item) => !item) || loadedPending.some((item) => !item)) {
-        throw new Error("invalid legacy paused-task record");
-      }
-      items = [...new Map(loaded.map((item) => [item.taskUid, item])).values()];
-      pendingResume = [...new Map(loadedPending.map((item) => [item.taskUid, item])).values()];
-      persist();
-      return getPaused();
-    }
-    throw new Error("unsupported paused-batch version");
-  } catch (error) {
-    items = [...new Map(recoverableItems.map((item) => [item.taskUid, item])).values()];
-    pendingResume = [...new Map(recoverablePending.map((item) => [item.taskUid, item])).values()];
-    finalizing = recoverableFinalizing;
-    unsupportedRaw2 = raw;
-    const firstWarning = preserveStateBackup(SETTING_PAUSED_BATCH, raw);
-    notice3 = firstWarning ? "Saved paused-task state uses an unsupported or invalid version and was kept." : "";
-    if (firstWarning)
-      console.warn("[roam-logbook] could not read paused task state", error);
-    return getPaused();
-  }
-}
-var pausedRecord = (snapshot) => {
-  const { clockUid: _clockUid, ...record } = snapshot;
-  return record;
-};
-var pauseBatchResult = ({
-  completed = 0,
-  failed = 0,
-  pendingClockUids = [],
-  pendingTaskUids = [],
-  uncertain = false,
-  error = null,
-  retry = null,
-  ...extra
-} = {}) => {
-  const clockUids = [...new Set(pendingClockUids.filter(Boolean))];
-  const taskUids = [...new Set(pendingTaskUids.filter(Boolean))];
-  const incomplete = uncertain || failed > 0 || clockUids.length > 0 || taskUids.length > 0;
-  return {
-    action: "pause-all",
-    ok: !incomplete,
-    paused: completed,
-    count: completed,
-    completed,
-    failed,
-    pending: Math.max(clockUids.length, taskUids.length),
-    pendingClockUids: clockUids,
-    pendingTaskUids: taskUids,
-    uncertain: Boolean(uncertain),
-    partial: Boolean(incomplete && completed > 0),
-    retry: retry || (incomplete ? { action: "pause", retryClockUids: clockUids, retryTaskUids: taskUids } : null),
-    error: error || (failed > 0 ? new Error("One or more Sessions could not be paused.") : null),
-    item: "Session",
-    completedVerb: "paused",
-    ...extra
-  };
-};
-async function pauseAll({ now = /* @__PURE__ */ new Date() } = {}) {
-  if (unsupportedRaw2 !== null) {
-    notice3 = "Saved paused-task state is unsupported; no Tasks were paused.";
-    notify2();
-    return pauseBatchResult({
-      failed: items.length,
-      pendingTaskUids: items.map((item) => item.taskUid),
-      uncertain: true,
-      error: new Error(notice3)
-    });
-  }
-  notice3 = "";
-  const originalItems = items.map((item) => ({ ...item }));
-  let previous;
-  try {
-    previous = new Map(
-      items.map((item) => {
-        const taskUid = resolveTaskUid(item.taskUid) || item.taskUid;
-        return [taskUid, { ...item, taskUid }];
-      })
-    );
-  } catch {
-    notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
-    notify2();
-    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
-    const pendingTaskUids2 = getRunning().map((entry) => entry.taskUid);
-    return pauseBatchResult({
-      failed: pendingClockUids2.length,
-      pendingClockUids: pendingClockUids2,
-      pendingTaskUids: pendingTaskUids2,
-      uncertain: true,
-      error: new Error(notice3)
-    });
-  }
-  const merged = new Map(previous);
-  let outcome;
-  try {
-    outcome = await pauseEntries({
-      now,
-      prepare: (entries) => {
-        const snapshots = entries.map((entry) => ({
-          taskUid: entry.taskUid,
-          title: entry.title,
-          pausedAtMs: now.getTime(),
-          clockUid: entry.clockUid
-        }));
-        for (const snapshot of snapshots) {
-          const record = pausedRecord(snapshot);
-          merged.set(record.taskUid, record);
-        }
-        items = [...merged.values()];
-        if (!persist()) {
-          const error = new Error(notice3 || "Pause Batch could not be saved before closing Sessions.");
-          error.uncertain = true;
-          throw error;
-        }
-        return snapshots;
-      }
-    });
-  } catch {
-    items = originalItems;
-    notice3 = getNotice() || "Unable to pause Tasks because the graph is unavailable.";
-    notify2();
-    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
-    const pendingTaskUids2 = getRunning().map((entry) => entry.taskUid);
-    return pauseBatchResult({
-      failed: pendingClockUids2.length,
-      pendingClockUids: pendingClockUids2,
-      pendingTaskUids: pendingTaskUids2,
-      uncertain: true,
-      error: new Error(notice3)
-    });
-  }
-  if (outcome.preflight) {
-    items = originalItems;
-    notice3 = "Pause Batch could not be saved before closing Sessions; no Session was changed.";
-    notify2();
-    return pauseBatchResult({
-      failed: outcome.pendingClockUids?.length || 0,
-      pendingClockUids: outcome.pendingClockUids || [],
-      pendingTaskUids: outcome.entries?.filter((entry) => entry.running).map((entry) => entry.taskUid) || [],
-      uncertain: true,
-      error: outcome.error || new Error(notice3)
-    });
-  }
-  let failed = 0;
-  const byClockUid = new Map(outcome.results.map((result) => [result.clockUid, result]));
-  for (const snapshot of outcome.records) {
-    const result = byClockUid.get(snapshot.clockUid);
-    if (result?.closed)
-      continue;
-    failed += 1;
-    if (previous.has(snapshot.taskUid))
-      merged.set(snapshot.taskUid, previous.get(snapshot.taskUid));
-    else
-      merged.set(snapshot.taskUid, pausedRecord(snapshot));
-    console.error("[roam-logbook] could not pause task", snapshot.taskUid, result?.error);
-  }
-  items = [...merged.values()];
-  if (outcome.uncertain) {
-    notice3 = GRAPH_UNCERTAIN;
-  } else if (failed > 0) {
-    notice3 = `${failed} Task${failed === 1 ? "" : "s"} could not be paused.`;
-  }
-  const persisted = persist();
-  if (!persisted)
-    notice3 || (notice3 = "Pause Batch could not be saved yet; its recovery state was retained.");
-  notify2();
-  const pendingSnapshots = outcome.records.filter((snapshot) => {
-    const result = byClockUid.get(snapshot.clockUid);
-    return !result?.closed;
-  });
-  const pendingClockUids = pendingSnapshots.map((snapshot) => snapshot.clockUid);
-  const pendingTaskUids = pendingSnapshots.map((snapshot) => snapshot.taskUid);
-  const incomplete = Boolean(outcome.uncertain) || failed > 0 || pendingSnapshots.length > 0;
-  return pauseBatchResult({
-    completed: outcome.closed,
-    failed,
-    pendingClockUids,
-    pendingTaskUids,
-    uncertain: Boolean(outcome.uncertain || !persisted),
-    retry: incomplete ? {
-      ...outcome.retry || { action: "pause" },
-      action: "pause",
-      retryClockUids: pendingClockUids,
-      retryTaskUids: pendingTaskUids
-    } : null,
-    error: outcome.error || pendingSnapshots.find((snapshot) => byClockUid.get(snapshot.clockUid)?.error)?.error || null
-  });
-}
-var existingTask = (record) => {
-  try {
-    const taskUid = resolveTaskUid(record.taskUid);
-    const string = getBlockString(taskUid);
-    return string === null ? null : { ...record, taskUid, title: taskTitle(string) || record.title };
-  } catch (error) {
-    if (error instanceof GraphReadError)
-      return { uncertain: true, error };
-    throw error;
-  }
-};
-var removeTask = (taskUid) => {
-  items = items.filter((item) => item.taskUid !== taskUid);
-};
-async function recoverPending({ running: running2 = [] } = {}) {
-  let recovered = 0;
-  let failed = 0;
-  let legacyRecovered = 0;
-  const conflicts = [];
-  const legacyToCreate = [];
-  const byClockUid = new Map(running2.map((entry) => [entry.clockUid, entry]));
-  for (const pending of [...pendingResume]) {
-    let entry = null;
-    if (pending.clockUid) {
-      entry = byClockUid.get(pending.clockUid) || null;
-      if (!entry || entry.taskUid !== pending.taskUid) {
-        conflicts.push({
-          taskUid: pending.taskUid,
-          clockUid: pending.clockUid,
-          reason: "exact Session association is missing or belongs to another Task"
-        });
-        continue;
-      }
-    } else if (pending.legacy === true) {
-      const matches = running2.filter((item) => item.taskUid === pending.taskUid);
-      if (matches.length === 1)
-        entry = matches[0];
-      else if (matches.length > 1) {
-        conflicts.push({
-          taskUid: pending.taskUid,
-          reason: "legacy pending record matched more than one running Session"
-        });
-        continue;
-      } else {
-        legacyToCreate.push(pending);
-        continue;
-      }
-    } else {
-      conflicts.push({
-        taskUid: pending.taskUid,
-        reason: "current pending Resume has no clockUid; exact Session association is required"
-      });
-      continue;
-    }
-    pendingResume = pendingResume.filter((item) => item.taskUid !== pending.taskUid);
-    removeTask(pending.taskUid);
-    persist();
-    recovered += 1;
-    if (pending.legacy === true)
-      legacyRecovered += 1;
-  }
-  return { recovered, failed, conflicts, legacyToCreate, legacyRecovered };
-}
-var pendingTasks = () => new Set(pendingResume.map((item) => item.taskUid));
-function reconcileFinalizing({ running: running2 = [] } = {}) {
-  if (!finalizing) {
-    return {
-      ok: true,
-      uncertain: false,
-      activeTaskUids: [],
-      activeClockUids: []
-    };
-  }
-  const runningByClock = new Map(running2.map((entry) => [entry.clockUid, entry]));
-  const activeTargets = finalizing.targets.filter((target) => {
-    const entry = runningByClock.get(target.clockUid);
-    return entry?.taskUid === target.taskUid;
-  });
-  const activeTaskUids = new Set(activeTargets.map((target) => target.taskUid));
-  const activeClockUids = activeTargets.map((target) => target.clockUid);
-  const previousItems = items;
-  const previousPending = pendingResume;
-  const previousFinalizing = finalizing;
-  const capturedScope = finalizing.scope;
-  if (capturedScope) {
-    const removableTaskUids = new Set(
-      [...capturedScope.items, ...capturedScope.pendingResume].map((record) => record.taskUid).filter((taskUid) => !activeTaskUids.has(taskUid))
-    );
-    const removeCaptured = (records, captured) => {
-      const remainingCaptured = captured.slice();
-      return records.filter((record) => {
-        if (!removableTaskUids.has(record.taskUid))
-          return true;
-        const index = remainingCaptured.findIndex((item) => sameFinalizingRecord(record, item));
-        if (index < 0)
-          return true;
-        remainingCaptured.splice(index, 1);
-        return false;
-      });
-    };
-    items = removeCaptured(items, capturedScope.items);
-    pendingResume = removeCaptured(pendingResume, capturedScope.pendingResume);
-  } else {
-    items = items.filter((item) => activeTaskUids.has(item.taskUid));
-    pendingResume = pendingResume.filter((item) => activeTaskUids.has(item.taskUid));
-  }
-  finalizing = activeTargets.length > 0 ? { ...finalizing, targets: activeTargets } : null;
-  const changed = previousItems.length !== items.length || previousPending.length !== pendingResume.length || JSON.stringify(previousFinalizing) !== JSON.stringify(finalizing);
-  if (!changed) {
-    return {
-      ok: true,
-      uncertain: false,
-      activeTaskUids: [...activeTaskUids],
-      activeClockUids
-    };
-  }
-  if (!persist()) {
-    items = previousItems;
-    pendingResume = previousPending;
-    finalizing = previousFinalizing;
-    notice3 = "Clock Out All was confirmed in the graph, but its recovery state could not be committed yet.";
-    notify2();
-    return {
-      ok: false,
-      uncertain: true,
-      activeTaskUids: [...activeTaskUids],
-      activeClockUids,
-      error: new Error(notice3)
-    };
-  }
-  notify2();
-  return { ok: true, uncertain: false, activeTaskUids: [...activeTaskUids], activeClockUids };
-}
-var resumeBatchResult = ({
-  completed = 0,
-  failed = 0,
-  pendingTaskUids = [],
-  uncertain = false,
-  blocked = false,
-  error = null,
-  retry = null,
-  ...extra
-} = {}) => {
-  const pending = [...new Set(pendingTaskUids.filter(Boolean))];
-  const incomplete = blocked || uncertain || failed > 0 || pending.length > 0;
-  return {
-    action: "resume-all",
-    ok: !incomplete,
-    count: completed,
-    completed,
-    resumed: completed,
-    failed,
-    pending: pending.length,
-    pendingTaskUids: pending,
-    uncertain: Boolean(uncertain),
-    partial: Boolean(incomplete && completed > 0),
-    retry: retry || (incomplete ? { action: "resume", retryTaskUids: pending } : null),
-    error: error || (failed > 0 ? new Error("One or more Tasks could not be resumed.") : null),
-    item: "Task",
-    completedVerb: "resumed",
-    blocked,
-    ...extra
-  };
-};
-var resumeOneResult = ({
-  completed = 0,
-  failed = 0,
-  pendingTaskUids = [],
-  uncertain = false,
-  error = null,
-  retry = null,
-  ...extra
-} = {}) => {
-  const pending = [...new Set(pendingTaskUids.filter(Boolean))];
-  const incomplete = uncertain || failed > 0 || pending.length > 0;
-  return {
-    action: "resume-one",
-    ok: !incomplete,
-    count: completed,
-    completed,
-    resumed: completed,
-    failed,
-    pending: pending.length,
-    pendingTaskUids: pending,
-    uncertain: Boolean(uncertain),
-    partial: Boolean(incomplete && completed > 0),
-    retry: retry || (incomplete ? { action: "resume", retryTaskUids: pending } : null),
-    error: error || (failed > 0 ? new Error("The Session could not be resumed.") : null),
-    item: "Session",
-    completedVerb: "resumed",
-    ...extra
-  };
-};
-var commitFinalizingResult = ({ hadFinalizing = false, finalized }) => {
-  const activeTaskUids = finalized?.activeTaskUids || [];
-  const activeClockUids = finalized?.activeClockUids || [];
-  const uncertain = Boolean(finalized?.uncertain || finalized?.ok === false);
-  const blocked = activeTaskUids.length > 0;
-  const ok = !uncertain && !blocked;
-  const error = finalized?.error || (blocked ? new Error("Clock Out All still has running Sessions.") : null);
-  return {
-    action: "commit-pause-batch",
-    ok,
-    committed: Boolean(hadFinalizing && ok),
-    count: Boolean(hadFinalizing && ok) ? 1 : 0,
-    completed: Boolean(hadFinalizing && ok) ? 1 : 0,
-    failed: uncertain ? 1 : activeTaskUids.length,
-    pending: activeClockUids.length,
-    pendingTaskUids: activeTaskUids,
-    pendingClockUids: activeClockUids,
-    uncertain,
-    partial: false,
-    blocked,
-    retry: ok ? null : {
-      action: "commit-pause-batch",
-      retryTaskUids: activeTaskUids,
-      retryClockUids: activeClockUids
-    },
-    error,
-    item: "Pause Batch",
-    completedVerb: "committed"
-  };
-};
-async function resumeRecord(record, now) {
-  let pending = pendingResume.find((item) => item.taskUid === record.taskUid);
-  let createdPending = false;
-  if (!pending) {
-    pending = {
-      ...record,
-      clockUid: null,
-      legacy: false,
-      sourceVersion: VERSION2,
-      recoveryState: "in-flight"
-    };
-    pendingResume.push(pending);
-    persist();
-    createdPending = true;
-  }
-  let entry = pending.clockUid ? getRunning().find((item) => item.clockUid === pending.clockUid) : pending.legacy === true ? getRunning().find((item) => item.taskUid === record.taskUid) : null;
-  if (pending.clockUid && (!entry || entry.taskUid !== record.taskUid)) {
-    const conflict = new Error(
-      `Resume conflict for ${record.taskUid}: exact Session ${pending.clockUid} is unavailable.`
-    );
-    conflict.conflict = true;
-    throw conflict;
-  }
-  if (!pending.clockUid && !pending.legacy && !createdPending) {
-    const conflict = new Error(
-      `Resume conflict for ${record.taskUid}: current pending Resume has no exact clockUid.`
-    );
-    conflict.conflict = true;
-    throw conflict;
-  }
-  if (!entry) {
-    let result;
-    try {
-      result = await clockIn(record.taskUid, { now, source: "resume" });
-    } catch (error) {
-      if (createdPending && !error?.uncertain) {
-        pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
-        persist();
-      }
-      throw error;
-    }
-    if (result?.uncertain) {
-      if (result.clockUid) {
-        pending.clockUid = result.clockUid;
-        persist();
-      }
-      const uncertain = new Error(result.notice || getNotice());
-      uncertain.uncertain = true;
-      throw uncertain;
-    }
-    entry = getRunning().find((item) => item.clockUid === result.clockUid) || result;
-  }
-  pending.clockUid = entry.clockUid;
-  pending.legacy = false;
-  pending.sourceVersion = VERSION2;
-  delete pending.recoveryState;
-  delete pending.recoveryIssue;
-  persist();
-  pendingResume = pendingResume.filter((item) => item.taskUid !== record.taskUid);
-  removeTask(record.taskUid);
-  persist();
-  return entry;
-}
-async function resumeOne(taskUid, { now = /* @__PURE__ */ new Date() } = {}) {
-  if (unsupportedRaw2 !== null) {
-    notice3 = "Saved paused-task state is unsupported; no Sessions were resumed.";
-    notify2();
-    return resumeOneResult({
-      failed: 1,
-      pendingTaskUids: [taskUid],
-      uncertain: true,
-      error: new Error(notice3)
-    });
-  }
-  notice3 = "";
-  const initial = refreshResult();
-  if (!initial.ok) {
-    notice3 = getNotice() || GRAPH_UNCERTAIN;
-    notify2();
-    return resumeOneResult({
-      failed: 1,
-      pendingTaskUids: [taskUid],
-      uncertain: true,
-      error: initial.error
-    });
-  }
-  const record = items.find((item) => item.taskUid === taskUid);
-  const alreadyRunning = initial.running.find((entry) => entry.taskUid === taskUid);
-  if (!record) {
-    return resumeOneResult({ alreadyRunning: Boolean(alreadyRunning) });
-  }
-  if (record.reconciliationState) {
-    removeTask(taskUid);
-    persist();
-    notice3 = record.reconciliationState === "externally-clocked-out" ? "The paused Session was already clocked out and was not reopened." : "The paused Session was replaced by explicit clock activity and was not duplicated.";
-    notify2();
-    return resumeOneResult({ reconciled: true });
-  }
-  if (alreadyRunning) {
-    removeTask(taskUid);
-    persist();
-    notify2();
-    return resumeOneResult({ alreadyRunning: true });
-  }
-  const valid = existingTask(record);
-  if (valid?.uncertain) {
-    notice3 = GRAPH_UNCERTAIN;
-    notify2();
-    return resumeOneResult({
-      failed: 1,
-      pendingTaskUids: [taskUid],
-      uncertain: true,
-      error: valid.error
-    });
-  }
-  if (!valid) {
-    notice3 = `Task ${taskUid} could not be confirmed; the paused Session was kept.`;
-    notify2();
-    return resumeOneResult({
-      failed: 1,
-      pendingTaskUids: [taskUid],
-      error: new Error(notice3)
-    });
-  }
-  try {
-    await resumeRecord(valid, now);
-  } catch (error) {
-    if (error?.code === "done-ancestor") {
-      const cleanup = pruneCompleted([taskUid]);
-      notice3 = "The paused Session was under a completed Task and was not resumed.";
-      notify2();
-      return resumeOneResult({
-        reconciled: true,
-        pruned: cleanup.removed,
-        completedTaskUids: [taskUid]
-      });
-    }
-    notice3 = error?.uncertain ? GRAPH_UNCERTAIN : error?.message || "The paused Session could not be resumed.";
-    notify2();
-    return resumeOneResult({
-      failed: 1,
-      pendingTaskUids: [taskUid],
-      uncertain: Boolean(error?.uncertain),
-      error
-    });
-  }
-  notice3 = "";
-  notify2();
-  return resumeOneResult({ completed: 1 });
-}
-async function resumeAll({ now = /* @__PURE__ */ new Date(), reconcileOnly = false } = {}) {
-  if (unsupportedRaw2 !== null) {
-    notice3 = "Saved paused-task state is unsupported; no Tasks were resumed.";
-    notify2();
-    return resumeBatchResult({
-      blocked: true,
-      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
-      error: new Error(notice3),
-      pruned: 0,
-      satisfied: 0
-    });
-  }
-  const hadFinalizing = Boolean(finalizing);
-  notice3 = "";
-  const initial = refreshResult();
-  if (!initial.ok) {
-    notice3 = getNotice() || "Graph state could not be confirmed; no further changes were made.";
-    notify2();
-    if (reconcileOnly) {
-      return commitFinalizingResult({
-        hadFinalizing,
-        finalized: { ok: false, uncertain: true, activeTaskUids: [], activeClockUids: [], error: initial.error }
-      });
-    }
-    return resumeBatchResult({
-      failed: pendingResume.length + items.length,
-      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
-      pruned: 0,
-      satisfied: 0,
-      blocked: true,
-      uncertain: true,
-      error: initial.error
-    });
-  }
-  const finalized = reconcileFinalizing({ running: initial.running });
-  if (reconcileOnly) {
-    if (finalized.activeTaskUids.length > 0) {
-      notice3 = "Clock Out All still has running Sessions; they were kept for an explicit retry.";
-      notify2();
-    }
-    return commitFinalizingResult({ hadFinalizing, finalized });
-  }
-  if (!finalized.ok) {
-    return resumeBatchResult({
-      failed: finalized.activeTaskUids.length,
-      pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
-      blocked: true,
-      uncertain: true,
-      error: finalized.error,
-      pruned: 0,
-      satisfied: 0
-    });
-  }
-  if (finalized.activeTaskUids.length > 0) {
-    notice3 = "Clock Out All still has running Sessions; they were kept for an explicit retry.";
-    notify2();
-    return resumeBatchResult({
-      failed: finalized.activeTaskUids.length,
-      pendingTaskUids: finalized.activeTaskUids,
-      blocked: true,
-      error: new Error(notice3),
-      pruned: 0,
-      satisfied: 0
-    });
-  }
-  const recovered = await recoverPending({ running: initial.running });
-  const runningEntries = getRunning();
-  const runningTasks = new Set(runningEntries.map((entry) => entry.taskUid));
-  const retained = [];
-  const ready = [];
-  const plannedTasks = /* @__PURE__ */ new Set();
-  const blockedPending = pendingTasks();
-  let pruned = 0;
-  let satisfied = 0;
-  let uncertain = 0;
-  let reconciled = 0;
-  let completedPruned = 0;
-  for (const pending of recovered.legacyToCreate) {
-    const valid = existingTask(pending);
-    if (valid?.uncertain) {
-      uncertain += 1;
-      continue;
-    }
-    if (!valid) {
-      recovered.conflicts.push({
-        taskUid: pending.taskUid,
-        reason: "legacy pending Task could not be found"
-      });
-      continue;
-    }
-    if (!plannedTasks.has(valid.taskUid)) {
-      plannedTasks.add(valid.taskUid);
-      ready.push(valid);
-    }
-  }
-  for (const record of [...items]) {
-    if (record.reconciliationState) {
-      reconciled += 1;
-      continue;
-    }
-    const valid = existingTask(record);
-    if (valid?.uncertain) {
-      uncertain += 1;
-      retained.push(record);
-      continue;
-    }
-    if (!valid) {
-      pruned += 1;
-      continue;
-    }
-    if (blockedPending.has(valid.taskUid)) {
-      retained.push(valid);
-      continue;
-    }
-    if (runningTasks.has(valid.taskUid) || plannedTasks.has(valid.taskUid)) {
-      satisfied += 1;
-      continue;
-    }
-    plannedTasks.add(valid.taskUid);
-    ready.push(valid);
-  }
-  let resumed = recovered.recovered;
-  let failed = recovered.failed + uncertain + recovered.conflicts.length;
-  let legacyRecovered = recovered.legacyRecovered;
-  let mutationUncertain = uncertain > 0;
-  let firstError = null;
-  const legacyRecovery = recovered.legacyRecovered > 0 || recovered.legacyToCreate.length > 0;
-  const completedTasks = /* @__PURE__ */ new Set();
-  for (const record of ready) {
-    try {
-      await resumeRecord(record, now);
-      resumed += 1;
-      if (record.legacy === true)
-        legacyRecovered += 1;
-      completedTasks.add(record.taskUid);
-    } catch (error) {
-      if (error?.code === "done-ancestor") {
-        completedPruned += pruneCompleted([record.taskUid]).removed;
-        completedTasks.add(record.taskUid);
-        continue;
-      }
-      failed += 1;
-      retained.push(record);
-      console.error("[roam-logbook] could not resume task", record.taskUid, error);
-      firstError || (firstError = error);
-      if (error?.uncertain) {
-        mutationUncertain = true;
-        for (const remaining of ready.slice(ready.indexOf(record) + 1))
-          retained.push(remaining);
-        break;
-      }
-    }
-  }
-  items = retained.filter((item) => !completedTasks.has(item.taskUid));
-  const messages = [];
-  if (ready.length > 1) {
-    messages.push("Paused Tasks were resumed as a single Focused CLOCK in sequence.");
-  }
-  if (pruned > 0)
-    messages.push(`${pruned} missing Task${pruned === 1 ? " was" : "s were"} removed.`);
-  if (completedPruned > 0) {
-    messages.push(
-      `${completedPruned} paused Session${completedPruned === 1 ? " was" : "s were"} under a completed Task and not resumed.`
-    );
-  }
-  if (failed > 0)
-    messages.push(`${failed} Task${failed === 1 ? "" : "s"} could not be resumed.`);
-  if (uncertain > 0) {
-    messages.push(
-      `${uncertain} Task${uncertain === 1 ? "" : "s"} could not be confirmed because the graph is unavailable.`
-    );
-  }
-  if (recovered.conflicts.length > 0) {
-    messages.push(
-      `${recovered.conflicts.length} pending Resume conflict${recovered.conflicts.length === 1 ? "" : "s"} were retained; exact Session associations were not changed.`
-    );
-  }
-  if (legacyRecovery) {
-    messages.push("Legacy Resume recovery used explicit Task matching.");
-  }
-  if (reconciled > 0) {
-    messages.push(
-      `${reconciled} paused Session${reconciled === 1 ? " was" : "s were"} reconciled with explicit clock activity.`
-    );
-    items = items.filter((item) => !item.reconciliationState);
-  }
-  notice3 = messages.join(" ");
-  persist();
-  notify2();
-  return resumeBatchResult({
-    completed: resumed,
-    failed,
-    pendingTaskUids: [...items, ...pendingResume].map((item) => item.taskUid),
-    uncertain: mutationUncertain,
-    error: firstError,
-    pruned,
-    completedPruned,
-    satisfied,
-    blocked: false,
-    legacyRecovery,
-    legacyRecovered
-  });
-}
-async function retryFinalizing({ now = /* @__PURE__ */ new Date() } = {}) {
-  if (!finalizing)
-    return commitFinalizingResult({ hadFinalizing: false, finalized: { ok: true } });
-  return resumeAll({ now, reconcileOnly: true });
-}
-async function clockOutAll({ now = /* @__PURE__ */ new Date() } = {}) {
-  let outcome;
-  try {
-    outcome = await clockOutEntries(null, {
-      now,
-      prepare: (entries) => {
-        const previousFinalizing = finalizing;
-        finalizing = makeFinalizing(entries);
-        if (!persist()) {
-          finalizing = previousFinalizing;
-          const error = new Error(
-            notice3 || "Pause Batch could not be saved before closing Sessions."
-          );
-          error.uncertain = true;
-          throw error;
-        }
-      }
-    });
-  } catch {
-    notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
-    notify2();
-    const pendingClockUids2 = getRunning().map((entry) => entry.clockUid);
-    return {
-      action: "clock-out-all",
-      ok: false,
-      count: 0,
-      completed: 0,
-      failed: pendingClockUids2.length,
-      pending: pendingClockUids2.length,
-      pendingClockUids: pendingClockUids2,
-      partial: false,
-      uncertain: true,
-      error: new Error(notice3),
-      retry: { action: "close", retryClockUids: pendingClockUids2, writtenClockUids: [] },
-      item: "Session",
-      completedVerb: "ended"
-    };
-  }
-  if (outcome?.preflight) {
-    notice3 = "Pause Batch could not be saved before closing Sessions; no Session was changed.";
-    notify2();
-    return {
-      ...outcome,
-      action: "clock-out-all",
-      ok: false,
-      item: "Session",
-      completedVerb: "ended",
-      count: 0,
-      completed: 0,
-      partial: false
-    };
-  }
-  if (!Array.isArray(outcome?.results)) {
-    notice3 = getNotice() || "Unable to finish Sessions because the graph is unavailable.";
-    notify2();
-    return {
-      action: "clock-out-all",
-      ok: false,
-      count: 0,
-      completed: 0,
-      failed: getRunning().length,
-      pending: getRunning().length,
-      pendingClockUids: getRunning().map((entry) => entry.clockUid),
-      partial: false,
-      uncertain: true,
-      error: new Error(notice3),
-      retry: { action: "close", retryClockUids: getRunning().map((entry) => entry.clockUid) },
-      item: "Session",
-      completedVerb: "ended"
-    };
-  }
-  const closedUids = new Set(
-    outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
-  );
-  const stillRunning = (outcome.entries || getRunning()).filter(
-    (entry) => entry.running && !closedUids.has(entry.clockUid)
-  );
-  if (!outcome.uncertain && outcome.failed === 0 && stillRunning.length === 0) {
-    const previousFinalizing = finalizing;
-    items = [];
-    pendingResume = [];
-    finalizing = null;
-    notice3 = "";
-    const persisted2 = persist();
-    if (!persisted2) {
-      finalizing = previousFinalizing || {
-        action: "clock-out-all",
-        targets: (outcome.entries || []).map((entry) => ({
-          taskUid: entry.taskUid,
-          clockUid: entry.clockUid
-        }))
-      };
-      notice3 = "Sessions were closed, but clearing the saved Pause Batch could not be committed yet.";
-      notify2();
-      return {
-        ...outcome,
-        action: "clock-out-all",
-        ok: false,
-        item: "Session",
-        completedVerb: "ended",
-        count: outcome.closed,
-        completed: outcome.closed,
-        pending: 0,
-        pendingClockUids: [],
-        uncertain: true,
-        partial: false,
-        retry: {
-          action: "commit-pause-batch",
-          retryClockUids: [],
-          writtenClockUids: outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
-        },
-        error: new Error(notice3)
-      };
-    }
-    notify2();
-    return {
-      ...outcome,
-      action: "clock-out-all",
-      item: "Session",
-      completedVerb: "ended",
-      count: outcome.closed,
-      completed: outcome.closed,
-      pending: 0,
-      pendingClockUids: []
-    };
-  }
-  const retained = new Map(
-    items.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid)).map((item) => [item.taskUid, item])
-  );
-  for (const entry of stillRunning) {
-    retained.set(entry.taskUid, {
-      taskUid: entry.taskUid,
-      title: entry.title,
-      pausedAtMs: now.getTime(),
-      clockUid: entry.clockUid
-    });
-  }
-  items = [...retained.values()];
-  pendingResume = pendingResume.filter((item) => stillRunning.some((entry) => entry.taskUid === item.taskUid));
-  finalizing = makeFinalizing(outcome.entries || []);
-  notice3 = outcome.uncertain ? GRAPH_UNCERTAIN : `${stillRunning.length} Session${stillRunning.length === 1 ? "" : "s"} could not be closed.`;
-  const persisted = persist();
-  if (!persisted) {
-    notice3 = "Sessions were partly closed, but their durable recovery state could not be committed yet.";
-  }
-  notify2();
-  const pendingClockUids = stillRunning.map((entry) => entry.clockUid);
-  return {
-    ...outcome,
-    action: "clock-out-all",
-    ok: false,
-    item: "Session",
-    completedVerb: "ended",
-    count: outcome.closed,
-    completed: outcome.closed,
-    uncertain: Boolean(outcome.uncertain || !persisted),
-    pending: pendingClockUids.length,
-    pendingClockUids,
-    partial: Boolean(outcome.partial || outcome.closed > 0 && pendingClockUids.length > 0),
-    retry: {
-      ...outcome.retry || { action: "close" },
-      retryClockUids: pendingClockUids,
-      writtenClockUids: outcome.results.filter((result) => result.closed).map((result) => result.clockUid)
-    }
-  };
-}
-function clear() {
-  if (unsupportedRaw2 !== null) {
-    notice3 = "Saved paused-task state is unsupported and was kept.";
-    notify2();
-    return false;
-  }
-  items = [];
-  pendingResume = [];
-  finalizing = null;
-  notice3 = "";
-  persist();
-  notify2();
-  return true;
-}
-function reset3() {
-  items = [];
-  pendingResume = [];
-  finalizing = null;
-  notice3 = "";
-  unsupportedRaw2 = null;
-  listeners2.clear();
-  unsubscribeClockActions?.();
-  unsubscribeClockActions = null;
-}
-
 // src/action-result.js
 var GRAPH_SYNC_RETRY_NOTICE = "Graph state could not be confirmed; no further changes were made. Retry after Roam finishes syncing.";
 var presentedResults = /* @__PURE__ */ new WeakSet();
@@ -5129,8 +3783,7 @@ function mutationResultNotice(result) {
     const failedCount = failed || pending;
     const completedText = `${completed} ${noun}${completed === 1 ? "" : "s"} ${completedVerb}`;
     const failedText = `${failedCount} could not be updated`;
-    const detail = result?.action === "resume-one" && typeof message === "string" && message.trim() ? ` ${message.trim()}` : "";
-    return completed > 0 ? `${completedText}; ${failedText}.${detail} Retry after Roam finishes syncing.` : `${failedText[0].toUpperCase()}${failedText.slice(1)}.${detail} Retry after Roam finishes syncing.`;
+    return completed > 0 ? `${completedText}; ${failedText}. Retry after Roam finishes syncing.` : `${failedText[0].toUpperCase()}${failedText.slice(1)}. Retry after Roam finishes syncing.`;
   }
   return "";
 }
@@ -5140,9 +3793,9 @@ function presentMutationResult(result, notifyUser) {
   if (presentedResults.has(result))
     return result;
   presentedResults.add(result);
-  const notice4 = mutationResultNotice(result);
-  if (notice4)
-    notifyUser?.(notice4);
+  const notice3 = mutationResultNotice(result);
+  if (notice3)
+    notifyUser?.(notice3);
   return result;
 }
 
@@ -5214,9 +3867,6 @@ var STYLES = `
     background: rgba(167, 182, 194, 0.24) !important;
 }
 
-.rlb-topbar__button--paused {
-    background: transparent !important;
-}
 
 .rlb-topbar__button--active {
     column-gap: 6px;
@@ -5226,18 +3876,6 @@ var STYLES = `
     flex: 0 0 auto;
 }
 
-.rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: var(--rlb-topbar-load-yellow) !important;
-}
-
-.rlb-topbar__button--paused:hover,
-.rlb-topbar__button--paused:focus-visible {
-    background: rgba(167, 182, 194, 0.24) !important;
-}
-
-.bp3-dark .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: var(--rlb-topbar-load-yellow) !important;
-}
 
 .bp3-dark .rlb-topbar {
     --rlb-topbar-load-yellow: #e6c35c;
@@ -5538,19 +4176,6 @@ var STYLES = `
     background: var(--rlb-surface-hover);
 }
 
-.rlb-surface__section--paused,
-.rlb-surface__section--recovery {
-    margin-top: 6px;
-    padding: 3px;
-    border: 1px solid var(--rlb-surface-border-light);
-    border-radius: 6px;
-    background: var(--rlb-surface-canvas);
-}
-
-.rlb-surface__section--paused .rlb-surface__section-label,
-.rlb-surface__section--recovery .rlb-surface__section-label {
-    padding: 3px 6px 2px;
-}
 
 .rlb-surface__section-label {
     padding: 7px 6px 3px;
@@ -5995,42 +4620,11 @@ var STYLES = `
     color: #c23030;
 }
 
-.rlb-run__actions .rlb-run__resume,
-.rlb-run__actions .rlb-run__recovery {
-    width: 32px;
-    min-width: 32px;
-    max-width: 32px;
-    height: 32px;
-    min-height: 32px;
-    max-height: 32px;
-    padding: 0 !important;
-    justify-content: center;
-    align-items: center;
-    color: #5c7080;
-}
-
-.rlb-run__actions .rlb-run__resume:hover,
-.rlb-run__actions .rlb-run__resume:focus-visible,
-.rlb-run__actions .rlb-run__recovery:hover,
-.rlb-run__actions .rlb-run__recovery:focus-visible {
-    color: #3f596b;
-    background: rgba(167, 182, 194, 0.24);
-}
-
-.rlb-run--paused .rlb-run__meta,
 .rlb-run__state {
     color: #5c7080;
     opacity: 0.75;
 }
 
-.rlb-run--recovery .rlb-run__meta {
-    color: #8a4b08;
-    opacity: 1;
-}
-
-.bp3-dark .rlb-run--recovery .rlb-run__meta {
-    color: #f29d49;
-}
 
 .rlb-run__actions .bp3-icon-trash {
     color: #5c7080;
@@ -7265,76 +5859,9 @@ var renderRecentRow = (row, now, options) => {
   node.append(body, actions);
   return node;
 };
-var renderPausedRow = (row, now, options) => {
-  const item = row.item;
-  const node = el("div", "rlb-run rlb-run--paused");
-  node.dataset.sessionState = "paused";
-  node.dataset.taskUid = item.taskUid;
-  const body = el("div", "rlb-run__body");
-  const meta = el("div", "rlb-run__meta");
-  const pausedAt = formatStarted(new Date(item.pausedAtMs), now);
-  const pausedDetails = pausedAt.valid ? `Paused since ${pausedAt.raw}` : "Paused Task";
-  const pausedNode = el(
-    "time",
-    "rlb-run__meta-line rlb-run__started",
-    pausedAt.valid ? `${pausedAt.dateLabel} ${pausedAt.timeLabel}` : pausedDetails
-  );
-  pausedNode.title = pausedDetails;
-  pausedNode.setAttribute("aria-label", pausedDetails);
-  if (pausedAt.datetime)
-    pausedNode.dateTime = pausedAt.datetime;
-  meta.appendChild(pausedNode);
-  body.append(renderTitle(row, options.onOpenTask), meta);
-  const actions = el("div", "rlb-run__actions");
-  const resume = button(
-    "bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__resume",
-    "",
-    (event) => {
-      event.stopPropagation();
-      void options.onResume?.(item, event);
-    },
-    { title: "Resume" }
-  );
-  resume.dataset.action = "resume";
-  actions.appendChild(resume);
-  node.append(body, actions);
-  return node;
-};
-var renderRecoveryRow = (row, options) => {
-  const item = row.item;
-  const node = el("div", "rlb-run rlb-run--recovery");
-  node.dataset.sessionState = "recovery";
-  node.dataset.recoveryState = item.recoveryState || "conflict";
-  node.dataset.taskUid = item.taskUid;
-  const body = el("div", "rlb-run__body");
-  const meta = el("div", "rlb-run__meta");
-  const reason = item.recoveryIssue === "missing-clockUid" ? "Exact Session association is missing." : "Exact Session association needs review.";
-  meta.append(
-    el("div", "rlb-run__meta-line rlb-run__meta-primary", "Recovery required"),
-    el("div", "rlb-run__meta-line rlb-run__started", reason)
-  );
-  body.append(renderTitle(row, options.onOpenTask), meta);
-  const actions = el("div", "rlb-run__actions");
-  const retry = button(
-    "bp3-button bp3-small bp3-minimal bp3-icon-refresh rlb-run__recovery",
-    "",
-    (event) => {
-      event.stopPropagation();
-      void options.onRecovery?.(item, event);
-    },
-    { title: "Retry Recovery" }
-  );
-  retry.dataset.action = "recovery";
-  actions.appendChild(retry);
-  node.append(body, actions);
-  return node;
-};
 function buildSessionSurfaceModel({
   entries = [],
   recentItems = [],
-  pausedItems = [],
-  pendingItems = [],
-  recoveryState = null,
   now,
   staleHours: staleHours2 = 8
 }) {
@@ -7353,36 +5880,15 @@ function buildSessionSurfaceModel({
     title: entry.title,
     entry
   }));
-  const pausedRows = pausedItems.map((item) => ({
-    kind: "paused",
-    key: `paused:${item.taskUid}`,
-    taskUid: item.taskUid,
-    title: item.title,
-    item
-  }));
-  const recoveryRows = pendingItems.filter((item) => item?.recoveryState === "conflict").map((item) => ({
-    kind: "recovery",
-    key: `recovery:${item.taskUid}`,
-    taskUid: item.taskUid,
-    title: item.title,
-    item
-  }));
   return {
     now: currentNow,
     entries: entries.slice(),
-    pausedItems: pausedItems.slice(),
-    pendingItems: pendingItems.slice(),
-    recoveryState: recoveryState ? { ...recoveryState } : null,
-    rows: [...runningRows, ...recentRows, ...pausedRows, ...recoveryRows],
+    rows: [...runningRows, ...recentRows],
     focusedRows: runningRows,
     recentRows,
-    pausedRows,
-    recoveryRows,
     focusedCount: runningRows.length,
     activeCount: runningRows.length + recentRows.length,
     runningCount: runningRows.length,
-    pausedCount: pausedItems.length,
-    recoveryCount: recoveryRows.length,
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
@@ -7448,33 +5954,19 @@ function renderSessionSurface(root, model, options = {}) {
       (row) => renderRecentRow(row, model.now, options),
       "rlb-surface__section--recent"
     );
-    appendSection(
-      sessionList,
-      "PAUSED",
-      model.pausedRows,
-      (row) => renderPausedRow(row, model.now, options),
-      "rlb-surface__section--paused"
-    );
-    appendSection(
-      sessionList,
-      "RECOVERY",
-      model.recoveryRows,
-      (row) => renderRecoveryRow(row, options),
-      "rlb-surface__section--recovery"
-    );
   }
-  for (const notice4 of options.notices || []) {
-    const message = typeof notice4 === "string" ? notice4 : notice4?.message;
+  for (const notice3 of options.notices || []) {
+    const message = typeof notice3 === "string" ? notice3 : notice3?.message;
     if (!message)
       continue;
-    const role = notice4?.role === "alert" ? "alert" : "status";
+    const role = notice3?.role === "alert" ? "alert" : "status";
     const node = el("div", "rlb-popover__notice bp3-text-small", message);
     node.setAttribute("role", role);
     node.setAttribute("aria-live", role === "alert" ? "assertive" : "polite");
     node.setAttribute("aria-atomic", "true");
     root.appendChild(node);
   }
-  const singleRunning = model.runningCount === 1 && model.pausedCount === 0;
+  const singleRunning = model.runningCount === 1;
   const footerModifiers = [
     model.rows.length === 0 ? "rlb-popover__footer--empty" : "",
     singleRunning ? "rlb-popover__footer--single-running" : ""
@@ -7485,50 +5977,18 @@ function renderSessionSurface(root, model, options = {}) {
       title: "Open Roam Logbook Dashboard"
     })
   );
-  if (model.recoveryState) {
-    const recovery = button(
-      "bp3-button bp3-small",
-      "Retry Pause Batch cleanup",
-      () => options.onRetryRecovery?.(),
-      {
-        title: "Commit the saved Pause Batch cleanup without resuming paused Tasks"
-      }
+  if (model.runningCount > 1) {
+    const confirming = Boolean(options.clockOutAllConfirm);
+    footer.appendChild(
+      button(
+        `bp3-button bp3-small${confirming ? " bp3-intent-danger" : ""}`,
+        confirming ? "Confirm Clock Out All" : "Clock Out All",
+        () => options.onClockOutAll?.(),
+        {
+          title: confirming ? "Confirm permanent Clock Out All" : "Close all running Sessions"
+        }
+      )
     );
-    recovery.dataset.action = "retry-pause-batch";
-    footer.appendChild(recovery);
-  }
-  if (model.runningCount > 0 || model.pausedCount > 0 || model.recoveryState) {
-    if (model.runningCount > 0) {
-      footer.appendChild(
-        button("bp3-button bp3-small", singleRunning ? "Pause" : "Pause All", () => options.onPauseAll?.(), {
-          title: singleRunning ? "Pause the running Session" : "Pause all running Sessions"
-        })
-      );
-    }
-    if (model.pausedCount > 0) {
-      const resumeLabel = model.pausedCount === 1 ? "Resume" : "Resume All";
-      const resumeTitle = model.pausedCount === 1 ? "Resume the paused Task" : "Resume all paused Tasks";
-      const resumeAll2 = button("bp3-button bp3-small", resumeLabel, () => options.onResumeAll?.(), {
-        title: resumeTitle
-      });
-      resumeAll2.dataset.action = "resume-all";
-      footer.appendChild(
-        resumeAll2
-      );
-    }
-    if (model.runningCount > 1 || model.pausedCount > 0) {
-      const confirming = Boolean(options.clockOutAllConfirm);
-      footer.appendChild(
-        button(
-          `bp3-button bp3-small${confirming ? " bp3-intent-danger" : ""}`,
-          confirming ? "Confirm Clock Out All" : "Clock Out All",
-          () => options.onClockOutAll?.(),
-          {
-            title: confirming ? "Confirm permanent Clock Out All" : "Permanently close all running Sessions and clear the Pause Batch"
-          }
-        )
-      );
-    }
   }
   if (options.onRefresh) {
     const refreshState = options.refreshState || {};
@@ -7600,7 +6060,6 @@ var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
 var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
 var activeCount = (count) => `${count} Active`;
-var taskCount = (count) => `${count} Task${count === 1 ? "" : "s"}`;
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   if (normalized2 >= 7)
@@ -7680,7 +6139,6 @@ function createTopbar({
   let observedTopbar = null;
   let ticker = null;
   let unsubscribe = null;
-  let unsubscribePaused = null;
   let destroyed = false;
   let discardConfirmUid = null;
   let discardConfirmTimer = null;
@@ -7792,22 +6250,15 @@ function createTopbar({
     popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
   };
   const sessionModel = () => {
-    const pausedItems = getPaused();
-    const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
-    const recoveryTaskUids = new Set(recoveryItems.map((item) => item.taskUid));
-    const visiblePausedItems = pausedItems.filter((item) => !recoveryTaskUids.has(item.taskUid));
-    const activeWork = getActiveWork(nowDate(), { pausedItems, recoveryItems });
+    const activeWork = getActiveWork(nowDate());
     return buildSessionSurfaceModel({
       entries: activeWork.focused ? [activeWork.focused] : [],
       recentItems: activeWork.recent,
-      pausedItems: visiblePausedItems,
-      pendingItems: recoveryItems,
-      recoveryState: getRecoveryState(),
       now: nowDate(),
       staleHours: staleHours()
     });
   };
-  const surfaceNotices = () => actionNotice ? [{ message: actionNotice, role: "alert" }] : [getNotice(), getNotice2()].filter(Boolean).map((message) => ({ message, role: "status" }));
+  const surfaceNotices = () => actionNotice ? [{ message: actionNotice, role: "alert" }] : [getNotice()].filter(Boolean).map((message) => ({ message, role: "status" }));
   const renderSurfaces = () => {
     if (popover)
       renderPopover();
@@ -7967,9 +6418,6 @@ function createTopbar({
       },
       onFocusRecent: (entry) => void run(() => clockIn(entry.taskUid, { source: "active-work-switch" })),
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
-      onResume: (item) => void run(() => resumeOne(item.taskUid)),
-      onRecovery: () => void run(() => resumeAll()),
-      onRetryRecovery: () => void run(() => retryFinalizing()),
       onDiscard: (entry) => {
         if (discardConfirmUid !== entry.clockUid) {
           discardConfirmUid = entry.clockUid;
@@ -7989,8 +6437,6 @@ function createTopbar({
         closePopover({ restoreFocus: false });
         onOpenDashboard?.(buttonNode);
       },
-      onPauseAll: () => void run(() => pauseAll()),
-      onResumeAll: () => void run(() => resumeAll()),
       onClockOutAll: () => {
         if (!confirmation?.arm("clock-out-all", scope)) {
           renderSurfaces();
@@ -8060,8 +6506,6 @@ function createTopbar({
       return;
     if (mode === "idle")
       buttonNode.replaceChildren(iconNode);
-    else if (mode === "paused")
-      buttonNode.replaceChildren(iconNode);
     else if (mode === "active")
       buttonNode.replaceChildren(iconNode, parallelNode);
     else if (mode === "parallel")
@@ -8073,11 +6517,7 @@ function createTopbar({
   const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true } = {}) => {
     if (!buttonNode)
       return;
-    const pausedItems = getPaused();
-    const recoveryItems = getPendingResume().filter((item) => item?.recoveryState === "conflict");
-    const finalizingRecovery = getRecoveryState();
-    const recoveryCount = recoveryItems.length + (finalizingRecovery ? 1 : 0);
-    const derived = getActiveWork(now, { pausedItems, recoveryItems });
+    const derived = getActiveWork(now);
     const focused = derived.focused || entries[0] || null;
     const activeWork = focused === derived.focused ? derived : focused ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some((item) => item.taskUid === focused.taskUid) ? 0 : 1) } : derived;
     const focusedEntries = focused ? [focused] : [];
@@ -8097,18 +6537,13 @@ function createTopbar({
       buttonNode.classList.toggle("rlb-topbar__button--icon-only", !hasActiveWork);
       buttonNode.classList.toggle("rlb-topbar__button--active", hasActiveWork);
       buttonNode.classList.remove("rlb-topbar__button--parallel");
-      buttonNode.classList.toggle(
-        "rlb-topbar__button--paused",
-        pausedItems.length > 0 || recoveryItems.length > 0 || Boolean(finalizingRecovery)
-      );
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
       timeNode.className = "rlb-topbar__time";
       parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : "";
       separatorNode.textContent = "";
       syncButtonLayout(hasActiveWork ? "active" : "idle");
-      buttonNode.title = pausedItems.length ? `${taskCount(pausedItems.length)} Paused \u2014 click to resume or review.` + (recoveryItems.length > 0 ? `
-${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} require review.` : "") : recoveryCount > 0 ? `${recoveryCount} Recovery item${recoveryCount === 1 ? "" : "s"} require review \u2014 click to retry.` : hasActiveWork ? `${activeCount(activeWork.count)} \u2014 no Session is currently timing. Click for details.` : "Roam Logbook \u2014 no Session running. Click for details.";
+      buttonNode.title = hasActiveWork ? `${activeCount(activeWork.count)} \u2014 no Session is currently timing. Click for details.` : "Roam Logbook \u2014 no Session running. Click for details.";
       buttonNode.setAttribute("aria-label", buttonNode.title);
       if (activeChanged && popover)
         renderPopover();
@@ -8116,7 +6551,6 @@ ${recoveryItems.length} Recovery item${recoveryItems.length === 1 ? "" : "s"} re
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
     buttonNode.classList.remove("rlb-topbar__button--active");
-    buttonNode.classList.remove("rlb-topbar__button--paused");
     const [first] = focusedEntries;
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
@@ -8163,12 +6597,12 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   const stopAttachmentObservers = () => {
     observer?.disconnect();
     observer = null;
+    hostObserver?.disconnect();
+    hostObserver = null;
     recoveryObserver?.disconnect();
     recoveryObserver = null;
     outerRecoveryObserver?.disconnect();
     outerRecoveryObserver = null;
-    hostObserver?.disconnect();
-    hostObserver = null;
     recoveryTarget = null;
     outerRecoveryTarget = null;
     observedTopbar = null;
@@ -8374,10 +6808,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
         renderButton();
         renderSurfaces();
       });
-      unsubscribePaused = subscribe2(() => {
-        renderButton();
-        renderSurfaces();
-      });
       attach2();
     },
     refresh: attach2,
@@ -8393,8 +6823,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       refreshInFlight = null;
       unsubscribe?.();
       unsubscribe = null;
-      unsubscribePaused?.();
-      unsubscribePaused = null;
       stopTicker();
       stopAttachmentObservers();
       attachQueued = false;
@@ -8456,7 +6884,7 @@ var ancestorsOf = (seed, parentOf) => {
   }
   return result;
 };
-function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIssue = null } = {}) {
+function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {}) {
   let watchCleanupReady = retryOrphanedDetachers();
   let disposed = false;
   const watches = /* @__PURE__ */ new Map();
@@ -8508,12 +6936,7 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
           try {
             const result = await clockOutCompletedTask(taskUid, {
               source: "auto-complete",
-              retryClockUids: retry ? [...retry] : null,
-              getPauseTaskUids: () => [
-                ...pauseApi?.getPaused?.() || [],
-                ...pauseApi?.getPendingResume?.() || []
-              ].map((item) => item.taskUid),
-              pruneCompleted: (taskUids) => pauseApi?.pruneCompleted?.(taskUids)
+              retryClockUids: retry ? [...retry] : null
             });
             reportResult(result);
             const remaining = [
@@ -8574,13 +6997,7 @@ function attachCompletionHandling({ pauseApi = null, onResult = null, onWatchIss
       if (!watchCleanupReady)
         return;
     }
-    const pauseTaskUids = [
-      ...pauseApi?.getPaused?.() || [],
-      ...pauseApi?.getPendingResume?.() || []
-    ].map((item) => item.taskUid);
-    const seeds = [
-      ...new Set([...entries.map((entry) => entry.taskUid), ...pauseTaskUids].filter(Boolean))
-    ];
+    const seeds = [...new Set(entries.map((entry) => entry.taskUid).filter(Boolean))];
     let hierarchy;
     try {
       hierarchy = readHierarchy(seeds, { includeSeedStrings: true });
@@ -8871,10 +7288,8 @@ function createController({ extensionAPI: extensionAPI2 }) {
       registerSettings();
       registerCommands();
       load();
-      load2();
       detachPomodoro = attach();
       detachCompletion = attachCompletionHandling({
-        pauseApi: paused_exports,
         onResult: (result) => presentMutationResult(result, notifyUser)
       });
       topbar.mount();
@@ -8897,7 +7312,6 @@ function createController({ extensionAPI: extensionAPI2 }) {
       topbar.unmount();
       dashboard.destroy();
       reset();
-      reset3();
       removeStyles(STYLE_ID);
       for (const label of [CONTEXT_CLOCK_IN, CONTEXT_CLOCK_OUT]) {
         try {

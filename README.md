@@ -45,17 +45,13 @@ is reported as uncertain.
 12:34 · 1 Active
 ```
 
-There is always exactly one real running `CLOCK`: the Focused Task. Switching tasks closes the old interval at the switch instant and opens the new one, so recorded time never overlaps. Active Work is the Focused Task plus distinct tasks whose latest interval ended within the fixed 45-minute return window. Recent tasks are navigation shortcuts only; they do not keep timing. The count keeps Roam's normal neutral color for 1–3 Active, uses yellow for 4–6, and red for 7+; this is only visual load context. When work is paused, the history-clock identity stays visible with a restrained yellow icon on the normal transparent surface and an explicit paused accessible name; there is no extra badge:
+There is always exactly one real running `CLOCK`: the Focused Task. Switching tasks closes the old interval at the switch instant and opens the new one, so recorded time never overlaps. Active Work is the Focused Task plus distinct tasks whose latest interval ended within the fixed 45-minute return window. Recent tasks are navigation shortcuts only; they do not keep timing. The count keeps Roam's normal neutral color for 1–3 Active, uses yellow for 4–6, and red for 7+; this is only visual load context. When no Session is timing, the history-clock identity remains visible while Recent work is still inside the 45-minute Active Work window:
 
 ```
 0:28 · 2 Active
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Focused Task as a compact neutral Linear-style card with a uniform hairline border, while Recent Tasks form a quiet flat list headed **RECENT · N**. Focused elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Recent rows show `<total> total · <relative time>` and retain the exact last-active timestamp in their title and accessible name. Clicking a Recent task switches focus atomically. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Focused row has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard, Pause/Pause All, Resume All, and Clock Out All remain available where applicable. Refresh is one icon-only footer action with an icon-only loading state and hidden live status feedback. Current-work task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue.
-
-**Pause All / Resume All** — Pause All is a durable break, not a frozen timer. It closes every running `CLOCK:` entry at one timestamp and saves one graph-scoped paused batch in extension settings, so paused time never accrues and reloads or crashes do not lose the batch. The current-session surface keeps the same rows and controls visible, marks their status as paused, exposes an icon-only **Resume** action per row, and changes the in-place batch action to **Resume All**. Resume preserves the batch workflow while applying the single-Focused boundary: only the last resumed Task can remain timed, and earlier resumed Tasks are historical/recent rather than concurrent clocks. Historical `CLOCK::` entries remain readable.
-
-Resume starts one fresh shared Pomodoro cycle; it never restores an old per-clock remainder or creates a second running clock. Each successful resume passes through the same Focused clock boundary, so a batch can only leave one real running `CLOCK`; other paused Tasks remain recoverable or become Recent after a switch. Deleted Tasks are removed from the batch, Tasks already running are treated as resumed without duplication, and failed graph writes remain available for retry. **Clock Out All** remains the permanent bulk-finish action and clears any paused batch.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Active count for the popover. The popover is titled **ACTIVE WORK** and presents the Focused Task as a compact neutral Linear-style card with a uniform hairline border, while Recent Tasks form a quiet flat list headed **RECENT · N**. Focused elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Recent rows show `<total> total · <relative time>` and retain the exact last-active timestamp in their title and accessible name. Clicking a Recent title opens its block; its independent `▶ Focus` action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Focused row has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is one icon-only footer action with an icon-only loading state and hidden live status feedback. Current-work task titles are native keyboard-accessible buttons with a restrained Roam-theme link cue.
 
 **DONE completion** — changing a watched Task to `DONE` closes its confirmed
 running Focused CLOCK and the confirmed running CLOCKs of its descendants. A
@@ -68,7 +64,7 @@ ancestors; if Roam's watch API is unavailable, safe refresh/reload recovery
 remains available without speculative graph writes. Manual single-Session Check
 Out keeps its exact one-Session meaning.
 
-**Shared Pomodoro cycle** — when the first Focused Task starts, the extension freezes the configured threshold (45 minutes by default) and starts one cycle from that action instant. Seamless task switches keep the same cycle; Pause, Clock Out All, and a confirmed empty state reset it. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. A reload restores a valid persisted cycle or conservatively uses the focused open CLOCK; the old `pomodoroTargets` setting is retained only as deprecated compatibility state and no longer controls the visible timer.
+**Shared Pomodoro cycle** — when the first Focused Task starts, the extension freezes the configured threshold (45 minutes by default) and starts one cycle from that action instant. Seamless task switches keep the same cycle; Clock Out All and a confirmed empty state reset it. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. A reload restores a valid persisted cycle or conservatively uses the focused open CLOCK.
 
 **Dashboard** — `Logbook: Open dashboard`, or the button in the popover. It is one chart-free, list-first view: exactly four compact metrics (Today with active-Session context, the current-range total, Sessions, and Tasks tracked), followed by Running when present and the By Task tree. There is no Analytics/chart view, By Day chart, category view, or secondary Dashboard mode. The Sessions and Tasks tracked metrics show the active date-range name directly (`Last 7 days`, `Last 30 days`, or `All time`). The range total needs no repeated helper text because its label already names the range. The header contains only the date-range selector, Refresh, and Close controls. Only task-title Shift+Click uses Roam's native right-sidebar block-window API; topbar Shift+Click is inert, while ordinary task clicks retain main-window navigation. The overlay is fixed to the viewport, locks background document scroll while open, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
 
@@ -132,14 +128,10 @@ Clocking in another Task always closes the current Focused `CLOCK` at the same a
 
 ### Compatibility and data health
 
-Pause Batch state is stored as version 2 `{ version, data }`; the shared
-Pomodoro cycle is stored as version 1 `{ version, data: { startedAt,
+The shared Pomodoro cycle is stored as version 1 `{ version, data: { startedAt,
 thresholdMinutes } }` (or `data: null` when no cycle is active). The old
 per-clock Pomodoro targets use version 1 `{ version, data }` and remain only
-as deprecated compatibility state. The extension migrates the legacy Pause
-Batch shape and a clean flat Pomodoro map in place; old pause remainder and
-suppression fields are removed from the settings record without changing a
-CLOCK. A mixed legacy Pomodoro map is backed up as raw and is not overwritten
+as deprecated compatibility state. A mixed legacy Pomodoro map is backed up as raw and is not overwritten
 until its invalid entries are reviewed.
 Unknown or corrupt composite state is kept untouched, copied once into the
 versioned internal `stateBackups` setting, and reported without destructive

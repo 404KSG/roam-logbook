@@ -40,7 +40,7 @@ export function subscribe(listener) {
     return () => listeners.delete(listener);
 }
 
-/** Observe confirmed clock actions without coupling graph state to Pause Batch. */
+/** Observe confirmed clock actions without coupling graph state to the UI. */
 export function subscribeActions(listener) {
     actionListeners.add(listener);
     return () => actionListeners.delete(listener);
@@ -66,8 +66,8 @@ export function getEntriesSnapshot() {
 }
 
 /** Derive the one Focused item plus the recent return set without a graph read. */
-export function getActiveWork(now = new Date(), options = {}) {
-    return buildActiveWork(entriesSnapshot, { now, ...options });
+export function getActiveWork(now = new Date()) {
+    return buildActiveWork(entriesSnapshot, { now });
 }
 
 export function getLastRefreshStatus() {
@@ -108,31 +108,6 @@ const uncertainCloseResult = (error, entries = running, { preflight = false } = 
         retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
         error,
         preflight,
-    };
-};
-
-const uncertainPauseResult = error => {
-    const pendingClockUids = running.map(entry => entry.clockUid);
-    return {
-        action: 'pause-sessions',
-        ok: false,
-        item: 'Session',
-        completedVerb: 'paused',
-        entries: running,
-        records: [],
-        results: [],
-        closed: 0,
-        count: 0,
-        completed: 0,
-        failed: pendingClockUids.length,
-        pending: pendingClockUids.length,
-        pendingClockUids,
-        pendingTaskUids: running.map(entry => entry.taskUid),
-        uncertain: true,
-        partial: false,
-        retry: { action: 'pause', retryClockUids: pendingClockUids, retryTaskUids: running.map(entry => entry.taskUid) },
-        error,
-        preflight: true,
     };
 };
 
@@ -275,8 +250,8 @@ async function closeEntry(entry, end) {
 /**
  * Close a confirmed set of entries inside an already-queued mutation.
  *
- * Failed writes are returned per entry so Pause/Clock Out All can preserve the
- * exact retry set. A read failure before this function is called is still thrown
+ * Failed writes are returned per entry so Clock Out All can preserve the exact
+ * retry set. A read failure before this function is called is still thrown
  * by the public action and therefore produces zero writes.
  */
 async function closeEntriesNow(entries, clockUids, now, { publish = true } = {}) {
@@ -567,49 +542,6 @@ export async function clockOutEntries(
     });
 }
 
-/**
- * Prepare and close the current running entries as one queued graph action.
- *
- * The preparation callback may persist extension state, but it cannot write the
- * graph. This lets Pause All save its recovery record before the first CLOCK
- * closes without allowing another local graph mutation to interleave.
- */
-export async function pauseEntries({ now = new Date(), prepare, source = 'pause' } = {}) {
-    return enqueueMutation(async () => {
-        try {
-            return await withGraphGuard(async () => {
-                const allEntries = readAllEntries();
-                const entries = allEntries.filter(entry => entry.running);
-                if (entries.length === 0) refresh({ entries: allEntries, notify: false });
-                const records = prepare ? await prepare(entries.map(entry => ({ ...entry }))) : [];
-                const outcome = await closeEntriesNow(
-                    entries,
-                    records.map(record => record.clockUid),
-                    now,
-                    { publish: false }
-                );
-                const result = { entries, records, ...outcome };
-                if (!outcome.uncertain) {
-                    for (const closed of outcome.results.filter(item => item.closed)) {
-                        const entry = entries.find(item => item.clockUid === closed.clockUid);
-                        publishAction({
-                            type: 'clock-out',
-                            source,
-                            clockUid: closed.clockUid,
-                            taskUid: entry?.taskUid,
-                        });
-                    }
-                }
-                notify();
-                return result;
-            });
-        } catch (error) {
-            notice = GRAPH_UNCERTAIN;
-            return uncertainPauseResult(error);
-        }
-    });
-}
-
 /** Close all currently running clocks and return a structured batch result. */
 export async function clockOutAll({ now = new Date(), source = 'user' } = {}) {
     let outcome;
@@ -685,16 +617,14 @@ export async function clockOutBlock(blockUid, { now = new Date(), source = 'user
 /**
  * Automatically close a completed Task's own and confirmed descendant Sessions.
  *
- * The caller may provide Pause Batch hooks, but the graph scope is always
- * confirmed here from a fresh hierarchy read while inside the mutation queue.
+ * The graph scope is always confirmed here from a fresh hierarchy read while
+ * inside the mutation queue.
  */
 export async function clockOutCompletedTask(
     taskUid,
     {
         now = new Date(),
         source = 'auto-complete',
-        getPauseTaskUids = null,
-        pruneCompleted = null,
         retryClockUids = null,
     } = {}
 ) {
@@ -703,17 +633,7 @@ export async function clockOutCompletedTask(
             return await withGraphGuard(async () => {
                 const entries = readAllEntries();
                 const runningEntries = entries.filter(entry => entry.running);
-                const pauseTaskUids = getPauseTaskUids ? getPauseTaskUids() : [];
-                if (!Array.isArray(pauseTaskUids)) {
-                    throw new GraphReadError('Paused Task scope could not be confirmed');
-                }
-                const taskUids = [
-                    ...new Set([
-                        taskUid,
-                        ...runningEntries.map(entry => entry.taskUid),
-                        ...pauseTaskUids,
-                    ].filter(Boolean)),
-                ];
+                const taskUids = [...new Set([taskUid, ...runningEntries.map(entry => entry.taskUid)].filter(Boolean))];
                 const hierarchy = readHierarchy(taskUids);
                 const relevantHierarchyIssues = hierarchy.issues.filter(issue =>
                     hierarchyIssueAffectsTask(issue, taskUid, hierarchy.parentOf)
@@ -757,13 +677,7 @@ export async function clockOutCompletedTask(
                         entry.running &&
                         isTaskInConfirmedTree(entry.taskUid, taskUid, hierarchy.parentOf)
                 );
-                const affectedTaskUids = [
-                    taskUid,
-                    ...targetEntries.map(entry => entry.taskUid),
-                    ...pauseTaskUids.filter(candidate =>
-                        isTaskInConfirmedTree(candidate, taskUid, hierarchy.parentOf)
-                    ),
-                ];
+                const affectedTaskUids = [taskUid, ...targetEntries.map(entry => entry.taskUid)];
                 const targetClockUids =
                     retryClockUids === null
                         ? targetEntries.map(entry => entry.clockUid)
@@ -785,31 +699,6 @@ export async function clockOutCompletedTask(
                         taskUid: entry?.taskUid,
                     });
                 }
-                const pauseResult = outcome.ok && pruneCompleted
-                    ? pruneCompleted([...new Set(affectedTaskUids)])
-                    : null;
-                if (pauseResult && pauseResult.ok === false) {
-                    const result = {
-                        ...outcome,
-                        action: 'auto-clock-out',
-                        source,
-                        triggerUid: taskUid,
-                        taskUids: [...new Set(affectedTaskUids)],
-                        pause: pauseResult,
-                        ok: false,
-                        uncertain: true,
-                        partial: Boolean(outcome.partial || outcome.closed > 0),
-                        retry: {
-                            ...(outcome.retry || { action: 'auto-clock-out' }),
-                            action: 'auto-clock-out',
-                            taskUid,
-                            retryClockUids: outcome.pendingClockUids,
-                        },
-                        error: pauseResult.error,
-                    };
-                    notify();
-                    return result;
-                }
                 notify();
                 const retry = outcome.retry
                     ? {
@@ -825,7 +714,6 @@ export async function clockOutCompletedTask(
                     source,
                     triggerUid: taskUid,
                     taskUids: [...new Set(affectedTaskUids)],
-                    pause: pauseResult,
                     retry,
                 };
             });

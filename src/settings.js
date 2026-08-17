@@ -16,8 +16,6 @@ export const SETTING_POMODORO_MINUTES = 'pomodoroMinutes';
 export const SETTING_POMODORO_STATE = 'pomodoroTargets';
 /** Internal shared Pomodoro cycle: one threshold for the active work cycle. */
 export const SETTING_POMODORO_CYCLE = 'pomodoroCycle';
-/** Internal, graph-scoped state for work deliberately paused as one batch. */
-export const SETTING_PAUSED_BATCH = 'pausedBatch';
 /** Internal, recoverable backups for unsupported or corrupt composite state. */
 export const SETTING_STATE_BACKUPS = 'stateBackups';
 

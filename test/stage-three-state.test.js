@@ -2,9 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const pomodoro = await import('../src/pomodoro.js');
-const paused = await import('../src/paused.js');
 const {
-    SETTING_PAUSED_BATCH,
     SETTING_POMODORO_STATE,
     SETTING_STATE_BACKUPS,
     setExtensionAPI,
@@ -18,7 +16,6 @@ const useSettings = seed => {
 
 test.beforeEach(() => {
     pomodoro.reset();
-    paused.reset();
 });
 
 test.after(() => setExtensionAPI(null));
@@ -36,17 +33,6 @@ test('unknown or corrupt Pomodoro state is backed up once and its source is neve
     pomodoro.load();
     assert.equal(pomodoro.getNotice(), '', 'the same state is not reported on every reload');
     assert.equal(store.get(SETTING_POMODORO_STATE), JSON.stringify({ version: 99, data: { c1: 30 } }));
-});
-
-test('invalid current Pause Batch state remains recoverable and is not silently reset', () => {
-    const raw = JSON.stringify({ version: 2, data: { items: [{ taskUid: 123 }], pendingResume: [] } });
-    const store = useSettings({ [SETTING_PAUSED_BATCH]: raw });
-    paused.load();
-
-    assert.deepEqual(paused.getPaused(), []);
-    assert.match(paused.getNotice(), /unsupported or invalid version and was kept/);
-    assert.equal(store.get(SETTING_PAUSED_BATCH), raw);
-    assert.equal(JSON.parse(JSON.parse(store.get(SETTING_STATE_BACKUPS)).data[SETTING_PAUSED_BATCH].raw).version, 2);
 });
 
 test('mixed legacy Pomodoro state is backed up as raw before valid entries are retained', () => {

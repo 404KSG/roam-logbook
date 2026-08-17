@@ -73,9 +73,6 @@ export const STYLES = `
     background: rgba(167, 182, 194, 0.24) !important;
 }
 
-.rlb-topbar__button--paused {
-    background: transparent !important;
-}
 
 .rlb-topbar__button--active {
     column-gap: 6px;
@@ -85,18 +82,6 @@ export const STYLES = `
     flex: 0 0 auto;
 }
 
-.rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: var(--rlb-topbar-load-yellow) !important;
-}
-
-.rlb-topbar__button--paused:hover,
-.rlb-topbar__button--paused:focus-visible {
-    background: rgba(167, 182, 194, 0.24) !important;
-}
-
-.bp3-dark .rlb-topbar__button--paused > .rlb-topbar__icon {
-    color: var(--rlb-topbar-load-yellow) !important;
-}
 
 .bp3-dark .rlb-topbar {
     --rlb-topbar-load-yellow: #e6c35c;
@@ -397,19 +382,6 @@ export const STYLES = `
     background: var(--rlb-surface-hover);
 }
 
-.rlb-surface__section--paused,
-.rlb-surface__section--recovery {
-    margin-top: 6px;
-    padding: 3px;
-    border: 1px solid var(--rlb-surface-border-light);
-    border-radius: 6px;
-    background: var(--rlb-surface-canvas);
-}
-
-.rlb-surface__section--paused .rlb-surface__section-label,
-.rlb-surface__section--recovery .rlb-surface__section-label {
-    padding: 3px 6px 2px;
-}
 
 .rlb-surface__section-label {
     padding: 7px 6px 3px;
@@ -854,42 +826,11 @@ export const STYLES = `
     color: #c23030;
 }
 
-.rlb-run__actions .rlb-run__resume,
-.rlb-run__actions .rlb-run__recovery {
-    width: 32px;
-    min-width: 32px;
-    max-width: 32px;
-    height: 32px;
-    min-height: 32px;
-    max-height: 32px;
-    padding: 0 !important;
-    justify-content: center;
-    align-items: center;
-    color: #5c7080;
-}
-
-.rlb-run__actions .rlb-run__resume:hover,
-.rlb-run__actions .rlb-run__resume:focus-visible,
-.rlb-run__actions .rlb-run__recovery:hover,
-.rlb-run__actions .rlb-run__recovery:focus-visible {
-    color: #3f596b;
-    background: rgba(167, 182, 194, 0.24);
-}
-
-.rlb-run--paused .rlb-run__meta,
 .rlb-run__state {
     color: #5c7080;
     opacity: 0.75;
 }
 
-.rlb-run--recovery .rlb-run__meta {
-    color: #8a4b08;
-    opacity: 1;
-}
-
-.bp3-dark .rlb-run--recovery .rlb-run__meta {
-    color: #f29d49;
-}
 
 .rlb-run__actions .bp3-icon-trash {
     color: #5c7080;

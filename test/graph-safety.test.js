@@ -126,37 +126,6 @@ test('clock in performs zero graph writes when the current graph state is uncert
     assert.deepEqual(count, { creates: 0, updates: 0, deletes: 0 });
 });
 
-test('resume keeps the Pause Batch when task existence cannot be confirmed', async () => {
-    const paused = await import('../src/paused.js');
-    const clock = await import('../src/clock.js');
-    const { setExtensionAPI } = await import('../src/settings.js');
-    const settingsApi = useSettings();
-    setExtensionAPI(settingsApi);
-    settings.set(
-        'pausedBatch',
-        JSON.stringify({
-            version: 1,
-            items: [{ taskUid: TASK.uid, title: 'safety task', pausedAtMs: 1 }],
-        })
-    );
-    paused.load();
-    clock.reset();
-    graph.api.data.q = () => {
-        throw new Error('graph is temporarily unavailable');
-    };
-
-    const result = await paused.resumeAll({ now: new Date('2026-08-15T09:00:00') });
-
-    assert.equal(result.resumed, 0);
-    assert.equal(result.failed, 1);
-    assert.equal(paused.getPaused().length, 1);
-    assert.match(paused.getNotice(), /could not be confirmed|could not be resumed/i);
-    assert.deepEqual(
-        JSON.parse(settings.get('pausedBatch')).data.items.map(item => item.taskUid),
-        [TASK.uid]
-    );
-});
-
 test('an empty graph remains a valid empty state', async () => {
     const clock = await import('../src/clock.js');
     const { setExtensionAPI } = await import('../src/settings.js');
