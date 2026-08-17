@@ -157,6 +157,13 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-popover__footer--single-running \.rlb-surface__refresh-cell\s*\{[^}]*grid-column: 3[^}]*grid-row: 1[^}]*width: 40px/s);
     assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
     assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
+    const focusedSectionRule = css.match(/\.rlb-surface__section--focused\s*{([^}]*)}/)?.[1] ?? '';
+    assert.match(focusedSectionRule, /border:\s*1px solid var\(--rlb-surface-border\)/);
+    assert.match(focusedSectionRule, /border-radius:\s*6px/);
+    assert.doesNotMatch(focusedSectionRule, /border-left/);
+    assert.doesNotMatch(css, /\.rlb-surface__section--focused\.rlb-surface__section--overrun\s*{/);
+    assert.match(css, /\.rlb-surface__section--focused \.rlb-run--overrun \.rlb-run__elapsed\s*{[^}]*color:\s*#cd4246/s);
+    assert.doesNotMatch(css, /\.rlb-run--overrun \.rlb-run__meta\s*{/);
 });
 
 test('clock commands leave shortcut selection to Roam Hotkeys', () => {
