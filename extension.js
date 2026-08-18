@@ -461,6 +461,7 @@ async function openBlock(uid) {
   }
 }
 var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
+var sidebarOperationQueues = /* @__PURE__ */ new WeakMap();
 var blockSidebarWindow = (uid, order) => {
   const sidebarWindow = { type: "block", "block-uid": uid };
   if (Number.isFinite(order))
@@ -473,6 +474,36 @@ var sidebarFailure = (reason, message, error) => ({
   message,
   ...error ? { error } : {}
 });
+var runSidebarOperation = (sidebar, operation) => {
+  const previous = sidebarOperationQueues.get(sidebar) || Promise.resolve();
+  const current = previous.catch(() => void 0).then(operation);
+  sidebarOperationQueues.set(sidebar, current);
+  return current.finally(() => {
+    if (sidebarOperationQueues.get(sidebar) === current) {
+      sidebarOperationQueues.delete(sidebar);
+    }
+  });
+};
+var revealExistingBlockWindow = async (sidebar, uid, { isCurrent = () => true, requireOrder = false, unavailableMessage } = {}) => {
+  let reordered = false;
+  if (typeof sidebar.setWindowOrder === "function") {
+    await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+    if (!isCurrent())
+      return { ok: false, skipped: true, reason: "superseded" };
+    reordered = true;
+  } else if (requireOrder) {
+    return sidebarFailure(
+      "order-unavailable",
+      unavailableMessage || "Roam could not move the sidebar block window to the top."
+    );
+  }
+  if (typeof sidebar.expandWindow === "function") {
+    await sidebar.expandWindow({ window: blockSidebarWindow(uid) });
+    if (!isCurrent())
+      return { ok: false, skipped: true, reason: "superseded" };
+  }
+  return { ok: true, reordered };
+};
 async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
   if (typeof uid !== "string" || uid.length === 0) {
     return sidebarFailure("missing-uid", "This Timing Line has no block UID.");
@@ -484,55 +515,51 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
       "Roam right-sidebar block windows are unavailable."
     );
   }
-  const target = blockSidebarWindow(uid);
   try {
-    await sidebar.open?.();
-    if (!isCurrent())
-      return { ok: false, skipped: true, reason: "superseded" };
-    if (typeof sidebar.getWindows === "function") {
-      const windows = await sidebar.getWindows();
+    return await runSidebarOperation(sidebar, async () => {
+      await sidebar.open?.();
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
-      const existing = Array.isArray(windows) ? windows.find(
-        (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
-      ) : null;
-      if (existing) {
-        if (typeof sidebar.setWindowOrder !== "function") {
-          return sidebarFailure(
-            "order-unavailable",
-            "Roam could not move the Timing Line sidebar window to the top."
-          );
-        }
-        await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+      if (typeof sidebar.getWindows === "function") {
+        const windows = await sidebar.getWindows();
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
-        if (typeof sidebar.expandWindow === "function") {
-          await sidebar.expandWindow({ window: target });
+        const existing = Array.isArray(windows) ? windows.find(
+          (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
+        ) : null;
+        if (existing) {
+          const visibility = await revealExistingBlockWindow(sidebar, uid, {
+            isCurrent,
+            requireOrder: true,
+            unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
+          });
+          if (visibility.ok === false)
+            return visibility;
+          return { ok: true, deduped: true, reordered: visibility.reordered };
         }
-        return { ok: true, deduped: true, reordered: true };
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        return { ok: true, added: true };
       }
+      let requested = requestedSidebarBlocks.get(sidebar);
+      if (!requested) {
+        requested = /* @__PURE__ */ new Set();
+        requestedSidebarBlocks.set(sidebar, requested);
+      }
+      if (requested.has(uid))
+        return { ok: true, deduped: true };
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
-      await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+      try {
+        await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        requested.add(uid);
+      } catch (error) {
+        requested.delete(uid);
+        throw error;
+      }
       return { ok: true, added: true };
-    }
-    let requested = requestedSidebarBlocks.get(sidebar);
-    if (!requested) {
-      requested = /* @__PURE__ */ new Set();
-      requestedSidebarBlocks.set(sidebar, requested);
-    }
-    if (requested.has(uid))
-      return { ok: true, deduped: true };
-    if (!isCurrent())
-      return { ok: false, skipped: true, reason: "superseded" };
-    try {
-      await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
-      requested.add(uid);
-    } catch (error) {
-      requested.delete(uid);
-      throw error;
-    }
-    return { ok: true, added: true };
+    });
   } catch (error) {
     console.debug("[roam-logbook] could not front Timing Line in right sidebar", uid, error);
     return sidebarFailure(
@@ -555,36 +582,46 @@ async function openBlockInRightSidebar(uid) {
     };
   }
   try {
-    await sidebar.open?.();
-    if (typeof sidebar.getWindows === "function") {
-      const windows = await sidebar.getWindows();
-      if (Array.isArray(windows) && windows.some(
-        (window2) => window2?.type === "block" && window2?.["block-uid"] === uid
-      )) {
-        return { ok: true, deduped: true };
+    return await runSidebarOperation(sidebar, async () => {
+      await sidebar.open?.();
+      if (typeof sidebar.getWindows === "function") {
+        const windows = await sidebar.getWindows();
+        const existing = Array.isArray(windows) ? windows.some(
+          (window2) => window2?.type === "block" && window2?.["block-uid"] === uid
+        ) : false;
+        if (existing) {
+          const visibility = await revealExistingBlockWindow(sidebar, uid);
+          if (visibility.ok === false)
+            return visibility;
+          return {
+            ok: true,
+            deduped: true,
+            ...visibility.reordered ? { reordered: true } : {}
+          };
+        }
+        await sidebar.addWindow({
+          window: { type: "block", "block-uid": uid }
+        });
+        return { ok: true };
       }
-      await sidebar.addWindow({
-        window: { type: "block", "block-uid": uid }
-      });
+      let requested = requestedSidebarBlocks.get(sidebar);
+      if (!requested) {
+        requested = /* @__PURE__ */ new Set();
+        requestedSidebarBlocks.set(sidebar, requested);
+      }
+      if (requested.has(uid))
+        return { ok: true, deduped: true };
+      try {
+        await sidebar.addWindow({
+          window: { type: "block", "block-uid": uid }
+        });
+        requested.add(uid);
+      } catch (error) {
+        requested.delete(uid);
+        throw error;
+      }
       return { ok: true };
-    }
-    let requested = requestedSidebarBlocks.get(sidebar);
-    if (!requested) {
-      requested = /* @__PURE__ */ new Set();
-      requestedSidebarBlocks.set(sidebar, requested);
-    }
-    if (requested.has(uid))
-      return { ok: true, deduped: true };
-    try {
-      await sidebar.addWindow({
-        window: { type: "block", "block-uid": uid }
-      });
-      requested.add(uid);
-    } catch (error) {
-      requested.delete(uid);
-      throw error;
-    }
-    return { ok: true };
+    });
   } catch (error) {
     console.debug("[roam-logbook] could not open task in right sidebar", uid, error);
     return {
@@ -2580,7 +2617,7 @@ function syncActivityView(section, activity, now) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.43";
+var PLUGIN_VERSION = "0.9.0-beta.44";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,

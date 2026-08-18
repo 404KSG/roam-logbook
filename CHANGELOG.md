@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0-beta.44 — 2026-08-18
+
+- Fixed task-title Shift+Click after a Timing Line switch: an existing block
+  window is now re-fronted and expanded when Roam exposes the native APIs,
+  instead of being treated as a visible no-op after deduplication.
+- Shared the existing-window visibility path between Timing Line fronting and
+  task navigation, and serialized native sidebar operations so switching and
+  Shift+Click cannot race into duplicate block windows. Unrelated sidebar
+  windows remain untouched; missing-UID, unavailable-API, and retry behavior
+  remain unchanged.
+
 ## 0.9.0-beta.43 — 2026-08-18
 
 - Reduced the Roam Settings panel to three current controls: Timing Line

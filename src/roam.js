@@ -321,6 +321,7 @@ export async function openBlock(uid) {
 // dedupe here so repeated Shift+Click does not create an unbounded set of the
 // same block windows when an older Roam build does not dedupe addWindow itself.
 const requestedSidebarBlocks = new WeakMap();
+const sidebarOperationQueues = new WeakMap();
 
 const blockSidebarWindow = (uid, order) => {
     const sidebarWindow = { type: 'block', 'block-uid': uid };
@@ -334,6 +335,46 @@ const sidebarFailure = (reason, message, error) => ({
     message,
     ...(error ? { error } : {}),
 });
+
+/** Serialize native sidebar reads/writes shared by Timing Line fronting and
+ * direct task navigation, so a switch cannot race a Shift+Click into a pair
+ * of duplicate addWindow calls. */
+const runSidebarOperation = (sidebar, operation) => {
+    const previous = sidebarOperationQueues.get(sidebar) || Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    sidebarOperationQueues.set(sidebar, current);
+    return current.finally(() => {
+        if (sidebarOperationQueues.get(sidebar) === current) {
+            sidebarOperationQueues.delete(sidebar);
+        }
+    });
+};
+
+/** Make an already-open block window visible without touching other windows. */
+const revealExistingBlockWindow = async (
+    sidebar,
+    uid,
+    { isCurrent = () => true, requireOrder = false, unavailableMessage } = {}
+) => {
+    let reordered = false;
+    if (typeof sidebar.setWindowOrder === 'function') {
+        await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+        reordered = true;
+    } else if (requireOrder) {
+        return sidebarFailure(
+            'order-unavailable',
+            unavailableMessage || 'Roam could not move the sidebar block window to the top.'
+        );
+    }
+
+    if (typeof sidebar.expandWindow === 'function') {
+        await sidebar.expandWindow({ window: blockSidebarWindow(uid) });
+        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+    }
+
+    return { ok: true, reordered };
+};
 
 /**
  * Put a block at order 0 in Roam's native right sidebar without changing focus.
@@ -355,60 +396,57 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
         );
     }
 
-    const target = blockSidebarWindow(uid);
     try {
-        await sidebar.open?.();
-        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-
-        if (typeof sidebar.getWindows === 'function') {
-            const windows = await sidebar.getWindows();
+        return await runSidebarOperation(sidebar, async () => {
+            await sidebar.open?.();
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-            const existing = Array.isArray(windows)
-                ? windows.find(
-                      sidebarWindow =>
-                          sidebarWindow?.type === 'block' &&
-                          sidebarWindow?.['block-uid'] === uid
-                  )
-                : null;
 
-            if (existing) {
-                if (typeof sidebar.setWindowOrder !== 'function') {
-                    return sidebarFailure(
-                        'order-unavailable',
-                        'Roam could not move the Timing Line sidebar window to the top.'
-                    );
-                }
-                await sidebar.setWindowOrder({ window: blockSidebarWindow(uid, 0) });
+            if (typeof sidebar.getWindows === 'function') {
+                const windows = await sidebar.getWindows();
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-                if (typeof sidebar.expandWindow === 'function') {
-                    await sidebar.expandWindow({ window: target });
+                const existing = Array.isArray(windows)
+                    ? windows.find(
+                          sidebarWindow =>
+                              sidebarWindow?.type === 'block' &&
+                              sidebarWindow?.['block-uid'] === uid
+                      )
+                    : null;
+
+                if (existing) {
+                    const visibility = await revealExistingBlockWindow(sidebar, uid, {
+                        isCurrent,
+                        requireOrder: true,
+                        unavailableMessage:
+                            'Roam could not move the Timing Line sidebar window to the top.',
+                    });
+                    if (visibility.ok === false) return visibility;
+                    return { ok: true, deduped: true, reordered: visibility.reordered };
                 }
-                return { ok: true, deduped: true, reordered: true };
+
+                if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+                await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+                return { ok: true, added: true };
             }
 
+            // Older Roam builds have no authoritative window list. Reuse the
+            // existing best-effort dedupe marker and include order 0 on first open.
+            let requested = requestedSidebarBlocks.get(sidebar);
+            if (!requested) {
+                requested = new Set();
+                requestedSidebarBlocks.set(sidebar, requested);
+            }
+            if (requested.has(uid)) return { ok: true, deduped: true };
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-            await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+
+            try {
+                await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+                requested.add(uid);
+            } catch (error) {
+                requested.delete(uid);
+                throw error;
+            }
             return { ok: true, added: true };
-        }
-
-        // Older Roam builds have no authoritative window list. Reuse the
-        // existing best-effort dedupe marker and include order 0 on first open.
-        let requested = requestedSidebarBlocks.get(sidebar);
-        if (!requested) {
-            requested = new Set();
-            requestedSidebarBlocks.set(sidebar, requested);
-        }
-        if (requested.has(uid)) return { ok: true, deduped: true };
-        if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-
-        try {
-            await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
-            requested.add(uid);
-        } catch (error) {
-            requested.delete(uid);
-            throw error;
-        }
-        return { ok: true, added: true };
+        });
     } catch (error) {
         console.debug('[roam-logbook] could not front Timing Line in right sidebar', uid, error);
         return sidebarFailure(
@@ -435,50 +473,58 @@ export async function openBlockInRightSidebar(uid) {
     }
 
     try {
-        await sidebar.open?.();
+        return await runSidebarOperation(sidebar, async () => {
+            await sidebar.open?.();
 
-        // Prefer Roam's own window list whenever the API exposes it. Roam is
-        // authoritative here: a user can close a sidebar window outside this
-        // extension, so an extension-local Set is not allowed to suppress a
-        // later request when the block is no longer genuinely open.
-        if (typeof sidebar.getWindows === 'function') {
-            const windows = await sidebar.getWindows();
-            if (
-                Array.isArray(windows) &&
-                windows.some(
-                    window =>
-                        window?.type === 'block' && window?.['block-uid'] === uid
-                )
-            ) {
-                return { ok: true, deduped: true };
+            // Prefer Roam's own window list whenever the API exposes it. Roam is
+            // authoritative here: a user can close a sidebar window outside this
+            // extension, so an extension-local Set is not allowed to suppress a
+            // later request when the block is no longer genuinely open.
+            if (typeof sidebar.getWindows === 'function') {
+                const windows = await sidebar.getWindows();
+                const existing = Array.isArray(windows)
+                    ? windows.some(
+                          window =>
+                              window?.type === 'block' && window?.['block-uid'] === uid
+                      )
+                    : false;
+                if (existing) {
+                    const visibility = await revealExistingBlockWindow(sidebar, uid);
+                    if (visibility.ok === false) return visibility;
+                    return {
+                        ok: true,
+                        deduped: true,
+                        ...(visibility.reordered ? { reordered: true } : {}),
+                    };
+                }
+
+                await sidebar.addWindow({
+                    window: { type: 'block', 'block-uid': uid },
+                });
+                return { ok: true };
             }
 
-            await sidebar.addWindow({
-                window: { type: 'block', 'block-uid': uid },
-            });
+            // Older Roam builds do not expose getWindows. Keep a best-effort
+            // fallback only for those builds, and clear a pending marker whenever
+            // addWindow rejects so a later attempt can retry safely.
+            let requested = requestedSidebarBlocks.get(sidebar);
+            if (!requested) {
+                requested = new Set();
+                requestedSidebarBlocks.set(sidebar, requested);
+            }
+            if (requested.has(uid)) return { ok: true, deduped: true };
+
+            try {
+                await sidebar.addWindow({
+                    window: { type: 'block', 'block-uid': uid },
+                });
+                requested.add(uid);
+            } catch (error) {
+                requested.delete(uid);
+                throw error;
+            }
             return { ok: true };
-        }
-
-        // Older Roam builds do not expose getWindows. Keep a best-effort
-        // fallback only for those builds, and clear a pending marker whenever
-        // addWindow rejects so a later attempt can retry safely.
-        let requested = requestedSidebarBlocks.get(sidebar);
-        if (!requested) {
-            requested = new Set();
-            requestedSidebarBlocks.set(sidebar, requested);
-        }
-        if (requested.has(uid)) return { ok: true, deduped: true };
-
-        try {
-            await sidebar.addWindow({
-                window: { type: 'block', 'block-uid': uid },
-            });
-            requested.add(uid);
-        } catch (error) {
-            requested.delete(uid);
-            throw error;
-        }
-        return { ok: true };
+        });
     } catch (error) {
         console.debug('[roam-logbook] could not open task in right sidebar', uid, error);
         return {

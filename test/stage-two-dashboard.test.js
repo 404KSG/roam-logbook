@@ -447,6 +447,100 @@ test('native task sidebar seam rejects missing UIDs and dedupes repeated block w
     ]);
 });
 
+test('Shift+Click after a task switch re-fronts an existing block window without touching other windows', async () => {
+    const windows = [
+        { type: 'block', 'block-uid': 'switched-task', order: 0 },
+        { type: 'block', 'block-uid': 'return-task', order: 1 },
+        { type: 'page', 'page-uid': 'unrelated-page', order: 2 },
+    ];
+    const calls = [];
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: () => calls.push({ action: 'open' }),
+        getWindows: async () => windows,
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+    };
+
+    // Timing Line fronting can create the target window before the user's
+    // later Shift+Click. The second request must make that existing window
+    // visible again after switching away and back to the task.
+    assert.deepEqual(await openBlockInRightSidebar('switched-task'), {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(await openBlockInRightSidebar('return-task'), {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(await openBlockInRightSidebar('switched-task'), {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+
+    assert.deepEqual(
+        calls.filter(({ action }) => action !== 'open'),
+        [
+            {
+                action: 'setWindowOrder',
+                spec: { window: { type: 'block', 'block-uid': 'switched-task', order: 0 } },
+            },
+            {
+                action: 'expandWindow',
+                spec: { window: { type: 'block', 'block-uid': 'switched-task' } },
+            },
+            {
+                action: 'setWindowOrder',
+                spec: { window: { type: 'block', 'block-uid': 'return-task', order: 0 } },
+            },
+            {
+                action: 'expandWindow',
+                spec: { window: { type: 'block', 'block-uid': 'return-task' } },
+            },
+            {
+                action: 'setWindowOrder',
+                spec: { window: { type: 'block', 'block-uid': 'switched-task', order: 0 } },
+            },
+            {
+                action: 'expandWindow',
+                spec: { window: { type: 'block', 'block-uid': 'switched-task' } },
+            },
+        ]
+    );
+    assert.deepEqual(
+        windows.filter(window => window.type === 'page'),
+        [{ type: 'page', 'page-uid': 'unrelated-page', order: 2 }]
+    );
+});
+
+test('concurrent sidebar requests serialize native addWindow and keep one block window', async () => {
+    const windows = [];
+    let addCalls = 0;
+    window.roamAlphaAPI.ui.rightSidebar = {
+        open: async () => {},
+        getWindows: async () => windows,
+        addWindow: async ({ window }) => {
+            addCalls += 1;
+            windows.push(window);
+        },
+    };
+
+    const results = await Promise.all([
+        openBlockInRightSidebar('race-task'),
+        openBlockInRightSidebar('race-task'),
+    ]);
+
+    assert.deepEqual(results, [
+        { ok: true },
+        { ok: true, deduped: true },
+    ]);
+    assert.equal(addCalls, 1);
+    assert.deepEqual(windows, [{ type: 'block', 'block-uid': 'race-task' }]);
+});
+
 test('native sidebar window list is authoritative after a user closes a block window', async () => {
     const windows = [];
     const calls = [];
