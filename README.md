@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.41**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.43**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.41 refines the single-page Activity panel while preserving the compact Timing Line and snapshot-only Dashboard reads; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.43 keeps the single-page Activity panel while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -37,7 +37,9 @@ is reported as uncertain.
 
 ## Use
 
-**Clock in** — right-click a TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while a clock is running. Both are also in the Command Palette, acting on the block you are editing.
+**Clock in** — right-click an unfinished TODO bullet → **Plugins** → **Logbook: Clock in**. The same menu offers **Logbook: Clock out** while that Task owns the Timing Line. Clock In is permanently TODO-only at the mutation boundary, so retired settings or alternate UI paths cannot start ordinary or completed blocks.
+
+The Command Palette exposes only three shortcut-ready actions: **Logbook: Focus current block**, **Logbook: Clock out Timing Line**, and **Logbook: Open dashboard**. Focus starts or switches to the unfinished TODO being edited. Clock out Timing Line ends the actual global Timing Line on its first invocation, independent of editor focus.
 
 By default, a successful user Clock In also opens that Timing Line in Roam's
 native right sidebar at order 0. Switching work moves an existing block window
@@ -76,7 +78,7 @@ Out keeps its exact one-Session meaning.
 
 ### Custom hotkeys
 
-Clock in and clock out deliberately have no default key binding. Open **Roam Settings → Hotkeys**, search for `Logbook`, and assign the Command Palette actions to the keys you prefer. The extension does not install a global keyboard listener.
+The three Command Palette actions deliberately have no default key binding. Open **Roam Settings → Hotkeys**, search for `Logbook`, and optionally bind **Focus current block**, **Clock out Timing Line**, and **Open dashboard**. The extension does not install a global keyboard listener.
 
 ### Sub-tasks
 
@@ -120,11 +122,11 @@ Clocking in another Task always closes the current Focused `CLOCK` at the same a
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Show topbar widget | on | The left-navigation history icon, live counter, and running-task list |
-| Keep Timing Line at top of right sidebar | on | A user Clock In opens or moves that block to order 0 without disturbing other sidebar windows |
-| Pomodoro duration (minutes) | 45 | Shared cycle threshold captured when the first Focused Task of a cycle starts; passing it only changes elapsed colour |
-| Only offer clock in on TODO blocks | on | Off lets any block be clocked |
-| Flag unfinished clocks after (hours) | 8 | When a running clock is called out as forgotten |
+| Open Timing Line in right sidebar | on | After Clock In or a task switch, keeps the Timing Line first without disturbing other sidebar windows |
+| Work-cycle duration (minutes) | 45 | Shared cycle threshold; passing it only changes elapsed colour, while seamless task switches keep the cycle |
+| Forgotten timer warning (hours) | 8 | How long a running clock may remain open before it is called out as likely forgotten |
+
+The Top Bar and TODO-only Clock In rule are now core behavior rather than optional settings. Existing stored values for the retired `showTopbarWidget` and `todoBlocksOnly` keys are left untouched for compatibility but have no runtime effect.
 
 ## Notes
 
@@ -172,7 +174,7 @@ check; GitHub Actions additionally runs the real pinned Docker image
 `src/roam.js` is the adapter boundary for `window.roamAlphaAPI`: it validates
 graph reads and exposes graph writes, Pull Watch lifecycle, and native block
 navigation to the other modules. UI and mutation modules do not call Roam's
-global API directly. The beta.24 source is fully implemented, the checked-in
+global API directly. The current beta source is fully implemented, the checked-in
 root `extension.js` has been rebuilt, and `npm run check` plus
 `npm run verify:bundle` passed. The existing esbuild advisory is dev-only build
 maintenance, not a runtime extension dependency exposure, and no dependency

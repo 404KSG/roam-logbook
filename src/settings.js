@@ -30,8 +30,6 @@ const DEFAULTS = {
 };
 
 const DEFAULT_ON_SWITCHES = [
-    SETTING_TOPBAR,
-    SETTING_TODO_ONLY,
     SETTING_TIMING_LINE_SIDEBAR,
 ];
 
@@ -69,7 +67,9 @@ function booleanSetting(key) {
 }
 
 export function showTopbarWidget() {
-    return booleanSetting(SETTING_TOPBAR);
+    // Kept as a compatibility getter for older integrations. The Top Bar is a
+    // core surface now, so the legacy value can never disable it.
+    return true;
 }
 
 export function allowMultipleClocks() {
@@ -77,7 +77,9 @@ export function allowMultipleClocks() {
 }
 
 export function todoBlocksOnly() {
-    return booleanSetting(SETTING_TODO_ONLY);
+    // Clock In is permanently TODO-bound. Keep the old getter inert so an old
+    // stored false value cannot reopen the retired setting's behavior.
+    return true;
 }
 
 export function keepTimingLineAtTopOfRightSidebar() {

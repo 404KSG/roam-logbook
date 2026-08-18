@@ -13,17 +13,24 @@ import {
     SETTING_TOPBAR,
     setExtensionAPI,
     showTopbarWidget,
+    pomodoroMinutes,
     staleHours,
     todoBlocksOnly,
 } from '../src/settings.js';
 
-const withValue = value => {
-    setExtensionAPI({ settings: { get: () => value } });
+const withValues = values => {
+    const store = new Map(Object.entries(values));
+    setExtensionAPI({ settings: { get: key => store.get(key) } });
 };
 
-test('switch getters normalize Roam boolean storage shapes consistently', () => {
+test('legacy topbar and TODO settings are inert while the current switch remains configurable', () => {
     for (const value of [true, 'true', 1, '1']) {
-        withValue(value);
+        withValues({
+            [SETTING_MULTIPLE]: value,
+            [SETTING_TOPBAR]: value,
+            [SETTING_TODO_ONLY]: value,
+            [SETTING_TIMING_LINE_SIDEBAR]: value,
+        });
         assert.equal(allowMultipleClocks(), true);
         assert.equal(showTopbarWidget(), true);
         assert.equal(todoBlocksOnly(), true);
@@ -31,10 +38,15 @@ test('switch getters normalize Roam boolean storage shapes consistently', () => 
     }
 
     for (const value of [false, 'false', 0, '0']) {
-        withValue(value);
+        withValues({
+            [SETTING_MULTIPLE]: value,
+            [SETTING_TOPBAR]: value,
+            [SETTING_TODO_ONLY]: value,
+            [SETTING_TIMING_LINE_SIDEBAR]: value,
+        });
         assert.equal(allowMultipleClocks(), false);
-        assert.equal(showTopbarWidget(), false);
-        assert.equal(todoBlocksOnly(), false);
+        assert.equal(showTopbarWidget(), true);
+        assert.equal(todoBlocksOnly(), true);
         assert.equal(keepTimingLineAtTopOfRightSidebar(), false);
     }
 });
@@ -45,12 +57,13 @@ test('missing switch values use each setting default', () => {
     assert.equal(showTopbarWidget(), true);
     assert.equal(todoBlocksOnly(), true);
     assert.equal(keepTimingLineAtTopOfRightSidebar(), true);
+    assert.equal(pomodoroMinutes(), 45);
 });
 
 test('unfinished-clock hours keep the existing storage key, values, and default', () => {
     assert.equal(SETTING_STALE_HOURS, 'staleHours');
     for (const value of ['2', '4', '8', '12', '24']) {
-        withValue(value);
+        withValues({ [SETTING_STALE_HOURS]: value });
         assert.equal(staleHours(), Number(value));
     }
     setExtensionAPI({ settings: { get: () => undefined } });
@@ -72,11 +85,7 @@ test('default-on switches are persisted only when their keys are missing', () =>
 
     initializeDefaultOnSwitches();
 
-    assert.deepEqual(writes, [
-        [SETTING_TOPBAR, true],
-        [SETTING_TODO_ONLY, true],
-        [SETTING_TIMING_LINE_SIDEBAR, true],
-    ]);
+    assert.deepEqual(writes, [[SETTING_TIMING_LINE_SIDEBAR, true]]);
     assert.equal(values.has(SETTING_MULTIPLE), false);
     assert.equal(values.has(SETTING_STALE_HOURS), false);
     assert.equal(values.has(SETTING_POMODORO_MINUTES), false);

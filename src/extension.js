@@ -23,9 +23,6 @@ import {
     SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
     SETTING_TIMING_LINE_SIDEBAR,
-    SETTING_TODO_ONLY,
-    SETTING_TOPBAR,
-    todoBlocksOnly,
 } from './settings.js';
 import { STYLES, STYLE_ID } from './styles.js';
 import { createTopbar } from './topbar.js';
@@ -38,11 +35,15 @@ const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
 const BRAND_NAME = 'Roam Logbook';
 
 const PALETTE_COMMANDS = [
+    'Logbook: Focus current block',
+    'Logbook: Clock out Timing Line',
+    'Logbook: Open dashboard',
+];
+const RETIRED_PALETTE_COMMANDS = [
+    'Logbook: Check for unfinished clocks',
     'Logbook: Clock in current block',
     'Logbook: Clock out current block',
     'Logbook: Clock out all running clocks',
-    'Logbook: Open dashboard',
-    'Logbook: Check for unfinished clocks',
 ];
 
 function createController({ extensionAPI }) {
@@ -70,7 +71,7 @@ function createController({ extensionAPI }) {
         if (!uid || clock.isBlockRunning(uid)) return false;
         const string = targetString(context);
         if (taskStatus(string) === 'DONE') return false;
-        return todoBlocksOnly() ? isTaskBlock(string) : true;
+        return isTaskBlock(string);
     };
 
     const notifyUser = message => {
@@ -103,6 +104,11 @@ function createController({ extensionAPI }) {
                 notifyUser('No focused block. Select a block before clocking in.');
                 return;
             }
+            const string = targetString({ 'block-uid': uid });
+            if (!isTaskBlock(string) || taskStatus(string) === 'DONE') {
+                notifyUser('Focus is only available on an unfinished TODO block.');
+                return;
+            }
             return clock.clockIn(uid);
         });
 
@@ -111,34 +117,10 @@ function createController({ extensionAPI }) {
             tabTitle: BRAND_NAME,
             settings: [
                 {
-                    id: SETTING_TOPBAR,
-                    name: 'Show topbar widget',
-                    description: 'The shared work-cycle timer and Active Work list in Roam’s left navigation.',
-                    action: {
-                        type: 'switch',
-                        defaultValue: true,
-                        onChange: event => {
-                            extensionAPI.settings.set(SETTING_TOPBAR, normalizeChecked(event));
-                            topbar.refresh();
-                        },
-                    },
-                },
-                {
-                    id: SETTING_TODO_ONLY,
-                    name: 'Only offer clock in on TODO blocks',
-                    description: 'Turn off to clock any block, not just TODO/DONE ones.',
-                    action: {
-                        type: 'switch',
-                        defaultValue: true,
-                        onChange: event =>
-                            extensionAPI.settings.set(SETTING_TODO_ONLY, normalizeChecked(event)),
-                    },
-                },
-                {
                     id: SETTING_TIMING_LINE_SIDEBAR,
-                    name: 'Keep Timing Line at top of right sidebar',
+                    name: 'Open Timing Line in right sidebar',
                     description:
-                        'After a successful Clock In, open or move that block to the top of Roam’s right sidebar.',
+                        'After Clock In or a task switch, keep the Timing Line first in Roam’s right sidebar.',
                     action: {
                         type: 'switch',
                         defaultValue: true,
@@ -151,9 +133,9 @@ function createController({ extensionAPI }) {
                 },
                 {
                     id: SETTING_POMODORO_MINUTES,
-                    name: 'Pomodoro duration (minutes)',
+                    name: 'Work-cycle duration (minutes)',
                     description:
-                        'Sets the shared work-cycle threshold. Passing it turns elapsed time red; seamless Task switches keep the cycle running.',
+                        'Passing the threshold turns elapsed time red; seamless task switches keep the cycle.',
                     action: {
                         type: 'input',
                         placeholder: '45',
@@ -169,7 +151,7 @@ function createController({ extensionAPI }) {
                 },
                 {
                     id: SETTING_STALE_HOURS,
-                    name: 'Flag unfinished clocks after (hours)',
+                    name: 'Forgotten timer warning (hours)',
                     description: 'How long a clock may run before it is called out as forgotten.',
                     action: {
                         type: 'select',
@@ -189,31 +171,20 @@ function createController({ extensionAPI }) {
         const add = (label, callback) =>
             extensionAPI.ui.commandPalette.addCommand({ label, callback });
 
+        // Remove labels from a previously loaded beta before registering the
+        // smaller surface. This also makes manual hot reloads deterministic if
+        // the host skipped the prior controller's unload callback.
+        for (const label of RETIRED_PALETTE_COMMANDS) {
+            try {
+                extensionAPI.ui.commandPalette.removeCommand({ label });
+            } catch {
+                // Not registered in this host session.
+            }
+        }
+
         add(PALETTE_COMMANDS[0], clockInFocused);
-        add(PALETTE_COMMANDS[1], () =>
-            guard(async () => {
-                const uid = getFocusedBlockUid();
-                if (!uid) {
-                    notifyUser('No focused block. Select a block before clocking out.');
-                    return;
-                }
-                return clock.clockOutBlock(uid);
-            })
-        );
-        add(PALETTE_COMMANDS[2], () =>
-            guard(async () => {
-                if (!confirmation.arm('clock-out-all', 'command')) {
-                    notifyUser('Clock Out All is armed. Run again within 5 seconds to confirm.');
-                    return;
-                }
-                return clock.clockOutAll();
-            })
-        );
-        add(PALETTE_COMMANDS[3], () => dashboard.open());
-        add(PALETTE_COMMANDS[4], () => {
-            clock.refresh();
-            dashboard.open();
-        });
+        add(PALETTE_COMMANDS[1], () => guard(() => clock.clockOutAll()));
+        add(PALETTE_COMMANDS[2], () => dashboard.open());
 
         window.roamAlphaAPI.ui.blockContextMenu.addCommand({
             label: CONTEXT_CLOCK_IN,
@@ -278,7 +249,7 @@ function createController({ extensionAPI }) {
             }
             // Palette commands added through extensionAPI are cleaned up by Roam,
             // but removing them keeps a hot reload from leaving duplicates behind.
-            for (const label of PALETTE_COMMANDS) {
+            for (const label of [...PALETTE_COMMANDS, ...RETIRED_PALETTE_COMMANDS]) {
                 try {
                     extensionAPI.ui.commandPalette.removeCommand({ label });
                 } catch {

@@ -8,7 +8,7 @@
 
 import { readAllEntries, readHierarchy } from './entries.js';
 import { buildActiveWork, chooseFocusedEntry } from './active-work.js';
-import { DRAWER_LABEL, formatClockLine, isDrawerBlock, taskStatus } from './org.js';
+import { DRAWER_LABEL, formatClockLine, isDrawerBlock, isTaskBlock, taskStatus } from './org.js';
 import { createBlock, deleteBlock, GraphReadError, getBlockString, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
 import { enqueueMutation, resetMutationQueue } from './mutations.js';
 
@@ -332,6 +332,13 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             // from both deciding that the task is free.
             const entries = readAllEntries();
             const open = entries.filter(entry => entry.running);
+            const taskString = getBlockString(taskUid);
+            if (!isTaskBlock(taskString) || taskStatus(taskString) !== 'TODO') {
+                const error = new Error('Clock In is only available on unfinished TODO blocks.');
+                error.code = 'todo-only';
+                error.taskUid = taskUid;
+                throw error;
+            }
             const doneAncestorUid = doneAncestorFor(taskUid);
             if (doneAncestorUid) {
                 const error = new Error(

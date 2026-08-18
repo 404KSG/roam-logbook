@@ -119,17 +119,18 @@ test.beforeEach(() => {
 test.afterEach(() => extension.onunload());
 test.after(() => uninstallGraph());
 
-test('Clock out current block with no focused block only notifies and performs zero writes', async () => {
+test('Clock out Timing Line ends the running clock even when no editor block is focused', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const before = clock.getRunning()[0].clockUid;
-    const callback = paletteCommands.get('Logbook: Clock out current block');
+    const callback = paletteCommands.get('Logbook: Clock out Timing Line');
 
     await callback();
 
-    assert.equal(clock.getRunning().length, 1);
-    assert.equal(clock.getRunning()[0].clockUid, before);
-    assert.match(graph.childrenOf(graph.childrenOf(TASK.uid)[0].uid)[0].string, /^CLOCK:{1,2} \[/);
-    assert.match(toasts.join(' '), /focused block/i);
+    assert.equal(clock.getRunning().length, 0);
+    assert.match(
+        graph.childrenOf(graph.childrenOf(TASK.uid)[0].uid)[0].string,
+        /^CLOCK:{1,2} \[[^\]]+\]--\[[^\]]+\] => /
+    );
+    assert.doesNotMatch(toasts.join(' '), /focused block|run again.*confirm/i);
 });
 
 test('context menu does not offer Clock In on a direct DONE Task', async () => {
@@ -148,17 +149,14 @@ test('single Focused surface omits the bulk Clock Out All action', async () => {
     assert.equal(footerAction('Confirm Clock Out All'), undefined);
 });
 
-test('Command Palette Clock Out All requires a second invocation before writing', async () => {
+test('Clock out Timing Line writes on the first invocation without confirmation', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = paletteCommands.get('Logbook: Clock out all running clocks');
+    const command = paletteCommands.get('Logbook: Clock out Timing Line');
 
     await command();
 
-    assert.equal(clock.getRunning().length, 1, 'the first command invocation must only arm confirmation');
-    assert.match(toasts.join(' '), /run again.*confirm/i);
-
-    await command();
-    assert.equal(clock.getRunning().length, 0, 'the second command invocation performs the confirmed action');
+    assert.equal(clock.getRunning().length, 0);
+    assert.doesNotMatch(toasts.join(' '), /run again.*confirm/i);
     assert.doesNotMatch(toasts.join(' '), /could not be updated|Retry after Roam finishes syncing/i);
 });
 
@@ -166,8 +164,7 @@ test('Command Palette reports a partial Clock Out All and retains the failed Ses
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
     seedOpenClock(OTHER.uid, 'action-legacy-other');
     clock.refresh();
-    const command = paletteCommands.get('Logbook: Clock out all running clocks');
-    await command();
+    const command = paletteCommands.get('Logbook: Clock out Timing Line');
     toasts.length = 0;
 
     const originalUpdate = graph.api.data.block.update;
@@ -218,10 +215,9 @@ test('the public batch close helper uses the shared partial presenter contract',
     ]);
 });
 
-test('Command Palette presents an uncertain mutation result once and preserves success silence', async () => {
-    focused = TASK.uid;
+test('Command Palette presents an uncertain Timing Line result once and preserves success silence', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = paletteCommands.get('Logbook: Clock out current block');
+    const command = paletteCommands.get('Logbook: Clock out Timing Line');
     const restore = failNextPostWriteReads();
     try {
         await command();
@@ -268,18 +264,17 @@ test('topbar per-session action presents an uncertain mutation result', async ()
     assert.match(toasts.join(' '), /Graph state could not be confirmed.*Retry after Roam finishes syncing/i);
 });
 
-test('Command Palette confirmation expires and unload resets the armed state', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = paletteCommands.get('Logbook: Clock out all running clocks');
-
-    await command();
-    t.mock.timers.tick(5_001);
-    await command();
-    assert.equal(clock.getRunning().length, 1, 'an expired confirmation cannot execute');
-
+test('hot reload keeps only the three current Command Palette actions', () => {
+    assert.deepEqual([...paletteCommands.keys()], [
+        'Logbook: Focus current block',
+        'Logbook: Clock out Timing Line',
+        'Logbook: Open dashboard',
+    ]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await paletteCommands.get('Logbook: Clock out all running clocks')();
-    assert.equal(clock.getRunning().length, 1, 'unload clears a pending command confirmation');
+    assert.deepEqual([...paletteCommands.keys()], [
+        'Logbook: Focus current block',
+        'Logbook: Clock out Timing Line',
+        'Logbook: Open dashboard',
+    ]);
 });

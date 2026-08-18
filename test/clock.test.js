@@ -44,6 +44,23 @@ test('clocking in creates the drawer and a running entry', async () => {
     assert.equal(clock.getRunning()[0].title, 'this is a test task');
 });
 
+test('the core Clock In path rejects plain and completed blocks without writing', async () => {
+    const plain = { uid: 'plain0001', string: 'just a note', parent: null };
+    const done = { uid: 'done00001', string: '{{[[DONE]]}} completed task', parent: null };
+    const graph = seed([TASK, plain, done]);
+
+    for (const uid of [plain.uid, done.uid]) {
+        await assert.rejects(
+            () => clock.clockIn(uid, { now: AT_1558 }),
+            error => error?.code === 'todo-only' && /unfinished TODO/i.test(error.message)
+        );
+    }
+
+    assert.equal(clock.getRunning().length, 0);
+    assert.equal(graph.childrenOf(plain.uid).length, 0);
+    assert.equal(graph.childrenOf(done.uid).length, 0);
+});
+
 test('repeating Clock In on the confirmed Timing Line publishes a user action', async () => {
     seed([TASK]);
     const actions = [];

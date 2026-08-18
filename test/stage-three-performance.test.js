@@ -72,8 +72,8 @@ test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
     topbar.unmount();
 });
 
-test('disabling the topbar stops its ticker and host observer before re-enabling once', async () => {
-    settings.set('showTopbarWidget', true);
+test('the retired topbar setting cannot disable the core widget or duplicate its ticker', async () => {
+    settings.set('showTopbarWidget', false);
     const timers = [];
     const cleared = [];
     const topbar = createTopbar({
@@ -88,29 +88,13 @@ test('disabling the topbar stops its ticker and host observer before re-enabling
 
     topbar.mount();
     assert.equal(timers.length, 1, 'mount registers one ticker');
-    settings.set('showTopbarWidget', false);
     topbar.refresh();
-    assert.equal(cleared.length, 1, 'disabling tears down the ticker');
-    assert.equal(document.querySelector('#roam-logbook-topbar'), null);
-    const disabledAttachCount = topbar.getPerformanceSnapshot().attachCount;
-
-    document.body.innerHTML = '<div class="rm-topbar"></div>';
-    await settleMutations();
-    assert.equal(
-        topbar.getPerformanceSnapshot().attachCount,
-        disabledAttachCount,
-        'the host observer is disconnected while disabled'
-    );
-
-    settings.set('showTopbarWidget', true);
-    topbar.refresh();
-    assert.equal(timers.length, 2, 're-enabling registers one ticker');
-    topbar.refresh();
-    assert.equal(timers.length, 2, 'repeated refresh does not duplicate the ticker');
+    assert.equal(timers.length, 1, 'legacy false is ignored and refresh does not duplicate the ticker');
+    assert.equal(cleared.length, 0);
     assert.ok(document.querySelector('#roam-logbook-topbar'));
 
     topbar.unmount();
-    assert.equal(cleared.length, 2, 'unmount clears the one re-enabled ticker');
+    assert.equal(cleared.length, 1, 'unmount clears the one active ticker');
 });
 
 test('outer navigation shell replacement is recovered with one debounced attach', async () => {

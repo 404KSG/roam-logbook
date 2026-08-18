@@ -12,7 +12,7 @@ import { button, el } from './dom.js';
 import * as pomodoro from './pomodoro.js';
 import { formatElapsed, formatMinutesHuman } from './time.js';
 import { findStaleClocks } from './stats.js';
-import { showTopbarWidget, staleHours } from './settings.js';
+import { staleHours } from './settings.js';
 import { openBlock, openBlockInRightSidebar } from './roam.js';
 import { GRAPH_SYNC_RETRY_NOTICE, mutationResultNotice } from './action-result.js';
 import {
@@ -715,12 +715,6 @@ export function createTopbar({
     const attach = () => {
         if (destroyed) return;
         attachCount += 1;
-        if (!showTopbarWidget()) {
-            stopTicker();
-            stopAttachmentObservers();
-            remove();
-            return;
-        }
         const topbar = document.querySelector(TOPBAR_SELECTOR);
         observeRecoveryTarget(topbar);
         if (!topbar) {

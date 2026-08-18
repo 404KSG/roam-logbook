@@ -32,7 +32,6 @@ const paletteCommands = new Map();
 const paletteCommandSpecs = new Map();
 const settingsStore = new Map();
 let settingsPanel = null;
-let settingsAtPanelCreate = null;
 
 const extensionAPI = {
     settings: {
@@ -40,9 +39,6 @@ const extensionAPI = {
         set: (key, value) => settingsStore.set(key, value),
         panel: {
             create: config => {
-                settingsAtPanelCreate = new Map(
-                    config.settings.map(setting => [setting.id, settingsStore.get(setting.id)])
-                );
                 settingsPanel = config;
             },
         },
@@ -79,7 +75,7 @@ test.before(() => {
 });
 test.after(() => extension.onunload());
 
-test('onload mounts the topbar widget and registers every command', () => {
+test('onload mounts the always-on topbar and registers the minimal command surface', () => {
     assert.ok(topbarWidget(), 'widget should be attached to .rm-topbar');
     assert.equal(topbarWidget().textContent, '', 'idle stays icon-only');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__icon.bp3-icon-history'));
@@ -91,25 +87,45 @@ test('onload mounts the topbar widget and registers every command', () => {
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
     assert.equal(settingsPanel.tabTitle, 'Roam Logbook');
     assert.deepEqual(
-        ['showTopbarWidget', 'todoBlocksOnly', 'keepTimingLineAtTopOfRightSidebar'].map(key => [
-            key,
-            settingsStore.get(key),
-            settingsAtPanelCreate.get(key),
+        settingsPanel.settings.map(setting => [
+            setting.id,
+            setting.name,
+            setting.action.type,
+            setting.action.defaultValue,
         ]),
         [
-            ['showTopbarWidget', true, true],
-            ['todoBlocksOnly', true, true],
-            ['keepTimingLineAtTopOfRightSidebar', true, true],
+            [
+                'keepTimingLineAtTopOfRightSidebar',
+                'Open Timing Line in right sidebar',
+                'switch',
+                true,
+            ],
+            ['pomodoroMinutes', 'Work-cycle duration (minutes)', 'input', '45'],
+            ['staleHours', 'Forgotten timer warning (hours)', 'select', '8'],
         ]
     );
-    assert.equal(paletteCommands.size, 5);
+    assert.deepEqual(
+        settingsPanel.settings.map(setting => setting.description),
+        [
+            'After Clock In or a task switch, keep the Timing Line first in Roam’s right sidebar.',
+            'Passing the threshold turns elapsed time red; seamless task switches keep the cycle.',
+            'How long a clock may run before it is called out as forgotten.',
+        ]
+    );
+    assert.equal(settingsPanel.settings.some(setting => setting.id === 'showTopbarWidget'), false);
+    assert.equal(settingsPanel.settings.some(setting => setting.id === 'todoBlocksOnly'), false);
+    assert.deepEqual([...paletteCommands.keys()], [
+        'Logbook: Focus current block',
+        'Logbook: Clock out Timing Line',
+        'Logbook: Open dashboard',
+    ]);
     assert.equal(paletteCommands.has('Logbook: Start pomodoro on current block'), false);
     assert.deepEqual(
         [...contextCommands.keys()],
         ['Logbook: Clock in', 'Logbook: Clock out']
     );
     const pomodoroSetting = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
-    assert.equal(pomodoroSetting.name, 'Pomodoro duration (minutes)');
+    assert.equal(pomodoroSetting.name, 'Work-cycle duration (minutes)');
     assert.equal(pomodoroSetting.action.type, 'input');
     assert.equal(pomodoroSetting.action.placeholder, '45');
     assert.equal(pomodoroSetting.action.defaultValue, '45');
@@ -118,12 +134,12 @@ test('onload mounts the topbar widget and registers every command', () => {
     );
     assert.equal(
         timingLineSidebarSetting.name,
-        'Keep Timing Line at top of right sidebar'
+        'Open Timing Line in right sidebar'
     );
     assert.equal(timingLineSidebarSetting.action.type, 'switch');
     assert.equal(timingLineSidebarSetting.action.defaultValue, true);
     const staleHoursSetting = settingsPanel.settings.find(setting => setting.id === 'staleHours');
-    assert.equal(staleHoursSetting.name, 'Flag unfinished clocks after (hours)');
+    assert.equal(staleHoursSetting.name, 'Forgotten timer warning (hours)');
     assert.deepEqual(staleHoursSetting.action.items, ['2', '4', '8', '12', '24']);
     assert.equal(staleHoursSetting.action.defaultValue, '8');
 });
@@ -201,9 +217,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
 
 test('clock commands leave shortcut selection to Roam Hotkeys', () => {
     for (const label of [
-        'Logbook: Clock in current block',
-        'Logbook: Clock out current block',
-        'Logbook: Clock out all running clocks',
+        'Logbook: Focus current block',
+        'Logbook: Clock out Timing Line',
+        'Logbook: Open dashboard',
     ]) {
         const spec = paletteCommandSpecs.get(label);
         assert.ok(spec, `${label} should be registered`);
@@ -220,7 +236,7 @@ test('the context menu offers clock in on a TODO block only', () => {
     assert.equal(clockIn['display-conditional']({ 'block-uid': 'plain0001' }), false);
 });
 
-test('command-palette Clock In fronts the confirmed Timing Line at order 0', async () => {
+test('command-palette Focus fronts the confirmed Timing Line at order 0', async () => {
     const calls = [];
     const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
     const previousFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;
@@ -231,7 +247,7 @@ test('command-palette Clock In fronts the confirmed Timing Line at order 0', asy
     };
     window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
     try {
-        await paletteCommands.get('Logbook: Clock in current block')();
+        await paletteCommands.get('Logbook: Focus current block')();
         await new Promise(resolve => setImmediate(resolve));
         assert.deepEqual(calls, [
             'open',
@@ -677,9 +693,8 @@ test('Escape closes the dashboard', () => {
     assert.ok(!dialog().classList.contains('rlb-root--open'));
 });
 
-test('clocking out through the palette closes the entry', async () => {
-    await paletteCommands.get('Logbook: Clock out all running clocks')();
-    await paletteCommands.get('Logbook: Clock out all running clocks')();
+test('clocking out through the palette closes the current Timing Line once', async () => {
+    await paletteCommands.get('Logbook: Clock out Timing Line')();
 
     const drawer = graph.childrenOf('taskone01')[0];
     assert.match(graph.childrenOf(drawer.uid)[0].string, /\]--\[.*\] => \d+:\d\d$/);
@@ -718,7 +733,7 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     const originalFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;
     window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
     try {
-        await paletteCommands.get('Logbook: Clock in current block')();
+        await paletteCommands.get('Logbook: Focus current block')();
     } finally {
         window.roamAlphaAPI.ui.getFocusedBlock = originalFocusedBlock;
     }

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0-beta.43 — 2026-08-18
+
+- Reduced the Roam Settings panel to three current controls: Timing Line
+  right-sidebar fronting, shared work-cycle duration, and forgotten-timer
+  warning. The Top Bar and unfinished-TODO-only Clock In rule are now core
+  behavior; retired stored keys remain intact but inert.
+- Reduced the Command Palette and user-assignable Hotkeys surface to Focus
+  current block, Clock out Timing Line, and Open dashboard, with no default
+  bindings. Retired command labels are removed during load and unload so hot
+  reloads cannot leave duplicate actions behind.
+- Made Focus start or switch only the unfinished TODO currently being edited,
+  and made Clock out Timing Line close the actual global Timing Line on the
+  first invocation regardless of editor focus. The core Clock In mutation now
+  enforces the same unfinished-TODO boundary for every UI entry point.
+- Preserved the TODO context-menu actions, Active Threads and Dashboard
+  controls, single-Timing-Line model, right-sidebar behavior, graph format, and
+  old setting values without migration.
+
 ## 0.9.0-beta.42 — 2026-08-18
 
 - Restored Blueprint's Dashboard glyph for the Active Threads Dashboard action
