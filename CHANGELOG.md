@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.40 — 2026-08-18
+
+- Added a single-page Activity panel between Timing and By Task, using the
+  existing Dashboard snapshot and no additional graph query or chart library.
+- Added range-aware Activity aggregation: Session bars for Today, daily bars
+  for Last 7/30 days, and automatic weekly/monthly buckets for All time. Each
+  bucket exposes duration, date, and Session count through visible text,
+  tooltip, and ARIA; zero-value buckets retain a quiet baseline.
+- Kept cross-midnight Org reporting on the Session start day, included running
+  time in cached derived buckets, and added focused model, DOM, performance,
+  and Chromium light/dark/narrow geometry coverage.
+
 ## 0.9.0-beta.39 — 2026-08-18
 
 - Replaced the Active Threads Dashboard action's chart-like Dashboard glyph

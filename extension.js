@@ -1742,43 +1742,6 @@ function createConfirmationController({
   return { arm, isArmed, reset: reset3, setOnChange };
 }
 
-// src/dom.js
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className)
-    node.className = className;
-  if (text !== void 0 && text !== null)
-    node.textContent = text;
-  return node;
-}
-function button(className, text, onClick, { title } = {}) {
-  const node = el("button", className, text);
-  node.type = "button";
-  if (title) {
-    node.title = title;
-    node.setAttribute("aria-label", title);
-  }
-  node.addEventListener("click", onClick);
-  return node;
-}
-function injectStyles(id, css) {
-  const matches = [...document.querySelectorAll("style")].filter((style2) => style2.id === id);
-  const style = matches.shift() ?? el("style");
-  if (!style.isConnected) {
-    style.id = id;
-    document.head.appendChild(style);
-  }
-  style.textContent = css;
-  for (const duplicate of matches)
-    duplicate.remove();
-}
-function removeStyles(id) {
-  for (const style of document.querySelectorAll("style")) {
-    if (style.id === id)
-      style.remove();
-  }
-}
-
 // src/stats.js
 var EMPTY_HIERARCHY = { parentOf: {}, stringOf: {}, mirrorsOf: {} };
 var RANGES = [
@@ -2099,8 +2062,359 @@ function findStaleClocks(entries, now, staleHours2) {
   return entries.filter((entry) => entry.running && entry.start.getTime() < cutoff);
 }
 
+// src/activity.js
+var DAY_MS = 864e5;
+var ALL_TIME_WEEK_LIMIT_DAYS = 90;
+var MONTH_NAMES2 = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec"
+];
+var isValidDate2 = (value) => value instanceof Date && !Number.isNaN(value.getTime());
+var pad2 = (value) => String(value).padStart(2, "0");
+var cloneDay = (date) => new Date(date.getTime());
+var nextDay = (date) => {
+  const next = cloneDay(date);
+  next.setDate(next.getDate() + 1);
+  return next;
+};
+var advanceDays = (date, count) => {
+  const result = cloneDay(date);
+  result.setDate(result.getDate() + count);
+  return result;
+};
+var nextMonth = (date) => new Date(date.getFullYear(), date.getMonth() + 1, 1);
+var startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
+var startOfWeek = (date) => {
+  const start = startOfDay(date);
+  const daysFromMonday = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - daysFromMonday);
+  return start;
+};
+var formatTime = (date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+var formatShortDate = (date) => `${MONTH_NAMES2[date.getMonth()]} ${date.getDate()}`;
+var formatFullDate = (date) => `${MONTH_NAMES2[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+function formatActivityDuration(minutes, { compact = false } = {}) {
+  const safe = Math.max(0, Math.round(Number(minutes) || 0));
+  if (!compact)
+    return formatMinutesHuman(safe);
+  const hours = Math.floor(safe / 60);
+  if (hours === 0)
+    return `${safe}m`;
+  const remainder = safe % 60;
+  return remainder === 0 ? `${hours}h` : `${hours}h${pad2(remainder)}`;
+}
+var sessionLabel = (count) => `${count} Session${count === 1 ? "" : "s"}`;
+var bucketAriaLabel = (bucket, dateText) => `${dateText} \xB7 ${formatMinutesHuman(bucket.minutes)} \xB7 ${sessionLabel(bucket.sessionCount)}`;
+var createBucket = ({ id, start, unit, compact = false, dateLabel, monthLabel = "" }) => ({
+  id,
+  unit,
+  dateKey: dateKey(start),
+  start,
+  minutes: 0,
+  fixedMinutes: 0,
+  sessionCount: 0,
+  runningClockUids: [],
+  runningEntries: [],
+  durationLabel: formatActivityDuration(0, { compact }),
+  dateLabel,
+  monthLabel,
+  fullDateLabel: formatFullDate(start),
+  ariaLabel: bucketAriaLabel(
+    { minutes: 0, sessionCount: 0 },
+    unit === "session" ? `${formatFullDate(start)} at ${formatTime(start)}` : formatFullDate(start)
+  )
+});
+var refreshBucketLabels = (bucket, compact, dateText = bucket.fullDateLabel) => {
+  bucket.durationLabel = formatActivityDuration(bucket.minutes, { compact });
+  bucket.ariaLabel = bucketAriaLabel(bucket, dateText);
+  return bucket;
+};
+var addEntryToBucket = (bucket, entry, now, compact, dateText) => {
+  const minutes = entryMinutes(entry, now);
+  bucket.minutes += minutes;
+  bucket.sessionCount += 1;
+  if (entry.running) {
+    bucket.runningClockUids.push(entry.clockUid);
+    bucket.runningEntries.push(entry);
+  } else {
+    bucket.fixedMinutes += minutes;
+  }
+  refreshBucketLabels(bucket, compact, dateText);
+};
+var emptyDailyBuckets = (start, count, compact) => {
+  const buckets = [];
+  let cursor = cloneDay(start);
+  for (let index = 0; index < count; index += 1) {
+    buckets.push(
+      createBucket({
+        id: dateKey(cursor),
+        start: cloneDay(cursor),
+        unit: "day",
+        compact,
+        dateLabel: compact ? String(cursor.getDate()) : formatShortDate(cursor)
+      })
+    );
+    cursor = nextDay(cursor);
+  }
+  return buckets;
+};
+var refreshDailyMonthLabels = (buckets) => {
+  for (const [index, bucket] of buckets.entries()) {
+    const isFirstVisibleBucket = index === 0;
+    const isMonthStart = bucket.start.getDate() === 1;
+    bucket.monthLabel = isFirstVisibleBucket || isMonthStart ? MONTH_NAMES2[bucket.start.getMonth()] : "";
+    refreshBucketLabels(bucket, true);
+  }
+  return buckets;
+};
+var buildToday = (entries, now) => {
+  const buckets = entries.slice().sort((left, right) => {
+    const difference = left.start.getTime() - right.start.getTime();
+    return difference || String(left.clockUid ?? "").localeCompare(String(right.clockUid ?? ""));
+  }).map((entry, index) => {
+    const start = cloneDay(entry.start);
+    const bucket = createBucket({
+      id: entry.clockUid || `session-${index + 1}`,
+      start,
+      unit: "session",
+      dateLabel: formatTime(start)
+    });
+    addEntryToBucket(bucket, entry, now, false, `${formatFullDate(start)} at ${formatTime(start)}`);
+    return bucket;
+  });
+  return { unit: "session", buckets };
+};
+var buildDaily = (entries, now, rangeId) => {
+  const count = rangeId === "today" ? 1 : rangeId === "month" ? 30 : 7;
+  const start = rangeId === "today" ? startOfDay(now) : startOfDaysAgo(now, count - 1);
+  const compact = rangeId === "month";
+  const buckets = emptyDailyBuckets(start, count, compact);
+  const byDate = new Map(buckets.map((bucket) => [bucket.dateKey, bucket]));
+  for (const entry of entries) {
+    const bucket = byDate.get(dateKey(entry.start));
+    if (!bucket)
+      continue;
+    addEntryToBucket(bucket, entry, now, compact, bucket.fullDateLabel);
+  }
+  if (compact)
+    refreshDailyMonthLabels(buckets);
+  return { unit: "day", buckets };
+};
+var buildAll = (entries, now) => {
+  if (entries.length === 0)
+    return { unit: "month", buckets: [] };
+  const firstDay = startOfDay(entries[0].start);
+  const lastDay = startOfDay(entries.at(-1).start);
+  const spanDays = Math.floor((lastDay.getTime() - firstDay.getTime()) / DAY_MS) + 1;
+  const unit = spanDays <= ALL_TIME_WEEK_LIMIT_DAYS ? "week" : "month";
+  const first = unit === "week" ? startOfWeek(firstDay) : startOfMonth(firstDay);
+  const last = unit === "week" ? startOfWeek(lastDay) : startOfMonth(lastDay);
+  const buckets = [];
+  const byKey = /* @__PURE__ */ new Map();
+  let cursor = first;
+  while (cursor.getTime() <= last.getTime()) {
+    const bucket = createBucket({
+      id: unit === "week" ? dateKey(cursor) : `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`,
+      start: cloneDay(cursor),
+      unit,
+      compact: unit === "month",
+      dateLabel: unit === "week" ? formatShortDate(cursor) : MONTH_NAMES2[cursor.getMonth()]
+    });
+    buckets.push(bucket);
+    byKey.set(unit === "week" ? dateKey(cursor) : bucket.id, bucket);
+    cursor = unit === "week" ? advanceDays(cursor, 7) : nextMonth(cursor);
+  }
+  for (const entry of entries) {
+    const start = unit === "week" ? startOfWeek(entry.start) : startOfMonth(entry.start);
+    const key = unit === "week" ? dateKey(start) : `${start.getFullYear()}-${pad2(start.getMonth() + 1)}`;
+    const bucket = byKey.get(key);
+    if (bucket)
+      addEntryToBucket(bucket, entry, now, unit === "month", bucket.fullDateLabel);
+  }
+  if (unit === "month") {
+    for (const bucket of buckets)
+      refreshBucketLabels(bucket, true, `${bucket.dateLabel} ${bucket.start.getFullYear()}`);
+  }
+  return { unit, buckets };
+};
+var finishActivity = (rangeId, entries, result) => {
+  const buckets = result.buckets;
+  const totalMinutes2 = buckets.reduce((sum, bucket) => sum + bucket.minutes, 0);
+  const maxMinutes = buckets.reduce((max, bucket) => Math.max(max, bucket.minutes), 0);
+  return {
+    rangeId,
+    unit: result.unit,
+    entries,
+    buckets,
+    totalMinutes: totalMinutes2,
+    maxMinutes,
+    allTimeWeekLimitDays: ALL_TIME_WEEK_LIMIT_DAYS
+  };
+};
+function buildActivity(entries, { now = /* @__PURE__ */ new Date(), rangeId = "week" } = {}) {
+  const selectedRange = getRange(rangeId);
+  const selectedEntries = filterByRange(Array.isArray(entries) ? entries : [], selectedRange.id, now).filter((entry) => isValidDate2(entry?.start)).sort((left, right) => left.start.getTime() - right.start.getTime());
+  if (selectedEntries.length === 0) {
+    return finishActivity(selectedRange.id, selectedEntries, { unit: selectedRange.id === "today" ? "session" : "day", buckets: [] });
+  }
+  if (selectedRange.id === "today")
+    return finishActivity(selectedRange.id, selectedEntries, buildToday(selectedEntries, now));
+  if (selectedRange.id === "all")
+    return finishActivity(selectedRange.id, selectedEntries, buildAll(selectedEntries, now));
+  return finishActivity(selectedRange.id, selectedEntries, buildDaily(selectedEntries, now, selectedRange.id));
+}
+function refreshActivityBucket(bucket, now) {
+  if (!bucket?.runningEntries?.length)
+    return bucket;
+  bucket.minutes = bucket.fixedMinutes + bucket.runningEntries.reduce(
+    (sum, entry) => sum + entryMinutes(entry, now),
+    0
+  );
+  refreshBucketLabels(bucket, bucket.unit === "month", bucket.unit === "session" ? `${bucket.fullDateLabel} at ${formatTime(bucket.start)}` : bucket.unit === "week" ? bucket.fullDateLabel : `${bucket.dateLabel} ${bucket.start.getFullYear()}`);
+  return bucket;
+}
+
+// src/dom.js
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className)
+    node.className = className;
+  if (text !== void 0 && text !== null)
+    node.textContent = text;
+  return node;
+}
+function button(className, text, onClick, { title } = {}) {
+  const node = el("button", className, text);
+  node.type = "button";
+  if (title) {
+    node.title = title;
+    node.setAttribute("aria-label", title);
+  }
+  node.addEventListener("click", onClick);
+  return node;
+}
+function injectStyles(id, css) {
+  const matches = [...document.querySelectorAll("style")].filter((style2) => style2.id === id);
+  const style = matches.shift() ?? el("style");
+  if (!style.isConnected) {
+    style.id = id;
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+  for (const duplicate of matches)
+    duplicate.remove();
+}
+function removeStyles(id) {
+  for (const style of document.querySelectorAll("style")) {
+    if (style.id === id)
+      style.remove();
+  }
+}
+
+// src/activity-view.js
+var BAR_MAX_HEIGHT = 96;
+var activityDateText = (bucket) => bucket.monthLabel ? `${bucket.monthLabel} ${bucket.dateLabel}` : bucket.dateLabel;
+var barHeight = (bucket, maxMinutes) => {
+  if (bucket.minutes <= 0 || maxMinutes <= 0)
+    return 2;
+  return Math.max(4, Math.round(bucket.minutes / maxMinutes * BAR_MAX_HEIGHT));
+};
+var activityRangeLabel = (rangeId) => ({
+  today: "Today",
+  week: "Last 7 days",
+  month: "Last 30 days",
+  all: "All time"
+})[rangeId] || "selected range";
+var updateBucketNode = (node, bucket, maxMinutes) => {
+  node.dataset.activityDuration = bucket.durationLabel;
+  node.dataset.activityMinutes = String(bucket.minutes);
+  node.dataset.activitySessions = String(bucket.sessionCount);
+  node.title = bucket.ariaLabel;
+  node.setAttribute("aria-label", bucket.ariaLabel);
+  node.classList.toggle("rlb-activity__bucket--empty", bucket.minutes <= 0);
+  node.querySelector(".rlb-activity__duration").textContent = bucket.durationLabel;
+  node.querySelector(".rlb-activity__bar").style.height = `${barHeight(bucket, maxMinutes)}px`;
+};
+function renderActivity(activity) {
+  if (!activity?.buckets?.length)
+    return null;
+  const titleId = "roam-logbook-activity-title";
+  const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-activity");
+  section.setAttribute("aria-labelledby", titleId);
+  section.dataset.activityPanel = "true";
+  const heading = el("div", "rlb-panel__header");
+  heading.appendChild(el("h3", "rlb-section__title", "Activity"));
+  heading.querySelector(".rlb-section__title").id = titleId;
+  section.appendChild(heading);
+  const chart = el("div", "rlb-activity__chart");
+  chart.setAttribute("role", "group");
+  chart.setAttribute("aria-label", `Activity for ${activityRangeLabel(activity.rangeId)}`);
+  chart.dataset.activityRange = activity.rangeId;
+  chart.dataset.activityUnit = activity.unit;
+  const plot = el("div", "rlb-activity__plot");
+  plot.style.setProperty("--rlb-activity-columns", String(activity.buckets.length));
+  const maxMinutes = activity.maxMinutes;
+  for (const bucket of activity.buckets) {
+    const column = el("div", "rlb-activity__bucket");
+    column.dataset.activityBucket = bucket.id;
+    column.dataset.activityDuration = bucket.durationLabel;
+    column.dataset.activityMinutes = String(bucket.minutes);
+    column.dataset.activitySessions = String(bucket.sessionCount);
+    column.tabIndex = 0;
+    column.setAttribute("role", "img");
+    column.title = bucket.ariaLabel;
+    column.setAttribute("aria-label", bucket.ariaLabel);
+    column.appendChild(el("span", "rlb-activity__duration", bucket.durationLabel));
+    const barWrap = el("span", "rlb-activity__bar-wrap");
+    const bar = el("span", "rlb-activity__bar");
+    bar.setAttribute("aria-hidden", "true");
+    bar.style.height = `${barHeight(bucket, maxMinutes)}px`;
+    barWrap.appendChild(bar);
+    column.appendChild(barWrap);
+    column.appendChild(el("time", "rlb-activity__date", activityDateText(bucket)));
+    if (bucket.minutes <= 0)
+      column.classList.add("rlb-activity__bucket--empty");
+    plot.appendChild(column);
+  }
+  chart.appendChild(plot);
+  section.appendChild(chart);
+  return section;
+}
+function syncActivityView(section, activity, now) {
+  if (!section || !activity?.buckets?.length)
+    return;
+  for (const bucket of activity.buckets)
+    refreshActivityBucket(bucket, now);
+  activity.totalMinutes = activity.buckets.reduce((sum, bucket) => sum + bucket.minutes, 0);
+  activity.maxMinutes = activity.buckets.reduce(
+    (max, bucket) => Math.max(max, bucket.minutes),
+    0
+  );
+  const nodes = new Map(
+    [...section.querySelectorAll("[data-activity-bucket]")].map((node) => [
+      node.dataset.activityBucket,
+      node
+    ])
+  );
+  for (const bucket of activity.buckets) {
+    const node = nodes.get(bucket.id);
+    if (node)
+      updateBucketNode(node, bucket, activity.maxMinutes);
+  }
+}
+
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.39";
+var PLUGIN_VERSION = "0.9.0-beta.40";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -2771,6 +3085,7 @@ function createDashboard({
   let root = null;
   let summaryNode = null;
   let bodyNode = null;
+  let activityNode = null;
   let rangeId = "week";
   let returnFocusTo = null;
   let liveTicker = null;
@@ -2869,6 +3184,7 @@ function createDashboard({
       cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
     }
     updateLiveMetricNodes(nowDateValue);
+    syncActivityView(activityNode, lastModel?.activity, nowDateValue);
   };
   const startLiveTicker = () => {
     clearLiveTicker();
@@ -2890,6 +3206,7 @@ function createDashboard({
     summaryNode.replaceChildren();
     summaryNode.appendChild(overviewBar(model, now));
     bodyNode.replaceChildren();
+    activityNode = null;
     if (refreshNotice) {
       const notice3 = el("div", "rlb-dashboard__notice", refreshNotice);
       notice3.setAttribute("role", "status");
@@ -2911,6 +3228,9 @@ function createDashboard({
       startLiveTicker();
       return;
     }
+    activityNode = renderActivity(model.activity);
+    if (activityNode)
+      bodyNode.appendChild(activityNode);
     bodyNode.appendChild(tasksSection(model.tree));
     if (issues.length > 0)
       bodyNode.appendChild(dataIssuesSection(issues));
@@ -2967,6 +3287,7 @@ function createDashboard({
     const hierarchy = snapshot.hierarchy || {};
     refresh({ entries, notify: false });
     lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
+    lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
     lastTransientIssues = transientIssues;
     lastRefreshNotice = refreshNotice;
     paint(now);
@@ -3665,6 +3986,7 @@ function createDashboard({
       root = null;
       summaryNode = null;
       bodyNode = null;
+      activityNode = null;
       lastModel = null;
       refreshInFlight = null;
       refreshButton = null;
@@ -5473,6 +5795,106 @@ var STYLES = `
     vertical-align: middle;
 }
 
+/* Activity is the one visual summary in the Dashboard. Keep its geometry
+   deliberately bounded: values sit above each bar and the date remains below
+   it, with no secondary axis or scroll rail competing for attention. */
+.rlb-dashboard .rlb-activity {
+    box-sizing: border-box;
+    height: 198px;
+    min-height: 198px;
+    overflow: hidden;
+}
+
+.rlb-dashboard .rlb-activity .rlb-panel__header {
+    margin-bottom: 6px;
+}
+
+.rlb-activity__chart {
+    position: relative;
+    height: 157px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.rlb-activity__plot {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(var(--rlb-activity-columns, 1), minmax(0, 1fr));
+    align-items: stretch;
+    gap: 4px;
+    height: 100%;
+    min-width: 0;
+    padding: 0 2px;
+    border-bottom: 1px solid var(--rlb-border-light);
+    box-sizing: border-box;
+}
+
+.rlb-activity__bucket {
+    display: grid;
+    grid-template-rows: 18px minmax(0, 1fr) 20px;
+    align-items: stretch;
+    min-width: 0;
+    height: 100%;
+    color: var(--rlb-muted);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+}
+
+.rlb-activity__bucket:focus-visible {
+    border-radius: 3px;
+    box-shadow: 0 0 0 2px var(--rlb-muted);
+}
+
+.rlb-activity__duration,
+.rlb-activity__date {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rlb-activity__duration {
+    color: var(--rlb-text);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 18px;
+}
+
+.rlb-activity__bar-wrap {
+    display: flex;
+    min-height: 0;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.rlb-activity__bar {
+    display: block;
+    width: min(18px, 62%);
+    min-height: 2px;
+    max-height: 100%;
+    border-radius: 2px 2px 0 0;
+    background: var(--rlb-session-running);
+}
+
+.rlb-activity__bucket--empty .rlb-activity__duration {
+    color: var(--rlb-muted);
+    opacity: 0.72;
+}
+
+.rlb-activity__bucket--empty .rlb-activity__bar {
+    width: min(16px, 52%);
+    opacity: 0.35;
+}
+
+.rlb-activity__date {
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 20px;
+}
+
 .rlb-panel__header {
     display: flex;
     align-items: center;
@@ -5776,6 +6198,34 @@ var STYLES = `
 
     .rlb-dashboard-section {
         overflow-x: auto;
+    }
+
+    .rlb-dashboard .rlb-activity {
+        height: 190px;
+        min-height: 190px;
+        overflow: hidden;
+    }
+
+    .rlb-activity__chart {
+        height: 149px;
+    }
+
+    .rlb-activity__plot {
+        gap: 2px;
+        padding: 0 1px;
+    }
+
+    .rlb-activity__duration,
+    .rlb-activity__date {
+        font-size: 8px;
+    }
+
+    .rlb-activity__bar {
+        width: min(12px, 72%);
+    }
+
+    .rlb-activity__bucket--empty .rlb-activity__bar {
+        width: min(10px, 62%);
     }
 
     .rlb-by-task > .rlb-section__heading {

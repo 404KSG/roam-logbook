@@ -7,6 +7,8 @@
  */
 
 import * as clock from './clock.js';
+import { buildActivity } from './activity.js';
+import { renderActivity, syncActivityView } from './activity-view.js';
 import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
 import { openBlock, openBlockInRightSidebar } from './roam.js';
@@ -112,6 +114,7 @@ export function createDashboard({
     let root = null;
     let summaryNode = null;
     let bodyNode = null;
+    let activityNode = null;
     let rangeId = 'week';
     let returnFocusTo = null;
     let liveTicker = null;
@@ -213,6 +216,7 @@ export function createDashboard({
             cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
         }
         updateLiveMetricNodes(nowDateValue);
+        syncActivityView(activityNode, lastModel?.activity, nowDateValue);
     };
 
     const startLiveTicker = () => {
@@ -234,6 +238,7 @@ export function createDashboard({
         summaryNode.replaceChildren();
         summaryNode.appendChild(overviewBar(model, now));
         bodyNode.replaceChildren();
+        activityNode = null;
 
         if (refreshNotice) {
             const notice = el('div', 'rlb-dashboard__notice', refreshNotice);
@@ -257,6 +262,8 @@ export function createDashboard({
             return;
         }
 
+        activityNode = renderActivity(model.activity);
+        if (activityNode) bodyNode.appendChild(activityNode);
         bodyNode.appendChild(tasksSection(model.tree));
         if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
         startLiveTicker();
@@ -314,6 +321,7 @@ export function createDashboard({
         // state without issuing the entries query a second time.
         clock.refresh({ entries, notify: false });
         lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
+        lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
         lastTransientIssues = transientIssues;
         lastRefreshNotice = refreshNotice;
         paint(now);
@@ -1069,6 +1077,7 @@ export function createDashboard({
             root = null;
             summaryNode = null;
             bodyNode = null;
+            activityNode = null;
             lastModel = null;
             refreshInFlight = null;
             refreshButton = null;

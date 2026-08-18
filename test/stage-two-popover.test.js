@@ -1708,7 +1708,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
     paletteCommands.get('Logbook: Open dashboard')();
     assert.equal(document.activeElement, root.querySelector('select'));
     const dashboardDialog = root.querySelector('.rlb-dialog');
-    root.querySelectorAll('select, button').forEach(control => control.remove());
+    root.querySelectorAll('select, button, .rlb-activity [tabindex]').forEach(control => control.remove());
     dashboardDialog.focus();
     document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     assert.equal(document.activeElement, dashboardDialog, 'an empty dialog remains keyboard reachable');

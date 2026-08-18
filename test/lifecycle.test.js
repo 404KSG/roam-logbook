@@ -154,7 +154,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-overview__label\s*{/);
     assert.match(css, /\.rlb-overview__value\s*{/);
     assert.doesNotMatch(css, /\.rlb-stats\s*{/);
-    assert.doesNotMatch(css, /rlb-analytics|rlb-activity|dashboard__view-toggle|toggle-view/);
+    assert.match(css, /\.rlb-dashboard \.rlb-activity\s*\{/);
+    assert.doesNotMatch(css, /rlb-analytics|dashboard__view-toggle|toggle-view/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);

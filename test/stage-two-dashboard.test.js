@@ -918,3 +918,119 @@ test('Dashboard keeps All and filtered collapse state in separate controller-loc
     assert.equal(rowFor('Nested TODO'), undefined, 'TODO restores its own collapsed state');
     dashboard.destroy();
 });
+
+test('Dashboard places the accessible Activity chart between Timing and By task', () => {
+    graph = installGraph([
+        { uid: 'activity-task', string: '{{[[TODO]]}} Activity task', parent: null },
+        { uid: 'activity-drawer', string: 'LOGBOOK::', parent: 'activity-task' },
+        {
+            uid: 'activity-early',
+            string: 'CLOCK:: [2026-08-09 Sun 09:00]--[2026-08-09 Sun 10:00] => 1:00',
+            parent: 'activity-drawer',
+        },
+        {
+            uid: 'activity-mid',
+            string: 'CLOCK:: [2026-08-12 Wed 09:00]--[2026-08-12 Wed 09:45] => 0:45',
+            parent: 'activity-drawer',
+        },
+        {
+            uid: 'activity-zero',
+            string: 'CLOCK:: [2026-08-15 Sat 11:00]--[2026-08-15 Sat 11:00] => 0:00',
+            parent: 'activity-drawer',
+        },
+        {
+            uid: 'activity-running',
+            string: 'CLOCK:: [2026-08-15 Sat 11:30]',
+            parent: 'activity-drawer',
+        },
+    ]);
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+
+    const timing = document.querySelector('.rlb-running');
+    const activity = document.querySelector('.rlb-activity');
+    const byTask = document.querySelector('.rlb-by-task');
+    assert.ok(timing, 'a running Session creates the Timing panel');
+    assert.ok(activity);
+    assert.ok(byTask);
+    assert.ok(
+        timing.compareDocumentPosition(activity) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+        'Activity appears after Timing'
+    );
+    assert.ok(
+        activity.compareDocumentPosition(byTask) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+        'Activity appears before By task'
+    );
+    assert.equal(activity.querySelector('.rlb-section__title').textContent, 'Activity');
+    const chart = activity.querySelector('.rlb-activity__chart');
+    assert.equal(chart.getAttribute('role'), 'group');
+    assert.equal(chart.getAttribute('aria-label'), 'Activity for Last 7 days');
+    assert.equal(chart.dataset.activityRange, 'week');
+    assert.equal(chart.querySelectorAll('[data-activity-bucket]').length, 7);
+    assert.equal(
+        activity.querySelector('[data-activity-bucket="2026-08-09"] .rlb-activity__duration').textContent,
+        '1h 00m'
+    );
+    assert.equal(
+        activity.querySelector('[data-activity-bucket="2026-08-09"] .rlb-activity__date').textContent,
+        'Aug 9'
+    );
+    assert.equal(
+        activity.querySelector('[data-activity-bucket="2026-08-10"] .rlb-activity__duration').textContent,
+        '0m'
+    );
+    assert.match(
+        activity.querySelector('[data-activity-bucket="2026-08-09"]').getAttribute('aria-label'),
+        /Aug 9, 2026.*1h 00m.*1 Session/
+    );
+    assert.equal(document.querySelector('[data-action="toggle-view"]'), null);
+    assert.equal(document.querySelector('.rlb-category'), null);
+    assert.equal(document.querySelector('.rlb-insights'), null);
+
+    dashboard.destroy();
+});
+
+test('Dashboard Activity changes bucket annotation with the existing range selector without another graph read', () => {
+    graph = installGraph([
+        { uid: 'activity-range-task', string: '{{[[TODO]]}} Activity range task', parent: null },
+        { uid: 'activity-range-drawer', string: 'LOGBOOK::', parent: 'activity-range-task' },
+        {
+            uid: 'activity-range-clock',
+            string: 'CLOCK:: [2026-08-01 Sat 09:00]--[2026-08-01 Sat 10:30] => 1:30',
+            parent: 'activity-range-drawer',
+        },
+    ]);
+    let graphReads = 0;
+    const query = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        graphReads += 1;
+        return query(...args);
+    };
+    const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
+    dashboard.open();
+    const readsAfterOpen = graphReads;
+    const range = document.querySelector('.rlb-header select');
+
+    range.value = 'today';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(graphReads, readsAfterOpen);
+    assert.equal(document.querySelector('.rlb-activity'), null);
+    assert.ok(document.querySelector('.rlb-empty'));
+
+    range.value = 'month';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(graphReads, readsAfterOpen);
+    const activity = document.querySelector('.rlb-activity');
+    assert.ok(activity);
+    assert.equal(activity.querySelectorAll('[data-activity-bucket]').length, 30);
+    assert.equal(
+        activity.querySelector('[data-activity-bucket="2026-08-01"] .rlb-activity__duration').textContent,
+        '1h30'
+    );
+    assert.equal(
+        activity.querySelector('[data-activity-bucket="2026-08-01"] .rlb-activity__date').textContent,
+        'Aug 1'
+    );
+
+    dashboard.destroy();
+});

@@ -226,6 +226,46 @@ test('opening the dashboard consumes one entries snapshot for clock state and re
     dashboard.destroy();
 });
 
+test('Activity running totals update from the cached snapshot without replacing the chart or querying Roam', async () => {
+    let nowMs = new Date('2026-08-15T09:00:00').getTime();
+    let tick;
+    const graph = installGraph([
+        TASK,
+        { uid: 'activity-live-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'activity-live-clock', string: 'CLOCK:: [2026-08-15 Sat 09:00]', parent: 'activity-live-drawer' },
+    ]);
+    let queryCount = 0;
+    const query = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        queryCount += 1;
+        return query(...args);
+    };
+    clock.refresh();
+    const dashboard = createDashboard({
+        now: () => new Date(nowMs),
+        setIntervalFn: callback => {
+            tick = callback;
+            return 'activity-ticker';
+        },
+        clearIntervalFn: () => {},
+    });
+
+    dashboard.open();
+    const readsAfterOpen = queryCount;
+    const chart = document.querySelector('.rlb-activity__chart');
+    const bucket = chart.querySelector('[data-activity-bucket="2026-08-15"]');
+    assert.equal(bucket.dataset.activityDuration, '0m');
+
+    nowMs += 61_000;
+    tick();
+    assert.equal(queryCount, readsAfterOpen);
+    assert.strictEqual(document.querySelector('.rlb-activity__chart'), chart);
+    assert.equal(bucket.dataset.activityDuration, '1m');
+    assert.match(bucket.getAttribute('aria-label'), /1m.*1 Session/);
+
+    dashboard.destroy();
+});
+
 test('1000 and 10000 CLOCK snapshots keep graph query count fixed and render linearly', () => {
     const queryCounts = [];
     const durations = [];
