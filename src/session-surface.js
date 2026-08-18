@@ -74,7 +74,7 @@ const renderRunningRow = (row, now, options) => {
     const overrun = pomodoro.isCycleOverrun(now);
     const node = el(
         'div',
-        `rlb-run rlb-run--focused rlb-run--inline-meta${overrun ? ' rlb-run--overrun' : ''}`
+        `rlb-run rlb-run--inline-meta${overrun ? ' rlb-run--overrun' : ''}`
     );
     node.dataset.sessionState = 'running';
     node.dataset.clockUid = entry.clockUid;
@@ -332,7 +332,7 @@ export function renderSessionSurface(root, model, options = {}) {
             'TIMING',
             model.focusedRows,
             row => renderRunningRow(row, model.now, options),
-            `rlb-surface__section--focused${pomodoro.isCycleOverrun(model.now) ? ' rlb-surface__section--overrun' : ''}`
+            'rlb-surface__section--focused'
         );
         appendSection(
             sessionList,
@@ -403,8 +403,6 @@ export function updateSessionSurfaceElapsed(
         if (row) {
             const overrun = pomodoro.isCycleOverrun(currentNow);
             row.classList.toggle('rlb-run--overrun', overrun);
-            row.closest('.rlb-surface__section--focused')
-                ?.classList.toggle('rlb-surface__section--overrun', overrun);
         }
     }
 

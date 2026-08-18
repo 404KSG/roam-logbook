@@ -324,6 +324,41 @@ test('Clock Out All keeps the legacy count as structured batch result fields', a
     assert.equal(result.partial, false);
 });
 
+test('batch close confirms all written CLOCKs with one read and one notification', async () => {
+    const graph = seed([
+        TASK,
+        OTHER,
+        { uid: 'batch-drawer-a', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'batch-clock-a', string: 'CLOCK:: [2026-08-17 Mon 09:00]', parent: 'batch-drawer-a' },
+        { uid: 'batch-drawer-b', string: 'LOGBOOK::', parent: OTHER.uid },
+        { uid: 'batch-clock-b', string: 'CLOCK:: [2026-08-17 Mon 09:01]', parent: 'batch-drawer-b' },
+    ]);
+    const originalQuery = graph.api.data.q;
+    let entryReads = 0;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) entryReads += 1;
+        return originalQuery(...args);
+    };
+    let notifications = 0;
+    const unsubscribe = clock.subscribe(() => {
+        notifications += 1;
+    });
+    notifications = 0;
+
+    try {
+        const result = await clock.clockOutEntries(null, { now: AT_1005 });
+
+        assert.equal(result.ok, true);
+        assert.equal(result.closed, 2);
+        assert.equal(entryReads, 2, 'one preflight read plus one batch confirmation read');
+        assert.equal(notifications, 1, 'the batch publishes one final snapshot');
+        assert.equal(clock.getRunning().length, 0);
+    } finally {
+        unsubscribe();
+        graph.api.data.q = originalQuery;
+    }
+});
+
 test('Clock Out All returns a structured uncertain result when the preflight read fails', async () => {
     const graph = seed([TASK]);
     await clock.clockIn('taskone01', { now: AT_1558 });

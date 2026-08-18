@@ -480,9 +480,9 @@ export function createDashboard({
                         if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
                         discardConfirmTimer = setTimeout(() => {
                             resetDiscardConfirmation();
-                            render();
+                            render({ readGraph: false });
                         }, 5000);
-                        render();
+                        render({ readGraph: false });
                         return;
                     }
                     resetDiscardConfirmation();

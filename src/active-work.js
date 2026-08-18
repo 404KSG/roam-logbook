@@ -47,7 +47,6 @@ const compareNewest = (left, right) =>
 export function chooseFocusedEntry(entries = []) {
     return entries
         .filter(entry => entry?.running && instantOf(entry.start) !== null)
-        .slice()
         .sort(compareNewest)[0] || null;
 }
 

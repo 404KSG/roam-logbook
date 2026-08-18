@@ -37,6 +37,19 @@ test('Active Work keeps one focused item and distinct recent tasks inside 45 min
     assert.equal(model.recent[0].remainingMinutes, 35);
 });
 
+test('Active Work is the single source of banked task minutes', () => {
+    const model = buildActiveWork(
+        [
+            { ...entry({ taskUid: 'focused', start: '10:20' }), minutes: 40 },
+            { ...entry({ taskUid: 'focused', start: '09:00', end: '10:00' }), minutes: 25 },
+        ],
+        { now: at('10:20') }
+    );
+
+    assert.equal(model.focused.priorMinutes, 25);
+    assert.equal(model.items[0].priorMinutes, 25);
+});
+
 test('Active Work chooses the newest running entry as Focused during legacy overlap', () => {
     const model = buildActiveWork([
         entry({ taskUid: 'older', start: '09:00' }),

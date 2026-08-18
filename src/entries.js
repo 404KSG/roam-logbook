@@ -15,7 +15,6 @@ import {
     taskTitle,
 } from './org.js';
 import {
-    query,
     queryOrThrow,
     validateQueryRows,
     withGraphReadIssue,
@@ -139,11 +138,6 @@ export function readAllEntries() {
     return entries;
 }
 
-/** Just the open clocks — what the topbar counts and what "unfinished" means. */
-export function readRunningEntries() {
-    return readAllEntries().filter(entry => entry.running);
-}
-
 /**
  * Read the graph inputs needed by one dashboard operation.
  *
@@ -255,7 +249,7 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
         let parentRows;
         try {
             parentRows = validateQueryRows(
-                query(PARENTS_QUERY, frontier),
+                queryOrThrow(PARENTS_QUERY, frontier),
                 'parent',
                 row => row.length >= 3 && row.every(value => typeof value === 'string')
             );

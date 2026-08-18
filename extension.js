@@ -306,9 +306,6 @@ function queryOrThrow(datalog, ...args) {
     throw result.error;
   return result.rows;
 }
-function query(datalog, ...args) {
-  return queryOrThrow(datalog, ...args);
-}
 function getBlockString(uid) {
   if (!uid)
     return null;
@@ -782,7 +779,7 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     let parentRows;
     try {
       parentRows = validateQueryRows(
-        query(PARENTS_QUERY, frontier),
+        queryOrThrow(PARENTS_QUERY, frontier),
         "parent",
         (row) => row.length >= 3 && row.every((value) => typeof value === "string")
       );
@@ -901,7 +898,7 @@ function openLineMinutesLeft(entry, now = Date.now(), windowMinutes = ACTIVE_WOR
 }
 var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
 function chooseFocusedEntry(entries = []) {
-  return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).slice().sort(compareNewest)[0] || null;
+  return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).sort(compareNewest)[0] || null;
 }
 function buildActiveWork(entries = [], {
   now = Date.now(),
@@ -1096,15 +1093,7 @@ function refresh({ entries, notify: shouldNotify = true } = {}) {
     console.error("[roam-logbook] could not refresh clocks", error);
     return running;
   }
-  const bankedByTask = /* @__PURE__ */ new Map();
-  for (const entry of all) {
-    if (entry.running)
-      continue;
-    bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
-  }
-  entriesSnapshot = all.map(
-    (entry) => entry.running ? { ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 } : { ...entry }
-  );
+  entriesSnapshot = all;
   const focused = chooseFocusedEntry(entriesSnapshot);
   running = focused ? [{ ...focused }] : [];
   lastRefreshStatus = { ok: true, error: null };
@@ -1201,48 +1190,52 @@ function postWriteConfirmationError(clockUid, action) {
 async function closeEntriesNow(entries, clockUids, now, { publish = true } = {}) {
   const byUid = new Map(entries.filter((entry) => entry.running).map((entry) => [entry.clockUid, entry]));
   const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
-  const results = [];
+  const resultByUid = /* @__PURE__ */ new Map();
+  const writtenClockUids = [];
   let uncertain = null;
   for (const clockUid of ids) {
     const entry = byUid.get(clockUid);
     if (!entry) {
-      results.push({ clockUid, closed: false, reason: "not-running" });
+      resultByUid.set(clockUid, { clockUid, closed: false, reason: "not-running" });
       continue;
     }
     try {
       const closed2 = await closeEntry(entry, now);
       if (!closed2) {
-        results.push({ clockUid, closed: false, reason: "not-running" });
+        resultByUid.set(clockUid, { clockUid, closed: false, reason: "not-running" });
         continue;
       }
-      const confirmation = refreshResult({ notify: false });
-      if (!confirmation.ok) {
-        results.push({
-          clockUid,
-          closed: false,
-          uncertain: true
-        });
-        uncertain = confirmation;
-        break;
-      }
-      const confirmed = entriesSnapshot.find(
-        (item) => item.clockUid === clockUid && item.running === false
-      );
-      if (!confirmed) {
-        const error = postWriteConfirmationError(clockUid, "Clock Out");
-        results.push({ clockUid, closed: false, uncertain: true });
-        uncertain = { ok: false, uncertain: true, error, notice: GRAPH_UNCERTAIN };
-        break;
-      }
-      results.push({ clockUid, closed: true });
+      writtenClockUids.push(clockUid);
     } catch (error) {
-      results.push({ clockUid, closed: false, error });
+      resultByUid.set(clockUid, { clockUid, closed: false, error });
     }
   }
-  const retryClockUids = ids.filter((clockUid) => {
-    const result = results.find((item) => item.clockUid === clockUid);
-    return !result || Boolean(result.error) || result.uncertain === true;
-  });
+  if (writtenClockUids.length > 0) {
+    const confirmation = refreshResult({ notify: false });
+    if (!confirmation.ok) {
+      uncertain = confirmation;
+      for (const clockUid of writtenClockUids) {
+        resultByUid.set(clockUid, { clockUid, closed: false, uncertain: true });
+      }
+    } else {
+      const confirmedClosedClockUids = new Set(
+        entriesSnapshot.filter((item) => item.running === false).map((item) => item.clockUid)
+      );
+      for (const clockUid of writtenClockUids) {
+        if (confirmedClosedClockUids.has(clockUid)) {
+          resultByUid.set(clockUid, { clockUid, closed: true });
+          continue;
+        }
+        const error = postWriteConfirmationError(clockUid, "Clock Out");
+        resultByUid.set(clockUid, { clockUid, closed: false, uncertain: true });
+        uncertain = { ok: false, uncertain: true, error, notice: GRAPH_UNCERTAIN };
+      }
+    }
+  }
+  const results = ids.map(
+    (clockUid) => resultByUid.get(clockUid) || { clockUid, closed: false, uncertain: true }
+  );
+  const retryClockUids = results.filter((result) => !result || Boolean(result.error) || result.uncertain === true).map((result) => result.clockUid);
   const closed = results.filter((result) => result.closed).length;
   const failed = results.filter((result) => result.error).length;
   const pending = retryClockUids.length;
@@ -1500,7 +1493,7 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
           prepareStarted = true;
           await prepare(entries.map((entry) => ({ ...entry })));
         }
-        const outcome = await closeEntriesNow(entries, clockUids, now);
+        const outcome = await closeEntriesNow(entries, clockUids, now, { publish: false });
         const result = { ...outcome, entries };
         if (!outcome.uncertain) {
           for (const closed of outcome.results.filter((item) => item.closed)) {
@@ -1525,28 +1518,7 @@ async function clockOutEntries(clockUids = null, { now = /* @__PURE__ */ new Dat
   });
 }
 async function clockOutAll({ now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
-  let outcome;
-  try {
-    outcome = await clockOutEntries(null, { now, source });
-  } catch (error) {
-    notice = GRAPH_UNCERTAIN;
-    const pendingClockUids = running.map((entry) => entry.clockUid);
-    return {
-      action: "clock-out-all",
-      ok: false,
-      item: "Session",
-      completedVerb: "ended",
-      count: 0,
-      completed: 0,
-      failed: pendingClockUids.length,
-      pending: pendingClockUids.length,
-      pendingClockUids,
-      uncertain: true,
-      partial: false,
-      retry: { action: "close", retryClockUids: pendingClockUids, writtenClockUids: [] },
-      error
-    };
-  }
+  const outcome = await clockOutEntries(null, { now, source });
   if (outcome.uncertain) {
     notice = GRAPH_UNCERTAIN;
   } else if (outcome.failed > 0) {
@@ -3711,9 +3683,9 @@ function createDashboard({
               clearTimeout(discardConfirmTimer);
             discardConfirmTimer = setTimeout(() => {
               resetDiscardConfirmation();
-              render();
+              render({ readGraph: false });
             }, 5e3);
-            render();
+            render({ readGraph: false });
             return;
           }
           resetDiscardConfirmation();
@@ -6709,7 +6681,7 @@ var renderRunningRow = (row, now, options) => {
   const overrun = isCycleOverrun(now);
   const node = el(
     "div",
-    `rlb-run rlb-run--focused rlb-run--inline-meta${overrun ? " rlb-run--overrun" : ""}`
+    `rlb-run rlb-run--inline-meta${overrun ? " rlb-run--overrun" : ""}`
   );
   node.dataset.sessionState = "running";
   node.dataset.clockUid = entry.clockUid;
@@ -6949,7 +6921,7 @@ function renderSessionSurface(root, model, options = {}) {
       "TIMING",
       model.focusedRows,
       (row) => renderRunningRow(row, model.now, options),
-      `rlb-surface__section--focused${isCycleOverrun(model.now) ? " rlb-surface__section--overrun" : ""}`
+      "rlb-surface__section--focused"
     );
     appendSection(
       sessionList,
@@ -7013,7 +6985,6 @@ function updateSessionSurfaceElapsed(root, entries, now, openLines = [], openLin
     if (row) {
       const overrun = isCycleOverrun(currentNow);
       row.classList.toggle("rlb-run--overrun", overrun);
-      row.closest(".rlb-surface__section--focused")?.classList.toggle("rlb-surface__section--overrun", overrun);
     }
   }
   const openLinesByTask = new Map(openLines.map((entry) => [entry.taskUid, entry]));
@@ -7509,10 +7480,10 @@ function createTopbar({
       buttonNode.replaceChildren(timeNode);
     layoutMode = mode;
   };
-  const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true } = {}) => {
+  const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true, activeWork: suppliedActiveWork = null } = {}) => {
     if (!buttonNode)
       return;
-    const derived = getActiveWork(now);
+    const derived = suppliedActiveWork || getActiveWork(now);
     const focused = derived.focused || entries[0] || null;
     const activeWork = focused === derived.focused ? derived : focused ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some((item) => item.taskUid === focused.taskUid) ? 0 : 1) } : derived;
     const composition = activeWorkDescription(
@@ -7555,7 +7526,7 @@ No Active Work is available. Click for details.`;
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
     buttonNode.classList.remove("rlb-topbar__button--active");
-    const [first] = focusedEntries;
+    const first = activeWork.focused || focusedEntries[0];
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
     timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
     timeNode.textContent = formatElapsed(cycleElapsed);
@@ -7571,7 +7542,7 @@ Primary timer: ${first.title}
 Shared cycle ${formatElapsed(cycleElapsed)}` + (threshold ? `
 Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
     } else {
-      const totalMinutes2 = (first.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 6e4);
+      const totalMinutes2 = (activeWork.focused?.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 6e4);
       const threshold = cycleThresholdMinutes();
       buttonNode.title = `${activeCount(activeWork.count)}
 ${composition}
@@ -7588,10 +7559,10 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     const entries = getRunning();
     const now = nowDate();
     const activeWork = getActiveWork(now);
-    renderButton(entries, now);
+    renderButton(entries, now, { activeWork });
     updateSessionSurfaceElapsed(
       popover,
-      entries,
+      activeWork.focused ? [activeWork.focused] : entries,
       now,
       activeWork.recent,
       activeWork.windowMinutes
@@ -7991,8 +7962,6 @@ function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {})
         }
       }
       scheduled = false;
-      if (!disposed && pending.size > 0)
-        schedule([...pending][0]);
     }).catch((error) => {
       scheduled = false;
       console.error("[roam-logbook] automatic completion reconciliation failed", error);
@@ -8067,7 +8036,7 @@ function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {})
         retryClockUids.delete(uid);
       }
     }
-    const explicitReconciliation = event.explicit === true || event.reason === "refresh" || event.reason === "reconcile";
+    const explicitReconciliation = event.explicit === true || event.reason === "refresh";
     for (const uid of desired) {
       const status = statusOf.get(uid);
       const previous = lastStatus.get(uid);

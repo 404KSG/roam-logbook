@@ -549,10 +549,10 @@ export function createTopbar({
     const renderButton = (
         entries = clock.getRunning(),
         now = nowDate(),
-        { reconcile = true } = {}
+        { reconcile = true, activeWork: suppliedActiveWork = null } = {}
     ) => {
         if (!buttonNode) return;
-        const derived = clock.getActiveWork(now);
+        const derived = suppliedActiveWork || clock.getActiveWork(now);
         const focused = derived.focused || entries[0] || null;
         const activeWork = focused === derived.focused
             ? derived
@@ -602,7 +602,7 @@ export function createTopbar({
 
         buttonNode.classList.remove('rlb-topbar__button--icon-only');
         buttonNode.classList.remove('rlb-topbar__button--active');
-        const [first] = focusedEntries;
+        const first = activeWork.focused || focusedEntries[0];
         // The topbar is a timing-state entry, not a task summary. Overrun
         // outranks stale, matching the previous status priority without putting
         // either state on the whole button.
@@ -634,7 +634,9 @@ export function createTopbar({
                 (!overrun && stale ? '\nA clock is likely forgotten.' : '') +
                 '\nClick for all clock details.';
         } else {
-            const totalMinutes = (first.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 60_000);
+            const totalMinutes =
+                (activeWork.focused?.priorMinutes || 0) +
+                Math.floor((now - first.start.getTime()) / 60_000);
             const threshold = pomodoro.cycleThresholdMinutes();
             buttonNode.title =
                 `${activeCount(activeWork.count)}\n` +
@@ -659,10 +661,10 @@ export function createTopbar({
         const entries = clock.getRunning();
         const now = nowDate();
         const activeWork = clock.getActiveWork(now);
-        renderButton(entries, now);
+        renderButton(entries, now, { activeWork });
         updateSessionSurfaceElapsed(
             popover,
-            entries,
+            activeWork.focused ? [activeWork.focused] : entries,
             now,
             activeWork.recent,
             activeWork.windowMinutes

@@ -168,7 +168,6 @@ export function attachCompletionHandling({ onResult = null, onWatchIssue = null 
                     }
                 }
                 scheduled = false;
-                if (!disposed && pending.size > 0) schedule([...pending][0]);
             })
             .catch(error => {
                 scheduled = false;
@@ -245,7 +244,7 @@ export function attachCompletionHandling({ onResult = null, onWatchIssue = null 
                 retryClockUids.delete(uid);
             }
         }
-        const explicitReconciliation = event.explicit === true || event.reason === 'refresh' || event.reason === 'reconcile';
+        const explicitReconciliation = event.explicit === true || event.reason === 'refresh';
         for (const uid of desired) {
             const status = statusOf.get(uid);
             const previous = lastStatus.get(uid);

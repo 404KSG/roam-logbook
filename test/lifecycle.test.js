@@ -338,8 +338,12 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
     });
     clock.refresh();
 
-    const [entry] = clock.getRunning();
-    assert.equal(entry.priorMinutes, 120, 'banked time is derived on refresh, not queried per tick');
+    const activeWork = clock.getActiveWork(new Date('2026-08-08T12:00:00'));
+    assert.equal(
+        activeWork.focused.priorMinutes,
+        120,
+        'banked time is derived by Active Work, not queried per tick'
+    );
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
     assert.match(topbarWidget().querySelector('button').title, /2h 0\dm on this task in total/);
     assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);

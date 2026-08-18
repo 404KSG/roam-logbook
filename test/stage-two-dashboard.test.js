@@ -238,6 +238,36 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     dashboard.destroy();
 });
 
+test('Dashboard discard confirmation reuses the cached snapshot before the write', async () => {
+    const nowMs = new Date('2026-08-15T09:00:00').getTime();
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const clockUid = clock.getRunning()[0].clockUid;
+    const originalQuery = graph.api.data.q;
+    let entryReads = 0;
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes('LOGBOOK:')) entryReads += 1;
+        return originalQuery(...args);
+    };
+    const dashboard = createDashboard({ now: () => new Date(nowMs) });
+
+    try {
+        dashboard.open();
+        const readsAfterOpen = entryReads;
+        const discard = document.querySelector('[data-action="discard"]');
+        discard.click();
+
+        assert.equal(entryReads, readsAfterOpen, 'first confirmation does not reread the graph');
+        document.querySelector('[data-action="discard"]').click();
+        await settle();
+
+        assert.equal(graph.store.has(clockUid), false);
+        assert.ok(entryReads > readsAfterOpen, 'the confirmed write still refreshes from the graph');
+    } finally {
+        graph.api.data.q = originalQuery;
+        dashboard.destroy();
+    }
+});
+
 test('Dashboard By Task exposes status-aware focus actions and switches the single CLOCK in place', async () => {
     graph = installGraph([
         { uid: 'dash-idle-task', string: '{{[[TODO]]}} Idle TODO task', parent: null },

@@ -1118,7 +1118,7 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     const recentSection = list.querySelector('.rlb-surface__section--recent');
     const focused = focusedSection.querySelector('[data-session-state="running"]');
     const recent = recentSection.querySelector('[data-session-state="recent"]');
-    assert.ok(focused.classList.contains('rlb-run--focused'));
+    assert.equal(focused.classList.contains('rlb-run--focused'), false);
     assert.ok(recent.classList.contains('rlb-run--recent'));
     assert.equal(focusedSection.querySelectorAll('.rlb-run').length, 1);
     assert.equal(recentSection.querySelectorAll('.rlb-run').length, 1);
@@ -1146,9 +1146,15 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     assert.equal(surface.querySelectorAll('.rlb-run__status').length, 0);
 
     const atWindowEdge = new Date('2026-08-15T09:45:00');
-    updateSessionSurfaceElapsed(surface, clock.getRunning(), atWindowEdge, clock.getActiveWork(atWindowEdge).recent);
+    const activeWork = clock.getActiveWork(atWindowEdge);
+    updateSessionSurfaceElapsed(
+        surface,
+        activeWork.focused ? [activeWork.focused] : clock.getRunning(),
+        atWindowEdge,
+        activeWork.recent
+    );
     assert.ok(focused.classList.contains('rlb-run--overrun'));
-    assert.ok(focusedSection.classList.contains('rlb-surface__section--overrun'));
+    assert.equal(focusedSection.classList.contains('rlb-surface__section--overrun'), false);
     assert.equal(recentMeta.textContent, '2m total · leaves in 2m');
     assert.match(focusedSection.querySelector('.rlb-run__elapsed').textContent, /^\d+:\d{2}$/);
     assert.match(focusedSection.querySelector('.rlb-run__total').textContent, /^\d+\w+ total$/);

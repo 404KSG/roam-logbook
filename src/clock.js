@@ -122,8 +122,8 @@ const uncertainCloseResult = (
 /**
  * Re-read the graph and publish the current set of open clocks.
  *
- * Each open clock is tagged with `priorMinutes`, the time already banked against
- * the same task. A failed read leaves the last valid snapshot untouched.
+ * A failed read leaves the last valid snapshot untouched. Active Work derives
+ * `priorMinutes` from this snapshot when it is requested.
  */
 export function refresh({ entries, notify: shouldNotify = true } = {}) {
     let all;
@@ -139,17 +139,7 @@ export function refresh({ entries, notify: shouldNotify = true } = {}) {
         return running;
     }
 
-    const bankedByTask = new Map();
-    for (const entry of all) {
-        if (entry.running) continue;
-        bankedByTask.set(entry.taskUid, (bankedByTask.get(entry.taskUid) || 0) + (entry.minutes || 0));
-    }
-
-    entriesSnapshot = all.map(entry =>
-        entry.running
-            ? { ...entry, priorMinutes: bankedByTask.get(entry.taskUid) || 0 }
-            : { ...entry }
-    );
+    entriesSnapshot = all;
     const focused = chooseFocusedEntry(entriesSnapshot);
     // The graph may contain legacy overlapping CLOCKs. Keep the public running
     // seam single-focused immediately; reconcileOpenClocks() then closes the
@@ -275,50 +265,60 @@ function postWriteConfirmationError(clockUid, action) {
 async function closeEntriesNow(entries, clockUids, now, { publish = true } = {}) {
     const byUid = new Map(entries.filter(entry => entry.running).map(entry => [entry.clockUid, entry]));
     const ids = clockUids === null ? [...byUid.keys()] : [...new Set(clockUids)];
-    const results = [];
+    const resultByUid = new Map();
+    const writtenClockUids = [];
 
     let uncertain = null;
     for (const clockUid of ids) {
         const entry = byUid.get(clockUid);
         if (!entry) {
-            results.push({ clockUid, closed: false, reason: 'not-running' });
+            resultByUid.set(clockUid, { clockUid, closed: false, reason: 'not-running' });
             continue;
         }
         try {
             const closed = await closeEntry(entry, now);
             if (!closed) {
-                results.push({ clockUid, closed: false, reason: 'not-running' });
+                resultByUid.set(clockUid, { clockUid, closed: false, reason: 'not-running' });
                 continue;
             }
-            const confirmation = refreshResult({ notify: false });
-            if (!confirmation.ok) {
-                results.push({
-                    clockUid,
-                    closed: false,
-                    uncertain: true,
-                });
-                uncertain = confirmation;
-                break;
-            }
-            const confirmed = entriesSnapshot.find(
-                item => item.clockUid === clockUid && item.running === false
-            );
-            if (!confirmed) {
-                const error = postWriteConfirmationError(clockUid, 'Clock Out');
-                results.push({ clockUid, closed: false, uncertain: true });
-                uncertain = { ok: false, uncertain: true, error, notice: GRAPH_UNCERTAIN };
-                break;
-            }
-            results.push({ clockUid, closed: true });
+            writtenClockUids.push(clockUid);
         } catch (error) {
-            results.push({ clockUid, closed: false, error });
+            resultByUid.set(clockUid, { clockUid, closed: false, error });
         }
     }
 
-    const retryClockUids = ids.filter(clockUid => {
-        const result = results.find(item => item.clockUid === clockUid);
-        return !result || Boolean(result.error) || result.uncertain === true;
-    });
+    // Confirm the whole write batch with one graph read. A failed read leaves
+    // every successfully written UID retryable because its final state is
+    // unknown; a successful read verifies each requested UID from one snapshot.
+    if (writtenClockUids.length > 0) {
+        const confirmation = refreshResult({ notify: false });
+        if (!confirmation.ok) {
+            uncertain = confirmation;
+            for (const clockUid of writtenClockUids) {
+                resultByUid.set(clockUid, { clockUid, closed: false, uncertain: true });
+            }
+        } else {
+            const confirmedClosedClockUids = new Set(
+                entriesSnapshot.filter(item => item.running === false).map(item => item.clockUid)
+            );
+            for (const clockUid of writtenClockUids) {
+                if (confirmedClosedClockUids.has(clockUid)) {
+                    resultByUid.set(clockUid, { clockUid, closed: true });
+                    continue;
+                }
+                const error = postWriteConfirmationError(clockUid, 'Clock Out');
+                resultByUid.set(clockUid, { clockUid, closed: false, uncertain: true });
+                uncertain = { ok: false, uncertain: true, error, notice: GRAPH_UNCERTAIN };
+            }
+        }
+    }
+
+    const results = ids.map(clockUid =>
+        resultByUid.get(clockUid) || { clockUid, closed: false, uncertain: true }
+    );
+    const retryClockUids = results
+        .filter(result => !result || Boolean(result.error) || result.uncertain === true)
+        .map(result => result.clockUid);
     const closed = results.filter(result => result.closed).length;
     const failed = results.filter(result => result.error).length;
     const pending = retryClockUids.length;
@@ -605,7 +605,7 @@ export async function clockOutEntries(
                     prepareStarted = true;
                     await prepare(entries.map(entry => ({ ...entry })));
                 }
-                const outcome = await closeEntriesNow(entries, clockUids, now);
+                const outcome = await closeEntriesNow(entries, clockUids, now, { publish: false });
                 const result = { ...outcome, entries };
                 if (!outcome.uncertain) {
                     for (const closed of outcome.results.filter(item => item.closed)) {
@@ -618,10 +618,8 @@ export async function clockOutEntries(
                         });
                     }
                 }
-                // Batch close changes the confirmed running snapshot without
-                // using closeEntriesNow's normal per-session publish path.
-                // Notify subscribers once so the shared Pomodoro cycle and
-                // surfaces reconcile the final batch state together.
+                // closeEntriesNow is silent for this batch; publish one final
+                // snapshot notification after all results and actions settle.
                 notify();
                 return result;
             });
@@ -636,28 +634,7 @@ export async function clockOutEntries(
 
 /** Close all currently running clocks and return a structured batch result. */
 export async function clockOutAll({ now = new Date(), source = 'user' } = {}) {
-    let outcome;
-    try {
-        outcome = await clockOutEntries(null, { now, source });
-    } catch (error) {
-        notice = GRAPH_UNCERTAIN;
-        const pendingClockUids = running.map(entry => entry.clockUid);
-        return {
-            action: 'clock-out-all',
-            ok: false,
-            item: 'Session',
-            completedVerb: 'ended',
-            count: 0,
-            completed: 0,
-            failed: pendingClockUids.length,
-            pending: pendingClockUids.length,
-            pendingClockUids,
-            uncertain: true,
-            partial: false,
-            retry: { action: 'close', retryClockUids: pendingClockUids, writtenClockUids: [] },
-            error,
-        };
-    }
+    const outcome = await clockOutEntries(null, { now, source });
     if (outcome.uncertain) {
         notice = GRAPH_UNCERTAIN;
     } else if (outcome.failed > 0) {

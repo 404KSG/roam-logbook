@@ -117,11 +117,6 @@ export function queryOrThrow(datalog, ...args) {
     return result.rows;
 }
 
-/** Compatibility alias for callers that require a confirmed graph read. */
-export function query(datalog, ...args) {
-    return queryOrThrow(datalog, ...args);
-}
-
 export function getBlockString(uid) {
     if (!uid) return null;
     let rows;
@@ -256,20 +251,6 @@ export function getChildren(uid) {
     return rows
         .map(([childUid, string, order]) => ({ uid: childUid, string, order }))
         .sort((a, b) => a.order - b.order);
-}
-
-export function getPageTitleOfBlock(uid) {
-    if (!uid) return null;
-    const rows = validateQueryRows(
-        queryOrThrow(
-            `[:find ?title :in $ ?uid
-          :where [?b :block/uid ?uid] [?b :block/page ?p] [?p :node/title ?title]]`,
-            uid
-        ),
-        'page title',
-        row => row.length >= 1 && typeof row[0] === 'string'
-    );
-    return rows[0]?.[0] ?? null;
 }
 
 export async function createBlock({ parentUid, order, string, uid, open }) {
