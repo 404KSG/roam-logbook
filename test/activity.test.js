@@ -133,6 +133,24 @@ test('Activity All time switches to complete calendar-year buckets beyond 24 mon
     assert.match(yearly.buckets[0].ariaLabel, /Jan 1, 2024.*30m.*1 Session/);
 });
 
+test('Activity All time keeps exactly 24 months monthly and switches at month 25', () => {
+    const exactlyTwentyFour = buildActivity(
+        [entry('month-24', '2024-09-15T09:00:00', '2024-09-15T09:30:00', 30)],
+        { now: NOW, rangeId: 'all' }
+    );
+    assert.equal(exactlyTwentyFour.unit, 'month');
+    assert.equal(exactlyTwentyFour.buckets.length, 24);
+    assert.equal(exactlyTwentyFour.buckets[0].dateKey, '2024-09-01');
+    assert.equal(exactlyTwentyFour.buckets.at(-1).dateKey, '2026-08-01');
+
+    const twentyFive = buildActivity(
+        [entry('month-25', '2024-08-15T09:00:00', '2024-08-15T09:30:00', 30)],
+        { now: NOW, rangeId: 'all' }
+    );
+    assert.equal(twentyFive.unit, 'year');
+    assert.deepEqual(twentyFive.buckets.map(bucket => bucket.dateLabel), ['2024', '2025', '2026']);
+});
+
 test('Activity density is explicit and prioritises short-range readability', () => {
     assert.equal(getActivityDensity('week', 'day', 7).barWidthPx, 42);
     assert.ok(getActivityDensity('week', 'day', 7).barWidthPx > 18);
