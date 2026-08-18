@@ -1158,7 +1158,7 @@ test('Dashboard task controls flow naturally at every width without overlap', as
     assert.equal(desktop.bodyOverflowY, 'auto', JSON.stringify(desktop));
 });
 
-test('Activity chart keeps desktop duration/date hierarchy, panel height, and theme green', async t => {
+test('Activity chart keeps desktop duration/date hierarchy, uses a wide 7-day density, and stays theme green', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const buckets = [
         ['2026-08-09', '1h 00m', 'Aug 9', '96px'],
@@ -1169,7 +1169,7 @@ test('Activity chart keeps desktop duration/date hierarchy, panel height, and th
         ['2026-08-14', '30m', 'Aug 14', '48px'],
         ['2026-08-15', '15m', 'Aug 15', '24px'],
     ];
-    const markup = theme => `<div class="${theme}"><div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity" aria-labelledby="activity-title"><div class="rlb-panel__header"><h3 id="activity-title" class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 7 days" data-activity-range="week"><div class="rlb-activity__plot" style="--rlb-activity-columns:7">${buckets.map(([id, duration, date, height]) => `<div class="rlb-activity__bucket${duration === '0m' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="${id}" role="img" tabindex="0" aria-label="${date}, 2026 · ${duration} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${height}"></span></span><time class="rlb-activity__date">${date}</time></div>`).join('')}</div></div></section></div></div></div></div>`;
+    const markup = theme => `<div class="${theme}"><div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity" aria-labelledby="activity-title"><div class="rlb-panel__header"><h3 id="activity-title" class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 7 days" data-activity-range="week" data-activity-density="week-42" data-activity-bucket-count="7"><div class="rlb-activity__plot" data-activity-density="week-42" style="--rlb-activity-columns:7;--rlb-activity-bar-width:42px">${buckets.map(([id, duration, date, height]) => `<div class="rlb-activity__bucket${duration === '0m' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="${id}" role="img" tabindex="0" aria-label="${date}, 2026 · ${duration} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${height}"></span></span><time class="rlb-activity__date">${date}</time></div>`).join('')}</div></div></section></div></div></div></div>`;
     const expression = `(() => {
         const rect = node => { const value = node.getBoundingClientRect(); return { left:value.left, right:value.right, top:value.top, bottom:value.bottom, width:value.width, height:value.height }; };
         const activity = document.querySelector('.rlb-activity');
@@ -1186,6 +1186,8 @@ test('Activity chart keeps desktop duration/date hierarchy, panel height, and th
             durationAboveBar: duration.getBoundingClientRect().bottom <= bar.getBoundingClientRect().top + 1,
             dateBelowBar: date.getBoundingClientRect().top >= bar.getBoundingClientRect().bottom - 1,
             green: getComputedStyle(bar).backgroundColor,
+            barWidth: bar.getBoundingClientRect().width,
+            density: chart.dataset.activityDensity,
             zeroOpacity: getComputedStyle(document.querySelector('.rlb-activity__bucket--empty .rlb-activity__bar')).opacity,
             overflow: getComputedStyle(chart).overflow,
         };
@@ -1201,6 +1203,8 @@ test('Activity chart keeps desktop duration/date hierarchy, panel height, and th
         assert.equal(geometry.noOverflow, true, JSON.stringify({ theme, geometry }));
         assert.equal(geometry.durationAboveBar, true, JSON.stringify({ theme, geometry }));
         assert.equal(geometry.dateBelowBar, true, JSON.stringify({ theme, geometry }));
+        assert.ok(geometry.barWidth > 18, JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.density, 'week-42', JSON.stringify({ theme, geometry }));
         assert.equal(geometry.overflow, 'hidden', JSON.stringify({ theme, geometry }));
         assert.equal(
             geometry.green,
@@ -1211,15 +1215,15 @@ test('Activity chart keeps desktop duration/date hierarchy, panel height, and th
     }
 });
 
-test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and preserves non-zero labels', async t => {
+test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and uses numeric hour labels', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const columns = Array.from({ length: 30 }, (_, index) => {
         const day = String(index + 1);
-        const duration = index === 12 ? '1h30' : index === 0 ? '30m' : '0m';
+        const duration = index === 12 ? '1.5' : index === 0 ? '0.5' : '0';
         const month = index === 0 ? 'Aug ' : '';
-        return `<div class="rlb-activity__bucket${duration === '0m' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="day-${index}" role="img" tabindex="0" aria-label="${month}${day}, 2026 · ${duration} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${duration === '0m' ? 2 : index === 12 ? 96 : 30}px"></span></span><time class="rlb-activity__date">${month}${day}</time></div>`;
+        return `<div class="rlb-activity__bucket${duration === '0' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="day-${index}" role="img" tabindex="0" aria-label="${month}${day}, 2026 · ${duration === '1.5' ? '1h 30m' : duration === '0.5' ? '30m' : '0m'} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${duration === '0' ? 2 : index === 12 ? 96 : 30}px"></span></span><time class="rlb-activity__date">${month}${day}</time></div>`;
     }).join('');
-    const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity"><div class="rlb-panel__header"><h3 class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 30 days" data-activity-range="month"><div class="rlb-activity__plot" style="--rlb-activity-columns:30">${columns}</div></div></section></div></div></div>`;
+    const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity"><div class="rlb-panel__header"><h3 class="rlb-section__title">Activity</h3><span class="rlb-activity__unit">HOURS</span></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 30 days" data-activity-range="month" data-activity-density="month-10" data-activity-bucket-count="30"><div class="rlb-activity__plot" data-activity-density="month-10" style="--rlb-activity-columns:30;--rlb-activity-bar-width:10px">${columns}</div></div></section></div></div></div>`;
     const geometry = await withChromium(
         htmlWithLateHost(markup),
         `(() => {
@@ -1233,6 +1237,8 @@ test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and pres
                 chartOverflow: chart.scrollWidth > chart.clientWidth + 1,
                 nonZeroDurations: nonZero.map(node => node.querySelector('.rlb-activity__duration').textContent),
                 nonZeroDates: nonZero.map(node => node.querySelector('.rlb-activity__date').textContent),
+                barWidth: nonZero[0].querySelector('.rlb-activity__bar').getBoundingClientRect().width,
+                density: chart.dataset.activityDensity,
                 fontSize: getComputedStyle(nonZero[0].querySelector('.rlb-activity__duration')).fontSize,
             };
         })()`,
@@ -1242,7 +1248,9 @@ test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and pres
     assert.ok(geometry.panelHeight >= 180 && geometry.panelHeight <= 205, JSON.stringify(geometry));
     assert.equal(geometry.dialogOverflow, false, JSON.stringify(geometry));
     assert.equal(geometry.chartOverflow, false, JSON.stringify(geometry));
-    assert.deepEqual(geometry.nonZeroDurations, ['30m', '1h30'], JSON.stringify(geometry));
+    assert.deepEqual(geometry.nonZeroDurations, ['0.5', '1.5'], JSON.stringify(geometry));
     assert.deepEqual(geometry.nonZeroDates, ['Aug 1', '13'], JSON.stringify(geometry));
+    assert.equal(geometry.barWidth, 10, JSON.stringify(geometry));
+    assert.equal(geometry.density, 'month-10', JSON.stringify(geometry));
     assert.ok(Number.parseFloat(geometry.fontSize) <= 10, JSON.stringify(geometry));
 });

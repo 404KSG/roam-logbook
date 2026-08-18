@@ -1025,11 +1025,17 @@ test('Dashboard Activity changes bucket annotation with the existing range selec
     assert.equal(activity.querySelectorAll('[data-activity-bucket]').length, 30);
     assert.equal(
         activity.querySelector('[data-activity-bucket="2026-08-01"] .rlb-activity__duration').textContent,
-        '1h30'
+        '1.5'
     );
     assert.equal(
         activity.querySelector('[data-activity-bucket="2026-08-01"] .rlb-activity__date').textContent,
         'Aug 1'
+    );
+    assert.equal(activity.querySelector('.rlb-activity__unit').textContent, 'HOURS');
+    assert.equal(activity.querySelector('.rlb-activity__chart').dataset.activityDensity, 'month-10');
+    assert.match(
+        activity.querySelector('[data-activity-bucket="2026-08-01"]').getAttribute('aria-label'),
+        /Aug 1, 2026.*1h 30m.*1 Session/
     );
 
     dashboard.destroy();

@@ -41,6 +41,9 @@ export function renderActivity(activity) {
     const heading = el('div', 'rlb-panel__header');
     heading.appendChild(el('h3', 'rlb-section__title', 'Activity'));
     heading.querySelector('.rlb-section__title').id = titleId;
+    if (activity.durationFormat === 'hours') {
+        heading.appendChild(el('span', 'rlb-activity__unit', 'HOURS'));
+    }
     section.appendChild(heading);
 
     const chart = el('div', 'rlb-activity__chart');
@@ -48,9 +51,13 @@ export function renderActivity(activity) {
     chart.setAttribute('aria-label', `Activity for ${activityRangeLabel(activity.rangeId)}`);
     chart.dataset.activityRange = activity.rangeId;
     chart.dataset.activityUnit = activity.unit;
+    chart.dataset.activityDensity = activity.density.id;
+    chart.dataset.activityBucketCount = String(activity.buckets.length);
 
     const plot = el('div', 'rlb-activity__plot');
     plot.style.setProperty('--rlb-activity-columns', String(activity.buckets.length));
+    plot.style.setProperty('--rlb-activity-bar-width', `${activity.density.barWidthPx}px`);
+    plot.dataset.activityDensity = activity.density.id;
     const maxMinutes = activity.maxMinutes;
     for (const bucket of activity.buckets) {
         const column = el('div', 'rlb-activity__bucket');
@@ -58,6 +65,7 @@ export function renderActivity(activity) {
         column.dataset.activityDuration = bucket.durationLabel;
         column.dataset.activityMinutes = String(bucket.minutes);
         column.dataset.activitySessions = String(bucket.sessionCount);
+        column.dataset.activityUnit = bucket.unit;
         column.tabIndex = 0;
         column.setAttribute('role', 'img');
         column.title = bucket.ariaLabel;

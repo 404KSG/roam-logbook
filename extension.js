@@ -2063,8 +2063,7 @@ function findStaleClocks(entries, now, staleHours2) {
 }
 
 // src/activity.js
-var DAY_MS = 864e5;
-var ALL_TIME_WEEK_LIMIT_DAYS = 90;
+var ALL_TIME_MONTH_LIMIT = 24;
 var MONTH_NAMES2 = [
   "Jan",
   "Feb",
@@ -2087,22 +2086,12 @@ var nextDay = (date) => {
   next.setDate(next.getDate() + 1);
   return next;
 };
-var advanceDays = (date, count) => {
-  const result = cloneDay(date);
-  result.setDate(result.getDate() + count);
-  return result;
-};
 var nextMonth = (date) => new Date(date.getFullYear(), date.getMonth() + 1, 1);
 var startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
-var startOfWeek = (date) => {
-  const start = startOfDay(date);
-  const daysFromMonday = (start.getDay() + 6) % 7;
-  start.setDate(start.getDate() - daysFromMonday);
-  return start;
-};
 var formatTime = (date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 var formatShortDate = (date) => `${MONTH_NAMES2[date.getMonth()]} ${date.getDate()}`;
 var formatFullDate = (date) => `${MONTH_NAMES2[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+var formatYearPeriod = (year) => `Jan 1, ${year} \u2013 Dec 31, ${year}`;
 function formatActivityDuration(minutes, { compact = false } = {}) {
   const safe = Math.max(0, Math.round(Number(minutes) || 0));
   if (!compact)
@@ -2113,9 +2102,40 @@ function formatActivityDuration(minutes, { compact = false } = {}) {
   const remainder = safe % 60;
   return remainder === 0 ? `${hours}h` : `${hours}h${pad2(remainder)}`;
 }
+function formatActivityHours(minutes) {
+  const safe = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.round(safe / 60 * 10) / 10;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+}
+function getActivityDensity(rangeId, unit, bucketCount) {
+  const count = Math.max(1, Number(bucketCount) || 1);
+  if (rangeId === "today" || unit === "session") {
+    const barWidthPx = count <= 4 ? 42 : count <= 8 ? 32 : count <= 16 ? 24 : count <= 24 ? 18 : 14;
+    return { id: `today-${barWidthPx}`, barWidthPx, bucketCount: count };
+  }
+  if (rangeId === "week")
+    return { id: "week-42", barWidthPx: 42, bucketCount: count };
+  if (rangeId === "month")
+    return { id: "month-10", barWidthPx: 10, bucketCount: count };
+  if (unit === "year")
+    return { id: "all-year-32", barWidthPx: 32, bucketCount: count };
+  return {
+    id: count <= 12 ? "all-month-30" : "all-month-18",
+    barWidthPx: count <= 12 ? 30 : 18,
+    bucketCount: count
+  };
+}
 var sessionLabel = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-var bucketAriaLabel = (bucket, dateText) => `${dateText} \xB7 ${formatMinutesHuman(bucket.minutes)} \xB7 ${sessionLabel(bucket.sessionCount)}`;
-var createBucket = ({ id, start, unit, compact = false, dateLabel, monthLabel = "" }) => ({
+var bucketAriaLabel = (bucket, dateText) => `${dateText} \xB7 ${bucket.fullDurationLabel || formatMinutesHuman(bucket.minutes)} \xB7 ${sessionLabel(bucket.sessionCount)}`;
+var createBucket = ({
+  id,
+  start,
+  unit,
+  durationFormat = "human",
+  dateLabel,
+  monthLabel = "",
+  fullDateLabel
+}) => ({
   id,
   unit,
   dateKey: dateKey(start),
@@ -2125,21 +2145,24 @@ var createBucket = ({ id, start, unit, compact = false, dateLabel, monthLabel = 
   sessionCount: 0,
   runningClockUids: [],
   runningEntries: [],
-  durationLabel: formatActivityDuration(0, { compact }),
+  durationFormat,
+  durationLabel: durationFormat === "hours" ? formatActivityHours(0) : formatActivityDuration(0, { compact: durationFormat === "compact" }),
+  fullDurationLabel: formatActivityDuration(0),
   dateLabel,
   monthLabel,
-  fullDateLabel: formatFullDate(start),
+  fullDateLabel: fullDateLabel || (unit === "month" ? `${MONTH_NAMES2[start.getMonth()]} ${start.getFullYear()}` : unit === "year" ? String(start.getFullYear()) : formatFullDate(start)),
   ariaLabel: bucketAriaLabel(
-    { minutes: 0, sessionCount: 0 },
-    unit === "session" ? `${formatFullDate(start)} at ${formatTime(start)}` : formatFullDate(start)
+    { minutes: 0, fullDurationLabel: formatMinutesHuman(0), sessionCount: 0 },
+    unit === "session" ? `${formatFullDate(start)} at ${formatTime(start)}` : fullDateLabel || (unit === "month" ? `${MONTH_NAMES2[start.getMonth()]} ${start.getFullYear()}` : unit === "year" ? String(start.getFullYear()) : formatFullDate(start))
   )
 });
-var refreshBucketLabels = (bucket, compact, dateText = bucket.fullDateLabel) => {
-  bucket.durationLabel = formatActivityDuration(bucket.minutes, { compact });
+var refreshBucketLabels = (bucket, dateText = bucket.fullDateLabel) => {
+  bucket.durationLabel = bucket.durationFormat === "hours" ? formatActivityHours(bucket.minutes) : formatActivityDuration(bucket.minutes, { compact: bucket.durationFormat === "compact" });
+  bucket.fullDurationLabel = formatActivityDuration(bucket.minutes);
   bucket.ariaLabel = bucketAriaLabel(bucket, dateText);
   return bucket;
 };
-var addEntryToBucket = (bucket, entry, now, compact, dateText) => {
+var addEntryToBucket = (bucket, entry, now, dateText) => {
   const minutes = entryMinutes(entry, now);
   bucket.minutes += minutes;
   bucket.sessionCount += 1;
@@ -2149,9 +2172,9 @@ var addEntryToBucket = (bucket, entry, now, compact, dateText) => {
   } else {
     bucket.fixedMinutes += minutes;
   }
-  refreshBucketLabels(bucket, compact, dateText);
+  refreshBucketLabels(bucket, dateText);
 };
-var emptyDailyBuckets = (start, count, compact) => {
+var emptyDailyBuckets = (start, count, durationFormat) => {
   const buckets = [];
   let cursor = cloneDay(start);
   for (let index = 0; index < count; index += 1) {
@@ -2160,8 +2183,8 @@ var emptyDailyBuckets = (start, count, compact) => {
         id: dateKey(cursor),
         start: cloneDay(cursor),
         unit: "day",
-        compact,
-        dateLabel: compact ? String(cursor.getDate()) : formatShortDate(cursor)
+        durationFormat,
+        dateLabel: durationFormat === "hours" ? String(cursor.getDate()) : formatShortDate(cursor)
       })
     );
     cursor = nextDay(cursor);
@@ -2173,7 +2196,7 @@ var refreshDailyMonthLabels = (buckets) => {
     const isFirstVisibleBucket = index === 0;
     const isMonthStart = bucket.start.getDate() === 1;
     bucket.monthLabel = isFirstVisibleBucket || isMonthStart ? MONTH_NAMES2[bucket.start.getMonth()] : "";
-    refreshBucketLabels(bucket, true);
+    refreshBucketLabels(bucket);
   }
   return buckets;
 };
@@ -2187,9 +2210,10 @@ var buildToday = (entries, now) => {
       id: entry.clockUid || `session-${index + 1}`,
       start,
       unit: "session",
+      durationFormat: "human",
       dateLabel: formatTime(start)
     });
-    addEntryToBucket(bucket, entry, now, false, `${formatFullDate(start)} at ${formatTime(start)}`);
+    addEntryToBucket(bucket, entry, now, `${formatFullDate(start)} at ${formatTime(start)}`);
     return bucket;
   });
   return { unit: "session", buckets };
@@ -2197,55 +2221,56 @@ var buildToday = (entries, now) => {
 var buildDaily = (entries, now, rangeId) => {
   const count = rangeId === "today" ? 1 : rangeId === "month" ? 30 : 7;
   const start = rangeId === "today" ? startOfDay(now) : startOfDaysAgo(now, count - 1);
-  const compact = rangeId === "month";
-  const buckets = emptyDailyBuckets(start, count, compact);
+  const durationFormat = rangeId === "month" ? "hours" : "human";
+  const buckets = emptyDailyBuckets(start, count, durationFormat);
   const byDate = new Map(buckets.map((bucket) => [bucket.dateKey, bucket]));
   for (const entry of entries) {
     const bucket = byDate.get(dateKey(entry.start));
     if (!bucket)
       continue;
-    addEntryToBucket(bucket, entry, now, compact, bucket.fullDateLabel);
+    addEntryToBucket(bucket, entry, now, bucket.fullDateLabel);
   }
-  if (compact)
+  if (rangeId === "month")
     refreshDailyMonthLabels(buckets);
-  return { unit: "day", buckets };
+  return { unit: "day", durationFormat, buckets };
 };
 var buildAll = (entries, now) => {
   if (entries.length === 0)
     return { unit: "month", buckets: [] };
-  const firstDay = startOfDay(entries[0].start);
-  const lastDay = startOfDay(entries.at(-1).start);
-  const spanDays = Math.floor((lastDay.getTime() - firstDay.getTime()) / DAY_MS) + 1;
-  const unit = spanDays <= ALL_TIME_WEEK_LIMIT_DAYS ? "week" : "month";
-  const first = unit === "week" ? startOfWeek(firstDay) : startOfMonth(firstDay);
-  const last = unit === "week" ? startOfWeek(lastDay) : startOfMonth(lastDay);
+  const first = startOfMonth(entries[0].start);
+  const last = startOfMonth(now);
+  const monthSpan = (last.getFullYear() - first.getFullYear()) * 12 + last.getMonth() - first.getMonth() + 1;
+  const unit = monthSpan <= ALL_TIME_MONTH_LIMIT ? "month" : "year";
+  const firstBucket = unit === "month" ? first : new Date(first.getFullYear(), 0, 1);
+  const lastBucket = unit === "month" ? last : new Date(last.getFullYear(), 0, 1);
+  const monthCount = (lastBucket.getFullYear() - firstBucket.getFullYear()) * 12 + lastBucket.getMonth() - firstBucket.getMonth() + 1;
+  const durationFormat = unit === "month" && monthCount > 12 ? "compact" : "human";
   const buckets = [];
   const byKey = /* @__PURE__ */ new Map();
-  let cursor = first;
-  while (cursor.getTime() <= last.getTime()) {
+  let cursor = firstBucket;
+  while (cursor.getTime() <= lastBucket.getTime()) {
+    const id = unit === "month" ? `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}` : `${cursor.getFullYear()}`;
+    const dateLabel = unit === "month" ? cursor.getMonth() === 0 ? `${MONTH_NAMES2[cursor.getMonth()]} \u2019${String(cursor.getFullYear()).slice(-2)}` : MONTH_NAMES2[cursor.getMonth()] : String(cursor.getFullYear());
     const bucket = createBucket({
-      id: unit === "week" ? dateKey(cursor) : `${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}`,
+      id,
       start: cloneDay(cursor),
       unit,
-      compact: unit === "month",
-      dateLabel: unit === "week" ? formatShortDate(cursor) : MONTH_NAMES2[cursor.getMonth()]
+      durationFormat,
+      dateLabel,
+      fullDateLabel: unit === "month" ? `${MONTH_NAMES2[cursor.getMonth()]} ${cursor.getFullYear()}` : formatYearPeriod(cursor.getFullYear())
     });
     buckets.push(bucket);
-    byKey.set(unit === "week" ? dateKey(cursor) : bucket.id, bucket);
-    cursor = unit === "week" ? advanceDays(cursor, 7) : nextMonth(cursor);
+    byKey.set(bucket.id, bucket);
+    cursor = unit === "month" ? nextMonth(cursor) : new Date(cursor.getFullYear() + 1, 0, 1);
   }
   for (const entry of entries) {
-    const start = unit === "week" ? startOfWeek(entry.start) : startOfMonth(entry.start);
-    const key = unit === "week" ? dateKey(start) : `${start.getFullYear()}-${pad2(start.getMonth() + 1)}`;
+    const start = unit === "month" ? startOfMonth(entry.start) : new Date(entry.start.getFullYear(), 0, 1);
+    const key = unit === "month" ? `${start.getFullYear()}-${pad2(start.getMonth() + 1)}` : `${start.getFullYear()}`;
     const bucket = byKey.get(key);
     if (bucket)
-      addEntryToBucket(bucket, entry, now, unit === "month", bucket.fullDateLabel);
+      addEntryToBucket(bucket, entry, now, bucket.fullDateLabel);
   }
-  if (unit === "month") {
-    for (const bucket of buckets)
-      refreshBucketLabels(bucket, true, `${bucket.dateLabel} ${bucket.start.getFullYear()}`);
-  }
-  return { unit, buckets };
+  return { unit, durationFormat, buckets };
 };
 var finishActivity = (rangeId, entries, result) => {
   const buckets = result.buckets;
@@ -2258,14 +2283,20 @@ var finishActivity = (rangeId, entries, result) => {
     buckets,
     totalMinutes: totalMinutes2,
     maxMinutes,
-    allTimeWeekLimitDays: ALL_TIME_WEEK_LIMIT_DAYS
+    durationFormat: result.durationFormat || "human",
+    density: getActivityDensity(rangeId, result.unit, buckets.length),
+    allTimeMonthLimit: ALL_TIME_MONTH_LIMIT
   };
 };
 function buildActivity(entries, { now = /* @__PURE__ */ new Date(), rangeId = "week" } = {}) {
   const selectedRange = getRange(rangeId);
   const selectedEntries = filterByRange(Array.isArray(entries) ? entries : [], selectedRange.id, now).filter((entry) => isValidDate2(entry?.start)).sort((left, right) => left.start.getTime() - right.start.getTime());
   if (selectedEntries.length === 0) {
-    return finishActivity(selectedRange.id, selectedEntries, { unit: selectedRange.id === "today" ? "session" : "day", buckets: [] });
+    return finishActivity(selectedRange.id, selectedEntries, {
+      unit: selectedRange.id === "today" ? "session" : "day",
+      durationFormat: selectedRange.id === "month" ? "hours" : "human",
+      buckets: []
+    });
   }
   if (selectedRange.id === "today")
     return finishActivity(selectedRange.id, selectedEntries, buildToday(selectedEntries, now));
@@ -2280,7 +2311,10 @@ function refreshActivityBucket(bucket, now) {
     (sum, entry) => sum + entryMinutes(entry, now),
     0
   );
-  refreshBucketLabels(bucket, bucket.unit === "month", bucket.unit === "session" ? `${bucket.fullDateLabel} at ${formatTime(bucket.start)}` : bucket.unit === "week" ? bucket.fullDateLabel : `${bucket.dateLabel} ${bucket.start.getFullYear()}`);
+  refreshBucketLabels(
+    bucket,
+    bucket.unit === "session" ? `${bucket.fullDateLabel} at ${formatTime(bucket.start)}` : bucket.fullDateLabel
+  );
   return bucket;
 }
 
@@ -2355,14 +2389,21 @@ function renderActivity(activity) {
   const heading = el("div", "rlb-panel__header");
   heading.appendChild(el("h3", "rlb-section__title", "Activity"));
   heading.querySelector(".rlb-section__title").id = titleId;
+  if (activity.durationFormat === "hours") {
+    heading.appendChild(el("span", "rlb-activity__unit", "HOURS"));
+  }
   section.appendChild(heading);
   const chart = el("div", "rlb-activity__chart");
   chart.setAttribute("role", "group");
   chart.setAttribute("aria-label", `Activity for ${activityRangeLabel(activity.rangeId)}`);
   chart.dataset.activityRange = activity.rangeId;
   chart.dataset.activityUnit = activity.unit;
+  chart.dataset.activityDensity = activity.density.id;
+  chart.dataset.activityBucketCount = String(activity.buckets.length);
   const plot = el("div", "rlb-activity__plot");
   plot.style.setProperty("--rlb-activity-columns", String(activity.buckets.length));
+  plot.style.setProperty("--rlb-activity-bar-width", `${activity.density.barWidthPx}px`);
+  plot.dataset.activityDensity = activity.density.id;
   const maxMinutes = activity.maxMinutes;
   for (const bucket of activity.buckets) {
     const column = el("div", "rlb-activity__bucket");
@@ -2370,6 +2411,7 @@ function renderActivity(activity) {
     column.dataset.activityDuration = bucket.durationLabel;
     column.dataset.activityMinutes = String(bucket.minutes);
     column.dataset.activitySessions = String(bucket.sessionCount);
+    column.dataset.activityUnit = bucket.unit;
     column.tabIndex = 0;
     column.setAttribute("role", "img");
     column.title = bucket.ariaLabel;
@@ -2414,7 +2456,7 @@ function syncActivityView(section, activity, now) {
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.40";
+var PLUGIN_VERSION = "0.9.0-beta.41";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -5862,6 +5904,16 @@ var STYLES = `
     line-height: 18px;
 }
 
+.rlb-activity__unit {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.45px;
+    line-height: 1.25;
+    opacity: 0.78;
+}
+
 .rlb-activity__bar-wrap {
     display: flex;
     min-height: 0;
@@ -5871,7 +5923,8 @@ var STYLES = `
 
 .rlb-activity__bar {
     display: block;
-    width: min(18px, 62%);
+    width: var(--rlb-activity-bar-width, 18px);
+    max-width: 100%;
     min-height: 2px;
     max-height: 100%;
     border-radius: 2px 2px 0 0;
@@ -5884,7 +5937,6 @@ var STYLES = `
 }
 
 .rlb-activity__bucket--empty .rlb-activity__bar {
-    width: min(16px, 52%);
     opacity: 0.35;
 }
 
@@ -6218,14 +6270,6 @@ var STYLES = `
     .rlb-activity__duration,
     .rlb-activity__date {
         font-size: 8px;
-    }
-
-    .rlb-activity__bar {
-        width: min(12px, 72%);
-    }
-
-    .rlb-activity__bucket--empty .rlb-activity__bar {
-        width: min(10px, 62%);
     }
 
     .rlb-by-task > .rlb-section__heading {

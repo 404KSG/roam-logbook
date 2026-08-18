@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildActivity } from '../src/activity.js';
+import { buildActivity, getActivityDensity } from '../src/activity.js';
 
 const NOW = new Date(2026, 7, 15, 12, 0);
 
@@ -66,7 +66,7 @@ test('Activity Last 7 days uses seven start-day buckets and keeps cross-midnight
     assert.equal(activity.buckets[0].ariaLabel, 'Aug 9, 2026 · 1h 00m · 1 Session');
 });
 
-test('Activity Last 30 days keeps compact duration labels and marks month boundaries', () => {
+test('Activity Last 30 days uses decimal hours while accessibility keeps full duration', () => {
     const now = new Date(2026, 8, 15, 12, 0);
     const activity = buildActivity(
         [
@@ -82,45 +82,64 @@ test('Activity Last 30 days keeps compact duration labels and marks month bounda
     const september = activity.buckets.find(bucket => bucket.dateKey === '2026-09-01');
     assert.deepEqual(
         [august.minutes, august.durationLabel, august.dateLabel, august.monthLabel],
-        [90, '1h30', '31', '']
+        [90, '1.5', '31', '']
     );
     assert.deepEqual(
         [september.minutes, september.durationLabel, september.dateLabel, september.monthLabel],
-        [30, '30m', '1', 'Sep']
+        [30, '0.5', '1', 'Sep']
     );
+    assert.match(august.ariaLabel, /Aug 31, 2026.*1h 30m.*1 Session/);
+    assert.match(september.ariaLabel, /Sep 1, 2026.*30m.*1 Session/);
+    assert.equal(activity.durationFormat, 'hours');
 });
 
-test('Activity All time chooses weekly or monthly buckets across the complete span', () => {
-    const weekly = buildActivity(
-        [
-            entry('first', '2026-08-01T09:00:00', '2026-08-01T09:30:00', 30),
-            entry('last', '2026-08-20T09:00:00', '2026-08-20T10:00:00', 60),
-        ],
-        { now: NOW, rangeId: 'all' }
-    );
-    assert.equal(weekly.unit, 'week');
-    assert.equal(weekly.buckets.length, 4);
-    assert.equal(weekly.buckets.reduce((sum, bucket) => sum + bucket.minutes, 0), 90);
-    assert.equal(weekly.buckets[0].dateKey, '2026-07-27');
-    assert.equal(weekly.buckets.at(-1).dateKey, '2026-08-17');
-
+test('Activity All time keeps a complete calendar-month timeline through now', () => {
     const monthly = buildActivity(
         [
-            entry('january', '2026-01-15T09:00:00', '2026-01-15T09:30:00', 30),
-            entry('may', '2026-05-20T09:00:00', '2026-05-20T10:00:00', 60),
+            entry('first', '2026-06-01T09:00:00', '2026-06-01T09:30:00', 30),
+            entry('last', '2026-07-20T09:00:00', '2026-07-20T10:00:00', 60),
         ],
         { now: NOW, rangeId: 'all' }
     );
     assert.equal(monthly.unit, 'month');
+    assert.equal(monthly.buckets.length, 3);
     assert.deepEqual(monthly.buckets.map(bucket => bucket.dateKey), [
-        '2026-01-01',
-        '2026-02-01',
-        '2026-03-01',
-        '2026-04-01',
-        '2026-05-01',
+        '2026-06-01',
+        '2026-07-01',
+        '2026-08-01',
     ]);
-    assert.deepEqual(monthly.buckets.map(bucket => bucket.minutes), [30, 0, 0, 0, 60]);
-    assert.deepEqual(monthly.buckets.map(bucket => bucket.durationLabel), ['30m', '0m', '0m', '0m', '1h']);
+    assert.deepEqual(monthly.buckets.map(bucket => bucket.minutes), [30, 60, 0]);
+    assert.equal(monthly.buckets.at(-1).start.getTime(), new Date('2026-08-01T00:00:00').getTime());
+    assert.equal(monthly.buckets[0].durationLabel, '30m');
+    assert.equal(monthly.buckets[0].dateLabel, 'Jun');
+    assert.equal(monthly.buckets.at(-1).dateLabel, 'Aug');
+    assert.match(monthly.buckets[0].ariaLabel, /Jun 2026.*30m.*1 Session/);
+});
+
+test('Activity All time switches to complete calendar-year buckets beyond 24 months', () => {
+    const yearly = buildActivity(
+        [
+            entry('january', '2024-01-15T09:00:00', '2024-01-15T09:30:00', 30),
+            entry('may', '2025-05-20T09:00:00', '2025-05-20T10:00:00', 60),
+        ],
+        { now: NOW, rangeId: 'all' }
+    );
+    assert.equal(yearly.unit, 'year');
+    assert.deepEqual(yearly.buckets.map(bucket => bucket.dateKey), ['2024-01-01', '2025-01-01', '2026-01-01']);
+    assert.deepEqual(yearly.buckets.map(bucket => bucket.minutes), [30, 60, 0]);
+    assert.deepEqual(yearly.buckets.map(bucket => bucket.dateLabel), ['2024', '2025', '2026']);
+    assert.equal(yearly.buckets.at(-1).start.getFullYear(), 2026);
+    assert.equal(yearly.buckets[0].durationLabel, '30m');
+    assert.match(yearly.buckets[0].ariaLabel, /Jan 1, 2024.*30m.*1 Session/);
+});
+
+test('Activity density is explicit and prioritises short-range readability', () => {
+    assert.equal(getActivityDensity('week', 'day', 7).barWidthPx, 42);
+    assert.ok(getActivityDensity('week', 'day', 7).barWidthPx > 18);
+    assert.equal(getActivityDensity('month', 'day', 30).barWidthPx, 10);
+    assert.ok(getActivityDensity('today', 'session', 3).barWidthPx > getActivityDensity('today', 'session', 12).barWidthPx);
+    assert.ok(getActivityDensity('all', 'month', 8).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
+    assert.ok(getActivityDensity('all', 'year', 3).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
 });
 
 test('Activity includes a running Session in its cached derived bucket without changing range semantics', () => {

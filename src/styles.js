@@ -1590,6 +1590,16 @@ export const STYLES = `
     line-height: 18px;
 }
 
+.rlb-activity__unit {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.45px;
+    line-height: 1.25;
+    opacity: 0.78;
+}
+
 .rlb-activity__bar-wrap {
     display: flex;
     min-height: 0;
@@ -1599,7 +1609,8 @@ export const STYLES = `
 
 .rlb-activity__bar {
     display: block;
-    width: min(18px, 62%);
+    width: var(--rlb-activity-bar-width, 18px);
+    max-width: 100%;
     min-height: 2px;
     max-height: 100%;
     border-radius: 2px 2px 0 0;
@@ -1612,7 +1623,6 @@ export const STYLES = `
 }
 
 .rlb-activity__bucket--empty .rlb-activity__bar {
-    width: min(16px, 52%);
     opacity: 0.35;
 }
 
@@ -1946,14 +1956,6 @@ export const STYLES = `
     .rlb-activity__duration,
     .rlb-activity__date {
         font-size: 8px;
-    }
-
-    .rlb-activity__bar {
-        width: min(12px, 72%);
-    }
-
-    .rlb-activity__bucket--empty .rlb-activity__bar {
-        width: min(10px, 62%);
     }
 
     .rlb-by-task > .rlb-section__heading {

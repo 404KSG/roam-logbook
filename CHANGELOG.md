@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0-beta.41 — 2026-08-18
+
+- Refined the single-page Activity panel's density model: Last 7 days uses
+  clearly wider daily bars, Today adapts bar width to the number of Sessions,
+  and dense 30-day buckets use narrow bars with decimal-hour labels and a
+  quiet `HOURS` context.
+- Kept All time as a complete Dashboard range while changing only its Activity
+  aggregation: calendar months through the current month for spans up to 24
+  months, then calendar years, with empty periods retained as baselines.
+- Preserved full duration/date/Session information in tooltips and ARIA,
+  cached live updates, Org start-day semantics, the Timing → Activity → By Task
+  order, and the no-extra-query/no-dependency boundary.
+
 ## 0.9.0-beta.40 — 2026-08-18
 
 - Added a single-page Activity panel between Timing and By Task, using the
