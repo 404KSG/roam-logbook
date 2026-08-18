@@ -88,8 +88,16 @@ function notify(meta = { reason: 'mutation' }) {
     }
 }
 
-const uncertainCloseResult = (error, entries = running, { preflight = false } = {}) => {
-    const pendingClockUids = entries.filter(entry => entry.running).map(entry => entry.clockUid);
+const uncertainCloseResult = (
+    error,
+    entries = running,
+    clockUids = null,
+    { preflight = false } = {}
+) => {
+    const scope = clockUids === null ? null : new Set(clockUids);
+    const pendingClockUids = entries
+        .filter(entry => entry.running && (scope === null || scope.has(entry.clockUid)))
+        .map(entry => entry.clockUid);
     return {
         action: 'close-sessions',
         ok: false,
@@ -247,6 +255,16 @@ async function closeEntry(entry, end) {
     return true;
 }
 
+function postWriteConfirmationError(clockUid, action) {
+    return new GraphReadError(`${action} for CLOCK ${clockUid} was not confirmed after graph refresh.`, {
+        issue: {
+            kind: 'post-write-confirmation',
+            source: action,
+            affectedUids: [clockUid],
+        },
+    });
+}
+
 /**
  * Close a confirmed set of entries inside an already-queued mutation.
  *
@@ -268,14 +286,30 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
         }
         try {
             const closed = await closeEntry(entry, now);
-            results.push({ clockUid, closed });
-            if (closed) {
-                const confirmation = refreshResult({ notify: false });
-                if (!confirmation.ok) {
-                    uncertain = confirmation;
-                    break;
-                }
+            if (!closed) {
+                results.push({ clockUid, closed: false, reason: 'not-running' });
+                continue;
             }
+            const confirmation = refreshResult({ notify: false });
+            if (!confirmation.ok) {
+                results.push({
+                    clockUid,
+                    closed: false,
+                    uncertain: true,
+                });
+                uncertain = confirmation;
+                break;
+            }
+            const confirmed = entriesSnapshot.find(
+                item => item.clockUid === clockUid && item.running === false
+            );
+            if (!confirmed) {
+                const error = postWriteConfirmationError(clockUid, 'Clock Out');
+                results.push({ clockUid, closed: false, uncertain: true });
+                uncertain = { ok: false, uncertain: true, error, notice: GRAPH_UNCERTAIN };
+                break;
+            }
+            results.push({ clockUid, closed: true });
         } catch (error) {
             results.push({ clockUid, closed: false, error });
         }
@@ -283,7 +317,7 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
 
     const retryClockUids = ids.filter(clockUid => {
         const result = results.find(item => item.clockUid === clockUid);
-        return !result || Boolean(result.error);
+        return !result || Boolean(result.error) || result.uncertain === true;
     });
     const closed = results.filter(result => result.closed).length;
     const failed = results.filter(result => result.error).length;
@@ -366,15 +400,17 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             // There is exactly one real CLOCK by design. A Clock In on another
             // Task is an atomic focus switch: close every confirmed open legacy
             // entry at this instant, then create the new Focused CLOCK.
+            let closedClockUids = [];
             if (open.length > 0) {
                 const outcome = await closeEntriesNow(entries, open.map(entry => entry.clockUid), now, {
                     publish: false,
                 });
+                closedClockUids = outcome.results.filter(result => result.closed).map(result => result.clockUid);
                 if (outcome.uncertain) {
                     return {
                         taskUid,
                         uncertain: true,
-                        partial: outcome.partial,
+                        partial: true,
                         notice: GRAPH_UNCERTAIN,
                         retry: outcome.retry,
                     };
@@ -382,34 +418,71 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
                 if (outcome.failed > 0) throw outcome.results.find(result => result.error).error;
             }
 
-            const drawer = await ensureDrawer(taskUid);
-            if (drawer.confirmation && !drawer.confirmation.ok) {
-                return {
-                    taskUid,
-                    drawerUid: drawer.uid,
-                    uncertain: true,
-                    partial: true,
-                    notice: GRAPH_UNCERTAIN,
-                    retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid },
-                };
-            }
-            const clockUid = await createBlock({
-                parentUid: drawer.uid,
-                // Roam shifts existing siblings when a child is created at 0,
-                // keeping the newest Session at the top of the drawer.
-                order: 0,
-                string: formatClockLine(now),
+            let drawer;
+            let clockUid;
+            const retry = details => ({
+                action: 'clock-in',
+                taskUid,
+                ...(open.length > 0 ? { closedClockUids } : {}),
+                ...details,
             });
+            try {
+                drawer = await ensureDrawer(taskUid);
+                if (drawer.confirmation && !drawer.confirmation.ok) {
+                    return {
+                        taskUid,
+                        drawerUid: drawer.uid,
+                        uncertain: true,
+                        partial: true,
+                        notice: GRAPH_UNCERTAIN,
+                        retry: retry({ drawerUid: drawer.uid }),
+                    };
+                }
+                clockUid = await createBlock({
+                    parentUid: drawer.uid,
+                    // Roam shifts existing siblings when a child is created at 0,
+                    // keeping the newest Session at the top of the drawer.
+                    order: 0,
+                    string: formatClockLine(now),
+                });
 
-            const confirmation = refreshResult({ notify: false });
-            if (!confirmation.ok) {
+                const confirmation = refreshResult({ notify: false });
+                if (!confirmation.ok) {
+                    return {
+                        clockUid,
+                        taskUid,
+                        uncertain: true,
+                        partial: true,
+                        notice: GRAPH_UNCERTAIN,
+                        retry: retry({ drawerUid: drawer.uid, clockUid }),
+                    };
+                }
+                const confirmed = entriesSnapshot.find(
+                    item => item.clockUid === clockUid && item.running === true
+                );
+                if (!confirmed) {
+                    return {
+                        clockUid,
+                        taskUid,
+                        uncertain: true,
+                        partial: true,
+                        notice: GRAPH_UNCERTAIN,
+                        retry: retry({ drawerUid: drawer.uid, clockUid }),
+                    };
+                }
+            } catch (error) {
+                if (open.length === 0) throw error;
                 return {
-                    clockUid,
+                    ...(clockUid ? { clockUid } : {}),
                     taskUid,
+                    ...(drawer?.uid ? { drawerUid: drawer.uid } : {}),
                     uncertain: true,
                     partial: true,
                     notice: GRAPH_UNCERTAIN,
-                    retry: { action: 'clock-in', taskUid, drawerUid: drawer.uid, clockUid },
+                    retry: retry({
+                        ...(drawer?.uid ? { drawerUid: drawer.uid } : {}),
+                        ...(clockUid ? { clockUid } : {}),
+                    }),
                 };
             }
             const result = { clockUid, taskUid };
@@ -554,7 +627,9 @@ export async function clockOutEntries(
             });
         } catch (error) {
             notice = GRAPH_UNCERTAIN;
-            return uncertainCloseResult(error, readCompleted ? entries : running, { preflight: prepareStarted });
+            return uncertainCloseResult(error, readCompleted ? entries : running, clockUids, {
+                preflight: prepareStarted,
+            });
         }
     });
 }
@@ -836,6 +911,7 @@ export async function discardClock(clockUid) {
         withGraphGuard(async () => {
             const entries = readAllEntries();
             const entry = entries.find(item => item.clockUid === clockUid);
+            if (!entry) return { deleted: false, reason: 'not-found' };
             await deleteBlock(clockUid);
 
             let confirmation = refreshResult({ notify: false });
@@ -849,8 +925,9 @@ export async function discardClock(clockUid) {
                 };
             }
 
-            if (entry) {
-                const drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
+            let drawer;
+            try {
+                drawer = getChildren(entry.taskUid).find(child => isDrawerBlock(child.string));
                 if (drawer && getChildren(drawer.uid).length === 0) {
                     await deleteBlock(drawer.uid);
                     confirmation = refreshResult({ notify: false });
@@ -864,6 +941,19 @@ export async function discardClock(clockUid) {
                         };
                     }
                 }
+            } catch {
+                return {
+                    deleted: true,
+                    uncertain: true,
+                    partial: true,
+                    notice: GRAPH_UNCERTAIN,
+                    retry: {
+                        action: 'discard-drawer',
+                        taskUid: entry.taskUid,
+                        clockUid,
+                        ...(drawer?.uid ? { drawerUid: drawer.uid } : {}),
+                    },
+                };
             }
 
             notify();
@@ -874,6 +964,10 @@ export async function discardClock(clockUid) {
 
 /** True when this block (or the one it references) has an open clock. */
 export function isBlockRunning(blockUid) {
-    const taskUid = resolveTaskUid(blockUid);
-    return running.some(entry => entry.taskUid === taskUid);
+    try {
+        const taskUid = resolveTaskUid(blockUid);
+        return running.some(entry => entry.taskUid === taskUid);
+    } catch {
+        return true;
+    }
 }

@@ -178,6 +178,42 @@ test('task forest filtering preserves matching branches and marks only required 
     assert.equal(result.forest.some(node => node.taskUid === 'legacy'), false);
 });
 
+test('task forest filtering recomputes visible totals and keeps the source total separately', () => {
+    const forest = [
+        taskNode('parent', 'Parent', 'DONE', [
+            taskNode('todo-child', 'Todo child', 'TODO', [], { own: 20, total: 20 }),
+            taskNode('done-child', 'Done child', 'DONE', [], { own: 30, total: 30 }),
+        ], { own: 10, total: 60 }),
+    ];
+
+    const result = transformTaskForest(forest, { filter: 'TODO' });
+    const [parent] = result.forest;
+
+    assert.equal(parent.total, 30);
+    assert.equal(parent.unfilteredTotal, 60);
+    assert.equal(parent.children[0].total, 20);
+});
+
+test('task forest sorting uses recomputed filtered totals', () => {
+    const forest = [
+        taskNode('large-unfiltered', 'A', 'DONE', [taskNode('todo-a', 'A child', 'TODO', [], { own: 20 })], {
+            own: 10,
+            total: 100,
+        }),
+        taskNode('small-unfiltered', 'B', 'DONE', [taskNode('todo-b', 'B child', 'TODO', [], { own: 40 })], {
+            own: 5,
+            total: 45,
+        }),
+    ];
+
+    const result = transformTaskForest(forest, { filter: 'TODO', sortBy: 'total', direction: 'desc' });
+
+    assert.deepEqual(result.forest.map(node => [node.taskUid, node.total]), [
+        ['small-unfiltered', 45],
+        ['large-unfiltered', 30],
+    ]);
+});
+
 test('DONE filtering does not reveal unmatched descendants and ALL includes unknown statuses', () => {
     const forest = [
         taskNode('parent', 'Parent', 'DONE', [taskNode('todo-child', 'Todo child', 'TODO')]),

@@ -344,3 +344,78 @@ test('Clock Out All returns a structured uncertain result when the preflight rea
         graph.api.data.q = originalQuery;
     }
 });
+
+test('a selected batch preflight failure reports only its requested running UIDs', async () => {
+    const graph = seed([
+        TASK,
+        OTHER,
+        { uid: 'scope-drawer-1', string: 'LOGBOOK::', parent: TASK.uid },
+        { uid: 'scope-clock-1', string: 'CLOCK:: [2026-08-17 Mon 09:00]', parent: 'scope-drawer-1' },
+        { uid: 'scope-drawer-2', string: 'LOGBOOK::', parent: OTHER.uid },
+        { uid: 'scope-clock-2', string: 'CLOCK:: [2026-08-17 Mon 09:01]', parent: 'scope-drawer-2' },
+    ]);
+    const selectedClockUid = 'scope-clock-1';
+
+    const result = await clock.clockOutEntries([selectedClockUid], {
+        prepare: async () => {
+            throw new Error('selection preflight failed');
+        },
+    });
+
+    assert.equal(result.uncertain, true);
+    assert.equal(result.failed, 1);
+    assert.equal(result.pending, 1);
+    assert.deepEqual(result.pendingClockUids, [selectedClockUid]);
+    assert.deepEqual(result.retry.retryClockUids, [selectedClockUid]);
+    assert.match(graph.store.get(selectedClockUid).string, /^CLOCK:: \[/);
+    assert.match(graph.store.get('scope-clock-2').string, /^CLOCK:: \[/);
+});
+
+test('discarding an unknown CLOCK is non-destructive and structured', async () => {
+    const graph = seed([TASK]);
+
+    const result = await clock.discardClock('missing-clock');
+
+    assert.deepEqual(result, { deleted: false, reason: 'not-found' });
+    assert.equal(graph.store.has('missing-clock'), false);
+});
+
+test('discard reports uncertain drawer cleanup after the CLOCK delete succeeds', async () => {
+    const graph = seed([TASK]);
+    const { clockUid } = await clock.clockIn(TASK.uid, { now: AT_1558 });
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?uid ?string ?order') && args[0] === TASK.uid) {
+            throw new Error('drawer lookup failed after discard');
+        }
+        return originalQuery(datalog, ...args);
+    };
+
+    try {
+        const result = await clock.discardClock(clockUid);
+
+        assert.equal(result.deleted, true);
+        assert.equal(result.uncertain, true);
+        assert.equal(result.partial, true);
+        assert.equal(result.retry.action, 'discard-drawer');
+        assert.equal(result.retry.clockUid, clockUid);
+        assert.equal(graph.store.has(clockUid), false);
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+});
+
+test('isBlockRunning fails closed when reference resolution cannot read the graph', async () => {
+    const graph = seed([TASK]);
+    await clock.clockIn(TASK.uid, { now: AT_1558 });
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = () => {
+        throw new Error('graph read failed during menu rendering');
+    };
+
+    try {
+        assert.equal(clock.isBlockRunning(TASK.uid), true);
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+});

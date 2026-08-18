@@ -683,6 +683,46 @@ test('completion remains idle until a public Pull Watch update arrives', async (
     assert.equal(graphWrites, 2);
 });
 
+test('completion keeps a DONE event that arrives while the same auto-close is in flight', async () => {
+    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    extension.onunload();
+
+    const results = [];
+    const detach = attachCompletionHandling({ onResult: result => results.push(result) });
+    const originalUpdate = graph.api.data.block.update;
+    const clockUid = graph
+        .childrenOf(graph.childrenOf(TASK.uid)[0].uid)
+        .find(block => block.string.startsWith('CLOCK:')).uid;
+    let injected = false;
+    graph.api.data.block.update = async payload => {
+        const result = await originalUpdate(payload);
+        if (!injected && payload.block.uid === clockUid && payload.block.string.includes('--')) {
+            injected = true;
+            await originalUpdate({
+                block: { uid: TASK.uid, string: '{{[[DONE]]}} finish this task' },
+            });
+        }
+        return result;
+    };
+
+    try {
+        clock.refresh();
+        await graph.api.data.block.update({
+            block: { uid: TASK.uid, string: '{{[[DONE]]}} finish this task' },
+        });
+        await settle();
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+        detach();
+    }
+
+    assert.equal(injected, true);
+    assert.equal(results.length, 2, 'the in-flight event is drained after the first action');
+    assert.equal(results[1].ok, true);
+    assert.equal(results[1].closed, 0);
+    assert.equal(clock.getRunning().length, 0);
+});
+
 test('an ambiguous parent hierarchy withholds the cascade and performs zero clock writes', async () => {
     install([PARENT, CHILD, OTHER]);
     extension.onunload();

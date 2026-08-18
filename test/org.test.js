@@ -50,6 +50,16 @@ test('timestamp duration wins over a conflicting => summary and exposes the mism
     assert.equal(parsed.issue.code, 'declared-duration-mismatch');
 });
 
+test('an invalid declared duration keeps a valid timestamp record and uses computed minutes', () => {
+    const parsed = parseClockLine('CLOCK:: [2026-08-05 Wed 15:00]--[2026-08-05 Wed 16:00] => 1:5');
+
+    assert.equal(parsed.declaredMinutes, null);
+    assert.equal(parsed.computedMinutes, 60);
+    assert.equal(parsed.effectiveMinutes, 60);
+    assert.equal(parsed.minutes, 60);
+    assert.equal(parsed.issue.code, 'invalid-declared-duration');
+});
+
 test('rejects lines that are not clock entries', () => {
     assert.equal(parseClockLine('CLOCK:: nothing here'), null);
     assert.equal(parseClockLine('just a note'), null);

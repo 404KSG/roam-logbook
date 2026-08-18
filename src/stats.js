@@ -305,6 +305,8 @@ function cloneFilteredNode(node, filter) {
 
     return {
         ...node,
+        ...(node.total !== undefined ? { unfilteredTotal: node.total } : {}),
+        total: (node.own ?? 0) + children.reduce((sum, child) => sum + (child.total ?? 0), 0),
         context: filter === 'ALL' ? false : !matches,
         children,
     };

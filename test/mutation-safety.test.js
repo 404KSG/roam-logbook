@@ -133,6 +133,73 @@ test('a failed Clock in can be retried without duplicating a successful drawer',
     assert.equal(clock.getRunning().length, 1);
 });
 
+test('a focus switch returns the closed CLOCK scope when the new CLOCK write throws', async () => {
+    const clock = await import('../src/clock.js');
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    const closedClockUid = clock.getRunning()[0].clockUid;
+    const originalCreate = graph.api.data.block.create;
+    graph.api.data.block.create = async payload => {
+        if (String(payload.block.string).startsWith('CLOCK:')) throw new Error('new clock write failed');
+        return originalCreate(payload);
+    };
+
+    try {
+        const result = await clock.clockIn(OTHER.uid, { now: new Date('2026-08-15T09:01:00') });
+
+        assert.equal(result.uncertain, true);
+        assert.equal(result.partial, true);
+        assert.equal(result.retry.action, 'clock-in');
+        assert.equal(result.retry.taskUid, OTHER.uid);
+        assert.deepEqual(result.retry.closedClockUids, [closedClockUid]);
+        assert.match(clockBlocksFor(TASK.uid)[0].string, /--/);
+        assert.equal(clockBlocksFor(OTHER.uid).length, 0);
+    } finally {
+        graph.api.data.block.create = originalCreate;
+    }
+});
+
+test('Clock Out does not count a no-op write as closed', async () => {
+    const clock = await import('../src/clock.js');
+    await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+    const clockUid = clock.getRunning()[0].clockUid;
+    const originalUpdate = graph.api.data.block.update;
+    graph.api.data.block.update = async payload => {
+        if (payload.block.uid === clockUid) return;
+        return originalUpdate(payload);
+    };
+
+    try {
+        const result = await clock.clockOut(clockUid, { now: new Date('2026-08-15T09:01:00') });
+
+        assert.equal(result.closed, false);
+        assert.equal(result.uncertain, true);
+        assert.deepEqual(result.retry.retryClockUids, [clockUid]);
+        assert.equal(clock.getRunning()[0].clockUid, clockUid);
+    } finally {
+        graph.api.data.block.update = originalUpdate;
+    }
+});
+
+test('Clock In does not report a new CLOCK until refresh confirms it is running', async () => {
+    const clock = await import('../src/clock.js');
+    const originalCreate = graph.api.data.block.create;
+    graph.api.data.block.create = async payload => {
+        if (String(payload.block.string).startsWith('CLOCK:')) return;
+        return originalCreate(payload);
+    };
+
+    try {
+        const result = await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
+
+        assert.equal(result.uncertain, true);
+        assert.equal(result.partial, true);
+        assert.equal(clock.getRunning().length, 0);
+        assert.equal(clockBlocksFor(TASK.uid).length, 0);
+    } finally {
+        graph.api.data.block.create = originalCreate;
+    }
+});
+
 test('unload does not reset the mutation tail behind an in-flight Clock In', async () => {
     allowMultiple = true;
     const clock = await import('../src/clock.js');

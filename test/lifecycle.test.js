@@ -236,6 +236,31 @@ test('the context menu offers clock in on a TODO block only', () => {
     assert.equal(clockIn['display-conditional']({ 'block-uid': 'plain0001' }), false);
 });
 
+test('context menu target text falls back to the host context after a graph read failure', () => {
+    const clockIn = contextCommands.get('Logbook: Clock in');
+    const originalQuery = graph.api.data.q;
+    let blockStringReads = 0;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?s')) {
+            blockStringReads += 1;
+            if (blockStringReads > 1) throw new Error('target text read failed');
+        }
+        return originalQuery(datalog, ...args);
+    };
+
+    try {
+        assert.equal(
+            clockIn['display-conditional']({
+                'block-uid': TASK.uid,
+                'block-string': '{{[[TODO]]}} fallback task',
+            }),
+            true
+        );
+    } finally {
+        graph.api.data.q = originalQuery;
+    }
+});
+
 test('command-palette Focus fronts the confirmed Timing Line at order 0', async () => {
     const calls = [];
     const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;

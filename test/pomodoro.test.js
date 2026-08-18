@@ -114,6 +114,14 @@ test('active cycle threshold stays frozen until the next cycle', () => {
     assert.equal(pomodoro.reconcileCycle([cycleEntry('freeze-2', startedAt + 60_000)]).thresholdMinutes, 45);
 });
 
+test('reconciling an unchanged compatibility state is idempotent', () => {
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const running = [cycleEntry('compat-1', startedAt)];
+
+    assert.equal(pomodoro.reconcile(running), true);
+    assert.equal(pomodoro.reconcile(running), false);
+});
+
 test('a session without a pomodoro can never be overrun', () => {
     const now = Date.now();
     assert.equal(pomodoro.targetMinutes('c1'), null);

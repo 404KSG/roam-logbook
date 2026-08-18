@@ -62,8 +62,12 @@ function createController({ extensionAPI }) {
 
     /** Task text of the block a menu entry was opened on, following references. */
     const targetString = context => {
-        const uid = clock.resolveTaskUid(context?.['block-uid']);
-        return getBlockString(uid) ?? context?.['block-string'] ?? '';
+        try {
+            const uid = clock.resolveTaskUid(context?.['block-uid']);
+            return getBlockString(uid) ?? context?.['block-string'] ?? '';
+        } catch {
+            return context?.['block-string'] ?? '';
+        }
     };
 
     const canClockIn = context => {

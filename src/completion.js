@@ -90,7 +90,7 @@ export function attachCompletionHandling({ onResult = null, onWatchIssue = null 
     };
 
     const schedule = (uid, explicitRetryClockUids = null) => {
-        if (disposed || !uid || active.has(uid)) return;
+        if (disposed || !uid) return;
         if (Array.isArray(explicitRetryClockUids) && explicitRetryClockUids.length > 0) {
             const retry = retryClockUids.get(uid) || new Set();
             for (const clockUid of explicitRetryClockUids) {
@@ -107,7 +107,10 @@ export function attachCompletionHandling({ onResult = null, onWatchIssue = null 
                     const current = [...pending];
                     pending = new Set();
                     for (const taskUid of current) {
-                        if (active.has(taskUid)) continue;
+                        if (active.has(taskUid)) {
+                            pending.add(taskUid);
+                            continue;
+                        }
                         active.add(taskUid);
                         const retry = retryClockUids.get(taskUid);
                         retryClockUids.delete(taskUid);

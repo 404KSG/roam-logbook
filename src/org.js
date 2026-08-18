@@ -27,7 +27,7 @@ export const CLOCK_LABEL = 'CLOCK:';
 // A leading `:` is accepted so drawers pasted straight out of an org file parse.
 const DRAWER_RE = /^\s*:?LOGBOOK:{1,2}\s*$/i;
 const CLOCK_RE =
-    /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\d+:\d+))?\s*$/i;
+    /^\s*:?CLOCK:{1,2}\s*\[([^\]]+)\](?:\s*--\s*\[([^\]]+)\])?(?:\s*=>\s*(\S*))?\s*$/i;
 const CLOCK_LIKE_RE = /^\s*:?CLOCK:{1,2}(?:\s|$)/i;
 
 const TODO_RE = /\{\{\[\[(TODO|DONE)\]\]\}\}|\{\{(TODO|DONE)\}\}/;
@@ -132,26 +132,23 @@ export function parseClockLineDetailed(string) {
         };
     }
 
-    const declaredMinutes = match[3] ? parseDurationMinutes(match[3]) : null;
-    if (match[3] && declaredMinutes === null) {
-        return {
-            ok: false,
-            issue: {
-                code: 'invalid-declared-duration',
-                raw: match[3],
-                message: `Declared duration is invalid: ${match[3]}`,
-            },
-        };
-    }
+    const hasDeclaredDuration = match[3] !== undefined;
+    const declaredMinutes = hasDeclaredDuration ? parseDurationMinutes(match[3]) : null;
     const computedMinutes = end ? durationMinutes(start.getTime(), end.getTime()) : null;
     const effectiveMinutes = end ? computedMinutes : null;
     const issue =
-        end && declaredMinutes !== null && declaredMinutes !== computedMinutes
+        hasDeclaredDuration && declaredMinutes === null
             ? {
-                  code: 'declared-duration-mismatch',
-                  message: `Declared ${match[3]} differs from the ${formatDurationMinutes(computedMinutes)} computed from timestamps.`,
+                  code: 'invalid-declared-duration',
+                  raw: match[3],
+                  message: `Declared duration is invalid: ${match[3]}`,
               }
-            : null;
+            : end && declaredMinutes !== null && declaredMinutes !== computedMinutes
+              ? {
+                    code: 'declared-duration-mismatch',
+                    message: `Declared ${match[3]} differs from the ${formatDurationMinutes(computedMinutes)} computed from timestamps.`,
+                }
+              : null;
 
     return {
         ok: true,

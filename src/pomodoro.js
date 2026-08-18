@@ -278,6 +278,12 @@ export function isAssigned(clockUid) {
     return targets.has(clockUid);
 }
 
+const sameCycle = (left, right) => {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    return left.startedAt === right.startedAt && left.thresholdMinutes === right.thresholdMinutes;
+};
+
 export function start(clockUid, minutes = pomodoroMinutes()) {
     if (!clockUid || !(minutes > 0)) return false;
     const next = new Map(targets);
@@ -314,7 +320,7 @@ export function cancel(clockUid) {
 export function reconcile(running) {
     const cycleBefore = getCycle();
     const cycleAfter = reconcileCycle(running);
-    if (unsupportedRaw !== null) return cycleBefore !== cycleAfter;
+    if (unsupportedRaw !== null) return !sameCycle(cycleBefore, cycleAfter);
     const live = new Set(running.map(entry => entry.clockUid));
     const next = new Map(targets);
     for (const clockUid of [...next.keys()]) {
@@ -324,7 +330,7 @@ export function reconcile(running) {
         if (!next.has(entry.clockUid)) next.set(entry.clockUid, pomodoroMinutes());
     }
     if (next.size === targets.size && [...next].every(([uid, value]) => targets.get(uid) === value)) {
-        return cycleBefore?.startedAt !== cycleAfter?.startedAt || cycleBefore?.thresholdMinutes !== cycleAfter?.thresholdMinutes;
+        return !sameCycle(cycleBefore, cycleAfter);
     }
     writeTargets(next);
     return true;
