@@ -977,8 +977,14 @@ test('Dashboard places the accessible Activity chart between Timing and By task'
     );
     assert.equal(
         activity.querySelector('[data-activity-bucket="2026-08-10"] .rlb-activity__duration').textContent,
-        '0m'
+        ''
     );
+    const emptyBucket = activity.querySelector('[data-activity-bucket="2026-08-10"]');
+    assert.equal(emptyBucket.dataset.activityDuration, '');
+    assert.equal(emptyBucket.classList.contains('rlb-activity__bucket--empty'), true);
+    assert.equal(emptyBucket.querySelector('.rlb-activity__bar').style.height, '2px');
+    assert.match(emptyBucket.title, /Aug 10, 2026.*0m.*0 Sessions/);
+    assert.match(emptyBucket.getAttribute('aria-label'), /Aug 10, 2026.*0m.*0 Sessions/);
     assert.match(
         activity.querySelector('[data-activity-bucket="2026-08-09"]').getAttribute('aria-label'),
         /Aug 9, 2026.*1h 00m.*1 Session/
@@ -986,6 +992,21 @@ test('Dashboard places the accessible Activity chart between Timing and By task'
     assert.equal(document.querySelector('[data-action="toggle-view"]'), null);
     assert.equal(document.querySelector('.rlb-category'), null);
     assert.equal(document.querySelector('.rlb-insights'), null);
+
+    const range = document.querySelector('.rlb-header select');
+    range.value = 'today';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    const todayActivity = document.querySelector('.rlb-activity');
+    assert.ok(todayActivity);
+    const todayChart = todayActivity.querySelector('.rlb-activity__chart');
+    assert.equal(todayChart.dataset.activityUnit, 'hour');
+    assert.equal(todayChart.querySelectorAll('[data-activity-bucket]').length, 24);
+    assert.deepEqual(
+        [...todayChart.querySelectorAll('.rlb-activity__date')]
+            .map(node => node.textContent)
+            .filter(Boolean),
+        ['00', '06', '12', '18']
+    );
 
     dashboard.destroy();
 });

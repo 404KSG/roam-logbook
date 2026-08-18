@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildActivity, getActivityDensity } from '../src/activity.js';
+import {
+    buildActivity,
+    getActivityDensity,
+    refreshActivityBuckets,
+} from '../src/activity.js';
 
 const NOW = new Date(2026, 7, 15, 12, 0);
 
@@ -15,29 +19,56 @@ const entry = (clockUid, start, end, minutes, overrides = {}) => ({
     ...overrides,
 });
 
-test('Activity Today keeps independent Sessions in start order with visible labels', () => {
+test('Activity Today uses exactly 24 local hour buckets and hides zero duration labels', () => {
     const activity = buildActivity(
         [
-            entry('late', '2026-08-15T11:30:00', '2026-08-15T12:00:00', 30),
-            entry('early', '2026-08-15T09:00:00', '2026-08-15T09:30:00', 30),
-            entry('zero', '2026-08-15T10:00:00', '2026-08-15T10:00:00', 0),
+            entry('cross-hour', '2026-08-15T09:30:00', '2026-08-15T11:30:00', 120),
+            entry('zero', '2026-08-15T08:00:00', '2026-08-15T08:00:00', 0),
         ],
         { now: NOW, rangeId: 'today' }
     );
 
-    assert.equal(activity.unit, 'session');
-    assert.equal(activity.buckets.length, 3);
+    assert.equal(activity.unit, 'hour');
+    assert.equal(activity.buckets.length, 24);
     assert.deepEqual(
-        activity.buckets.map(bucket => [bucket.id, bucket.minutes, bucket.dateLabel]),
-        [
-            ['early', 30, '09:00'],
-            ['zero', 0, '10:00'],
-            ['late', 30, '11:30'],
-        ]
+        activity.buckets.slice(0, 4).map(bucket => bucket.id),
+        ['2026-08-15T00', '2026-08-15T01', '2026-08-15T02', '2026-08-15T03']
     );
-    assert.deepEqual(activity.buckets.map(bucket => bucket.sessionCount), [1, 1, 1]);
-    assert.deepEqual(activity.buckets.map(bucket => bucket.durationLabel), ['30m', '0m', '30m']);
-    assert.equal(activity.totalMinutes, 60);
+    assert.deepEqual(
+        activity.buckets.map(bucket => bucket.minutes),
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 60, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert.deepEqual(
+        activity.buckets.filter(bucket => bucket.dateLabel).map(bucket => bucket.dateLabel),
+        ['00', '06', '12', '18']
+    );
+    assert.equal(activity.buckets[8].durationLabel, '');
+    assert.equal(activity.buckets[8].fullDurationLabel, '0m');
+    assert.equal(activity.buckets[8].sessionCount, 1);
+    assert.match(activity.buckets[8].ariaLabel, /Aug 15, 2026 at 08:00.*0m.*1 Session/);
+    assert.equal(activity.buckets[9].sessionCount, 1);
+    assert.equal(activity.buckets[10].sessionCount, 1);
+    assert.equal(activity.totalMinutes, 120);
+});
+
+test('Activity Today refreshes a running Session into only the overlapping local hour buckets', () => {
+    const activity = buildActivity(
+        [entry('running', '2026-08-15T09:30:00', null, null)],
+        { now: new Date('2026-08-15T10:00:00'), rangeId: 'today' }
+    );
+
+    assert.equal(activity.buckets[9].minutes, 30);
+    assert.equal(activity.buckets[10].minutes, 0);
+    assert.equal(activity.buckets[9].sessionCount, 1);
+    assert.equal(activity.buckets[10].sessionCount, 0);
+
+    refreshActivityBuckets(activity, new Date('2026-08-15T10:01:00'));
+
+    assert.equal(activity.buckets[9].minutes, 30);
+    assert.equal(activity.buckets[10].minutes, 1);
+    assert.equal(activity.buckets[9].sessionCount, 1);
+    assert.equal(activity.buckets[10].sessionCount, 1);
+    assert.equal(activity.totalMinutes, 31);
 });
 
 test('Activity Last 7 days uses seven start-day buckets and keeps cross-midnight time on its start day', () => {
@@ -60,6 +91,7 @@ test('Activity Last 7 days uses seven start-day buckets and keeps cross-midnight
         '2026-08-15',
     ]);
     assert.deepEqual(activity.buckets.map(bucket => bucket.minutes), [60, 0, 0, 45, 0, 0, 0]);
+    assert.deepEqual(activity.buckets.map(bucket => bucket.durationLabel), ['1h 00m', '', '', '45m', '', '', '']);
     assert.equal(activity.buckets[0].dateLabel, 'Aug 9');
     assert.equal(activity.buckets[3].durationLabel, '45m');
     assert.equal(activity.buckets[0].sessionCount, 1);
@@ -91,6 +123,7 @@ test('Activity Last 30 days uses decimal hours while accessibility keeps full du
     assert.match(august.ariaLabel, /Aug 31, 2026.*1h 30m.*1 Session/);
     assert.match(september.ariaLabel, /Sep 1, 2026.*30m.*1 Session/);
     assert.equal(activity.durationFormat, 'hours');
+    assert.equal(activity.buckets.find(bucket => bucket.minutes === 0).durationLabel, '');
 });
 
 test('Activity All time keeps a complete calendar-month timeline through now', () => {
@@ -109,6 +142,7 @@ test('Activity All time keeps a complete calendar-month timeline through now', (
         '2026-08-01',
     ]);
     assert.deepEqual(monthly.buckets.map(bucket => bucket.minutes), [30, 60, 0]);
+    assert.equal(monthly.buckets.at(-1).durationLabel, '');
     assert.equal(monthly.buckets.at(-1).start.getTime(), new Date('2026-08-01T00:00:00').getTime());
     assert.equal(monthly.buckets[0].durationLabel, '30m');
     assert.equal(monthly.buckets[0].dateLabel, 'Jun');
@@ -127,6 +161,7 @@ test('Activity All time switches to complete calendar-year buckets beyond 24 mon
     assert.equal(yearly.unit, 'year');
     assert.deepEqual(yearly.buckets.map(bucket => bucket.dateKey), ['2024-01-01', '2025-01-01', '2026-01-01']);
     assert.deepEqual(yearly.buckets.map(bucket => bucket.minutes), [30, 60, 0]);
+    assert.equal(yearly.buckets.at(-1).durationLabel, '');
     assert.deepEqual(yearly.buckets.map(bucket => bucket.dateLabel), ['2024', '2025', '2026']);
     assert.equal(yearly.buckets.at(-1).start.getFullYear(), 2026);
     assert.equal(yearly.buckets[0].durationLabel, '30m');
@@ -155,7 +190,11 @@ test('Activity density is explicit and prioritises short-range readability', () 
     assert.equal(getActivityDensity('week', 'day', 7).barWidthPx, 42);
     assert.ok(getActivityDensity('week', 'day', 7).barWidthPx > 18);
     assert.equal(getActivityDensity('month', 'day', 30).barWidthPx, 10);
-    assert.ok(getActivityDensity('today', 'session', 3).barWidthPx > getActivityDensity('today', 'session', 12).barWidthPx);
+    assert.deepEqual(getActivityDensity('today', 'hour', 24), {
+        id: 'today-18',
+        barWidthPx: 18,
+        bucketCount: 24,
+    });
     assert.ok(getActivityDensity('all', 'month', 8).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
     assert.ok(getActivityDensity('all', 'year', 3).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
 });
@@ -182,4 +221,11 @@ test('Activity with no entries stays empty so the Dashboard can keep its compact
     assert.deepEqual(activity.buckets, []);
     assert.equal(activity.totalMinutes, 0);
     assert.equal(activity.maxMinutes, 0);
+});
+
+test('Activity Today keeps the compact empty state when the selected range has no entries', () => {
+    const activity = buildActivity([], { now: NOW, rangeId: 'today' });
+
+    assert.equal(activity.unit, 'hour');
+    assert.deepEqual(activity.buckets, []);
 });

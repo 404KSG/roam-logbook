@@ -1,5 +1,5 @@
 import { el } from './dom.js';
-import { refreshActivityBucket } from './activity.js';
+import { refreshActivityBucket, refreshActivityBuckets } from './activity.js';
 
 const BAR_MAX_HEIGHT = 96;
 
@@ -90,7 +90,11 @@ export function renderActivity(activity) {
 /** Patch live totals and bar heights without replacing the chart or querying Roam. */
 export function syncActivityView(section, activity, now) {
     if (!section || !activity?.buckets?.length) return;
-    for (const bucket of activity.buckets) refreshActivityBucket(bucket, now);
+    if (activity.unit === 'hour') {
+        refreshActivityBuckets(activity, now);
+    } else {
+        for (const bucket of activity.buckets) refreshActivityBucket(bucket, now);
+    }
     activity.totalMinutes = activity.buckets.reduce((sum, bucket) => sum + bucket.minutes, 0);
     activity.maxMinutes = activity.buckets.reduce(
         (max, bucket) => Math.max(max, bucket.minutes),

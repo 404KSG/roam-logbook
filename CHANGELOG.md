@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.42 — 2026-08-18
+
+- Restored Blueprint's Dashboard glyph for the Active Threads Dashboard action
+  while preserving its existing label, behavior, and 32px action rail.
+- Replaced Today's unbounded per-Session Activity columns with exactly 24 local
+  hour buckets. Session minutes are apportioned across the hours they overlap;
+  running Sessions continue to update from the cached snapshot without another
+  graph read.
+- Hid visible duration text for every zero-value Activity bucket while keeping
+  the date/hour context, quiet baseline, dataset, tooltip, and complete ARIA
+  duration and Session count.
+
 ## 0.9.0-beta.41 — 2026-08-18
 
 - Refined the single-page Activity panel's density model: Last 7 days uses

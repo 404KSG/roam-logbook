@@ -10,6 +10,9 @@ import { entryMinutes, filterByRange, getRange } from './stats.js';
 import { dateKey, formatMinutesHuman, startOfDay, startOfDaysAgo } from './time.js';
 
 const ALL_TIME_MONTH_LIMIT = 24;
+const TODAY_HOUR_COUNT = 24;
+const TODAY_VISIBLE_HOURS = new Set([0, 6, 12, 18]);
+const MINUTE_MS = 60 * 1000;
 const MONTH_NAMES = [
     'Jan',
     'Feb',
@@ -49,6 +52,17 @@ const formatFullDate = date => `${MONTH_NAMES[date.getMonth()]} ${date.getDate()
 
 const formatYearPeriod = year => `Jan 1, ${year} – Dec 31, ${year}`;
 
+const formatHourLabel = hour => (TODAY_VISIBLE_HOURS.has(hour) ? pad(hour) : '');
+
+const fullDateLabelFor = (unit, start) =>
+    unit === 'month'
+        ? `${MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`
+        : unit === 'year'
+          ? String(start.getFullYear())
+          : unit === 'hour'
+            ? `${formatFullDate(start)} at ${formatTime(start)}`
+            : formatFullDate(start);
+
 /** Compact month labels retain the useful signal while fitting narrow buckets. */
 export function formatActivityDuration(minutes, { compact = false } = {}) {
     const safe = Math.max(0, Math.round(Number(minutes) || 0));
@@ -66,16 +80,21 @@ export function formatActivityHours(minutes) {
     return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
 }
 
+const visibleDurationLabel = (minutes, durationFormat) => {
+    if (Math.max(0, Math.round(Number(minutes) || 0)) <= 0) return '';
+    return durationFormat === 'hours'
+        ? formatActivityHours(minutes)
+        : formatActivityDuration(minutes, { compact: durationFormat === 'compact' });
+};
+
 /**
  * Explicit density contract shared by the pure model and the DOM/CSS seam.
  * Short ranges get visual weight; dense ranges keep every bucket visible.
  */
 export function getActivityDensity(rangeId, unit, bucketCount) {
     const count = Math.max(1, Number(bucketCount) || 1);
-    if (rangeId === 'today' || unit === 'session') {
-        const barWidthPx =
-            count <= 4 ? 42 : count <= 8 ? 32 : count <= 16 ? 24 : count <= 24 ? 18 : 14;
-        return { id: `today-${barWidthPx}`, barWidthPx, bucketCount: count };
+    if (rangeId === 'today' || unit === 'hour') {
+        return { id: 'today-18', barWidthPx: 18, bucketCount: count };
     }
     if (rangeId === 'week') return { id: 'week-42', barWidthPx: 42, bucketCount: count };
     if (rangeId === 'month') return { id: 'month-10', barWidthPx: 10, bucketCount: count };
@@ -95,6 +114,7 @@ const bucketAriaLabel = (bucket, dateText) =>
 const createBucket = ({
     id,
     start,
+    end = null,
     unit,
     durationFormat = 'human',
     dateLabel,
@@ -105,44 +125,28 @@ const createBucket = ({
     unit,
     dateKey: dateKey(start),
     start,
+    end,
     minutes: 0,
     fixedMinutes: 0,
     sessionCount: 0,
+    fixedSessionCount: 0,
     runningClockUids: [],
     runningEntries: [],
     durationFormat,
-    durationLabel:
-        durationFormat === 'hours'
-            ? formatActivityHours(0)
-            : formatActivityDuration(0, { compact: durationFormat === 'compact' }),
+    durationLabel: '',
     fullDurationLabel: formatActivityDuration(0),
     dateLabel,
     monthLabel,
     fullDateLabel:
-        fullDateLabel ||
-        (unit === 'month'
-            ? `${MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`
-            : unit === 'year'
-              ? String(start.getFullYear())
-              : formatFullDate(start)),
+        fullDateLabel || fullDateLabelFor(unit, start),
     ariaLabel: bucketAriaLabel(
         { minutes: 0, fullDurationLabel: formatMinutesHuman(0), sessionCount: 0 },
-        unit === 'session'
-            ? `${formatFullDate(start)} at ${formatTime(start)}`
-            : fullDateLabel ||
-                  (unit === 'month'
-                      ? `${MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`
-                      : unit === 'year'
-                        ? String(start.getFullYear())
-                        : formatFullDate(start))
+        fullDateLabel || fullDateLabelFor(unit, start)
     ),
 });
 
 const refreshBucketLabels = (bucket, dateText = bucket.fullDateLabel) => {
-    bucket.durationLabel =
-        bucket.durationFormat === 'hours'
-            ? formatActivityHours(bucket.minutes)
-            : formatActivityDuration(bucket.minutes, { compact: bucket.durationFormat === 'compact' });
+    bucket.durationLabel = visibleDurationLabel(bucket.minutes, bucket.durationFormat);
     bucket.fullDurationLabel = formatActivityDuration(bucket.minutes);
     bucket.ariaLabel = bucketAriaLabel(bucket, dateText);
     return bucket;
@@ -157,6 +161,7 @@ const addEntryToBucket = (bucket, entry, now, dateText) => {
         bucket.runningEntries.push(entry);
     } else {
         bucket.fixedMinutes += minutes;
+        bucket.fixedSessionCount += 1;
     }
     refreshBucketLabels(bucket, dateText);
 };
@@ -190,26 +195,106 @@ const refreshDailyMonthLabels = buckets => {
     return buckets;
 };
 
-const buildToday = (entries, now) => {
-    const buckets = entries
-        .slice()
-        .sort((left, right) => {
-            const difference = left.start.getTime() - right.start.getTime();
-            return difference || String(left.clockUid ?? '').localeCompare(String(right.clockUid ?? ''));
+const entryInterval = (entry, now) => {
+    if (!isValidDate(entry?.start)) return null;
+    const startMs = entry.start.getTime();
+    const endDate = entry.running ? now : entry.end;
+    if (!isValidDate(endDate)) return null;
+    return {
+        startMs,
+        endMs: Math.max(startMs, endDate.getTime()),
+    };
+};
+
+const splitMinutes = (totalMinutes, segments) => {
+    if (segments.length === 0) return [];
+    const totalMs = segments.reduce((sum, segment) => sum + segment.overlapMs, 0);
+    const target = Math.min(
+        Math.max(0, Math.round(Number(totalMinutes) || 0)),
+        Math.floor(totalMs / MINUTE_MS)
+    );
+    if (target <= 0 || totalMs <= 0) return segments.map(() => 0);
+
+    const allocations = segments.map(segment => {
+        const exact = (target * segment.overlapMs) / totalMs;
+        return { base: Math.floor(exact), remainder: exact - Math.floor(exact) };
+    });
+    let remainder = target - allocations.reduce((sum, allocation) => sum + allocation.base, 0);
+    const order = allocations
+        .map((allocation, index) => ({ ...allocation, index }))
+        .sort((left, right) => right.remainder - left.remainder || left.index - right.index);
+    for (let index = 0; index < order.length && remainder > 0; index += 1, remainder -= 1) {
+        allocations[order[index].index].base += 1;
+    }
+    return allocations.map(allocation => allocation.base);
+};
+
+const todaySegments = (buckets, entry, now) => {
+    const interval = entryInterval(entry, now);
+    if (!interval) return [];
+    return buckets
+        .map(bucket => {
+            const bucketStartMs = bucket.start.getTime();
+            const bucketEndMs = bucket.end.getTime();
+            const overlapStart = Math.max(interval.startMs, bucketStartMs);
+            const overlapEnd = Math.min(interval.endMs, bucketEndMs);
+            const isPointEntry =
+                interval.startMs === interval.endMs &&
+                interval.startMs >= bucketStartMs &&
+                interval.startMs < bucketEndMs;
+            if (overlapEnd <= overlapStart && !isPointEntry) return null;
+            return { bucket, overlapMs: Math.max(0, overlapEnd - overlapStart) };
         })
-        .map((entry, index) => {
-            const start = cloneDay(entry.start);
-            const bucket = createBucket({
-                id: entry.clockUid || `session-${index + 1}`,
+        .filter(Boolean);
+};
+
+const addTodayEntry = (buckets, entry, now) => {
+    const segments = todaySegments(buckets, entry, now);
+    const allocations = splitMinutes(entryMinutes(entry, now), segments);
+    for (const [index, segment] of segments.entries()) {
+        const bucket = segment.bucket;
+        bucket.minutes += allocations[index];
+        bucket.sessionCount += 1;
+        if (entry.running) {
+            bucket.runningClockUids.push(entry.clockUid);
+            bucket.runningEntries.push(entry);
+        } else {
+            bucket.fixedMinutes += allocations[index];
+            bucket.fixedSessionCount += 1;
+        }
+        refreshBucketLabels(bucket);
+    }
+};
+
+const createTodayBuckets = now => {
+    const day = startOfDay(now);
+    const buckets = [];
+    for (let hour = 0; hour < TODAY_HOUR_COUNT; hour += 1) {
+        const start = new Date(day);
+        start.setHours(hour, 0, 0, 0);
+        const end = new Date(day);
+        end.setHours(hour + 1, 0, 0, 0);
+        const hourText = formatTime(start);
+        buckets.push(
+            createBucket({
+                id: `${dateKey(day)}T${pad(hour)}`,
                 start,
-                unit: 'session',
+                end,
+                unit: 'hour',
                 durationFormat: 'human',
-                dateLabel: formatTime(start),
-            });
-            addEntryToBucket(bucket, entry, now, `${formatFullDate(start)} at ${formatTime(start)}`);
-            return bucket;
-        });
-    return { unit: 'session', buckets };
+                dateLabel: formatHourLabel(hour),
+                fullDateLabel: `${formatFullDate(start)} at ${hourText}`,
+            })
+        );
+    }
+    return buckets;
+};
+
+const buildToday = (entries, now) => {
+    const buckets = createTodayBuckets(now);
+    for (const entry of entries) addTodayEntry(buckets, entry, now);
+    for (const bucket of buckets) refreshBucketLabels(bucket);
+    return { unit: 'hour', buckets };
 };
 
 const buildDaily = (entries, now, rangeId) => {
@@ -311,7 +396,7 @@ export function buildActivity(entries, { now = new Date(), rangeId = 'week' } = 
 
     if (selectedEntries.length === 0) {
         return finishActivity(selectedRange.id, selectedEntries, {
-            unit: selectedRange.id === 'today' ? 'session' : 'day',
+            unit: selectedRange.id === 'today' ? 'hour' : 'day',
             durationFormat: selectedRange.id === 'month' ? 'hours' : 'human',
             buckets: [],
         });
@@ -335,4 +420,25 @@ export function refreshActivityBucket(bucket, now) {
             : bucket.fullDateLabel
     );
     return bucket;
+}
+
+/** Update the fixed 24-hour Today model from the cached running entries only. */
+export function refreshActivityBuckets(activity, now) {
+    if (activity?.unit !== 'hour' || !activity.buckets?.length) return activity;
+    for (const bucket of activity.buckets) {
+        bucket.minutes = bucket.fixedMinutes;
+        bucket.sessionCount = bucket.fixedSessionCount;
+        bucket.runningClockUids = [];
+        bucket.runningEntries = [];
+    }
+    for (const entry of activity.entries || []) {
+        if (entry.running) addTodayEntry(activity.buckets, entry, now);
+    }
+    for (const bucket of activity.buckets) refreshBucketLabels(bucket);
+    activity.totalMinutes = activity.buckets.reduce((sum, bucket) => sum + bucket.minutes, 0);
+    activity.maxMinutes = activity.buckets.reduce(
+        (max, bucket) => Math.max(max, bucket.minutes),
+        0
+    );
+    return activity;
 }

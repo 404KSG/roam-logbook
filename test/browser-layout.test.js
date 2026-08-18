@@ -627,7 +627,7 @@ test('shared session header actions and bulk footer stay usable at 340px and 320
         })()`;
         const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 1</div><div class="rlb-surface__actions"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-home rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="loading"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--loading" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph" aria-busy="true" disabled></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Refreshing</span></div><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button" data-action="close" title="Close Current Sessions" aria-label="Close Current Sessions"></button></div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div>`),
+            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 1</div><div class="rlb-surface__actions"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="loading"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--loading" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph" aria-busy="true" disabled></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Refreshing</span></div><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button" data-action="close" title="Close Current Sessions" aria-label="Close Current Sessions"></button></div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div>`),
             expression
         );
         if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
@@ -803,7 +803,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
     const longTitle = 'A long Focused task title that remains accessible while ellipsizing visually';
     const recentTitle = 'A recent task that can be focused again';
     const markup = (theme, width) =>
-        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 2</div><div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-home rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></header><div class="rlb-surface__list" role="group" aria-label="Active Threads"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="TIMING"><div class="rlb-surface__section-label">TIMING</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--open-lines rlb-surface__section--recent" aria-label="PARALLEL THREADS · 1, Leave after 45m without focus"><div class="rlb-surface__section-label"><span class="rlb-surface__section-label-text">PARALLEL THREADS · 1</span><span class="rlb-surface__section-context">Leave after 45m without focus</span></div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="30m total · leaves in 41m; Last active [2026-08-15 Sat 09:09]" aria-label="30m total; leaves in 41m; Last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · leaves in 41m</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div></div>`;
+        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 2</div><div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></header><div class="rlb-surface__list" role="group" aria-label="Active Threads"><section class="rlb-surface__section rlb-surface__section--focused rlb-surface__section--overrun" aria-label="TIMING"><div class="rlb-surface__section-label">TIMING</div><div class="rlb-run rlb-run--focused rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--open-lines rlb-surface__section--recent" aria-label="PARALLEL THREADS · 1, Leave after 45m without focus"><div class="rlb-surface__section-label"><span class="rlb-surface__section-label-text">PARALLEL THREADS · 1</span><span class="rlb-surface__section-context">Leave after 45m without focus</span></div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="30m total · leaves in 41m; Last active [2026-08-15 Sat 09:09]" aria-label="30m total; leaves in 41m; Last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · leaves in 41m</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div></div>`;
 
     const expression = `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -1161,15 +1161,15 @@ test('Dashboard task controls flow naturally at every width without overlap', as
 test('Activity chart keeps desktop duration/date hierarchy, uses a wide 7-day density, and stays theme green', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const buckets = [
-        ['2026-08-09', '1h 00m', 'Aug 9', '96px'],
-        ['2026-08-10', '0m', 'Aug 10', '2px'],
-        ['2026-08-11', '45m', 'Aug 11', '72px'],
-        ['2026-08-12', '0m', 'Aug 12', '2px'],
-        ['2026-08-13', '2h 15m', 'Aug 13', '112px'],
-        ['2026-08-14', '30m', 'Aug 14', '48px'],
-        ['2026-08-15', '15m', 'Aug 15', '24px'],
+        ['2026-08-09', '1h 00m', '1h 00m', 'Aug 9', '96px'],
+        ['2026-08-10', '', '0m', 'Aug 10', '2px'],
+        ['2026-08-11', '45m', '45m', 'Aug 11', '72px'],
+        ['2026-08-12', '', '0m', 'Aug 12', '2px'],
+        ['2026-08-13', '2h 15m', '2h 15m', 'Aug 13', '112px'],
+        ['2026-08-14', '30m', '30m', 'Aug 14', '48px'],
+        ['2026-08-15', '15m', '15m', 'Aug 15', '24px'],
     ];
-    const markup = theme => `<div class="${theme}"><div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity" aria-labelledby="activity-title"><div class="rlb-panel__header"><h3 id="activity-title" class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 7 days" data-activity-range="week" data-activity-density="week-42" data-activity-bucket-count="7"><div class="rlb-activity__plot" data-activity-density="week-42" style="--rlb-activity-columns:7;--rlb-activity-bar-width:42px">${buckets.map(([id, duration, date, height]) => `<div class="rlb-activity__bucket${duration === '0m' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="${id}" role="img" tabindex="0" aria-label="${date}, 2026 · ${duration} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${height}"></span></span><time class="rlb-activity__date">${date}</time></div>`).join('')}</div></div></section></div></div></div></div>`;
+    const markup = theme => `<div class="${theme}"><div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity" aria-labelledby="activity-title"><div class="rlb-panel__header"><h3 id="activity-title" class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 7 days" data-activity-range="week" data-activity-density="week-42" data-activity-bucket-count="7"><div class="rlb-activity__plot" data-activity-density="week-42" style="--rlb-activity-columns:7;--rlb-activity-bar-width:42px">${buckets.map(([id, duration, fullDuration, date, height]) => `<div class="rlb-activity__bucket${duration === '' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="${id}" role="img" tabindex="0" aria-label="${date}, 2026 · ${fullDuration} · ${duration === '' ? '0 Sessions' : '1 Session'}"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${height}"></span></span><time class="rlb-activity__date">${date}</time></div>`).join('')}</div></div></section></div></div></div></div>`;
     const expression = `(() => {
         const rect = node => { const value = node.getBoundingClientRect(); return { left:value.left, right:value.right, top:value.top, bottom:value.bottom, width:value.width, height:value.height }; };
         const activity = document.querySelector('.rlb-activity');
@@ -1189,6 +1189,7 @@ test('Activity chart keeps desktop duration/date hierarchy, uses a wide 7-day de
             barWidth: bar.getBoundingClientRect().width,
             density: chart.dataset.activityDensity,
             zeroOpacity: getComputedStyle(document.querySelector('.rlb-activity__bucket--empty .rlb-activity__bar')).opacity,
+            zeroDuration: document.querySelector('.rlb-activity__bucket--empty .rlb-activity__duration').textContent,
             overflow: getComputedStyle(chart).overflow,
         };
     })()`;
@@ -1212,6 +1213,7 @@ test('Activity chart keeps desktop duration/date hierarchy, uses a wide 7-day de
             JSON.stringify({ theme, geometry })
         );
         assert.equal(geometry.zeroOpacity, '0.35', JSON.stringify({ theme, geometry }));
+        assert.equal(geometry.zeroDuration, '', JSON.stringify({ theme, geometry }));
     }
 });
 
@@ -1219,9 +1221,9 @@ test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and uses
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const columns = Array.from({ length: 30 }, (_, index) => {
         const day = String(index + 1);
-        const duration = index === 12 ? '1.5' : index === 0 ? '0.5' : '0';
+        const duration = index === 12 ? '1.5' : index === 0 ? '0.5' : '';
         const month = index === 0 ? 'Aug ' : '';
-        return `<div class="rlb-activity__bucket${duration === '0' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="day-${index}" role="img" tabindex="0" aria-label="${month}${day}, 2026 · ${duration === '1.5' ? '1h 30m' : duration === '0.5' ? '30m' : '0m'} · 1 Session"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${duration === '0' ? 2 : index === 12 ? 96 : 30}px"></span></span><time class="rlb-activity__date">${month}${day}</time></div>`;
+        return `<div class="rlb-activity__bucket${duration === '' ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="day-${index}" role="img" tabindex="0" aria-label="${month}${day}, 2026 · ${duration === '1.5' ? '1h 30m' : duration === '0.5' ? '30m' : '0m'} · ${duration === '' ? '0 Sessions' : '1 Session'}"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${duration === '' ? 2 : index === 12 ? 96 : 30}px"></span></span><time class="rlb-activity__date">${month}${day}</time></div>`;
     }).join('');
     const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity"><div class="rlb-panel__header"><h3 class="rlb-section__title">Activity</h3><span class="rlb-activity__unit">HOURS</span></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Last 30 days" data-activity-range="month" data-activity-density="month-10" data-activity-bucket-count="30"><div class="rlb-activity__plot" data-activity-density="month-10" style="--rlb-activity-columns:30;--rlb-activity-bar-width:10px">${columns}</div></div></section></div></div></div>`;
     const geometry = await withChromium(
@@ -1253,4 +1255,56 @@ test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and uses
     assert.equal(geometry.barWidth, 10, JSON.stringify(geometry));
     assert.equal(geometry.density, 'month-10', JSON.stringify(geometry));
     assert.ok(Number.parseFloat(geometry.fontSize) <= 10, JSON.stringify(geometry));
+});
+
+test('Today Activity keeps 24 hourly buckets, sparse labels, and no narrow-layout overflow', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+    const visibleHours = new Set([0, 6, 12, 18]);
+    const columns = Array.from({ length: 24 }, (_, hour) => {
+        const duration = hour === 9 ? '30m' : '';
+        const minutes = hour === 9 ? 30 : 0;
+        const label = String(hour).padStart(2, '0');
+        const visibleLabel = visibleHours.has(hour) ? label : '';
+        return `<div class="rlb-activity__bucket${minutes === 0 ? ' rlb-activity__bucket--empty' : ''}" data-activity-bucket="2026-08-15T${label}" data-activity-duration="${duration}" data-activity-minutes="${minutes}" data-activity-sessions="${minutes === 0 ? 0 : 1}" role="img" tabindex="0" aria-label="Aug 15, 2026 at ${label}:00 · ${minutes === 0 ? '0m' : duration} · ${minutes === 0 ? 0 : 1} Session${minutes === 0 ? 's' : ''}" title="Aug 15, 2026 at ${label}:00 · ${minutes === 0 ? '0m' : duration} · ${minutes === 0 ? 0 : 1} Session${minutes === 0 ? 's' : ''}"><span class="rlb-activity__duration">${duration}</span><span class="rlb-activity__bar-wrap"><span class="rlb-activity__bar" style="height:${minutes === 0 ? 2 : 96}px"></span></span><time class="rlb-activity__date">${visibleLabel}</time></div>`;
+    }).join('');
+    const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:calc(100vw - 24px)"><div class="rlb-body rlb-body__scroll"><section class="rlb-dashboard-section rlb-dashboard-panel rlb-activity"><div class="rlb-panel__header"><h3 class="rlb-section__title">Activity</h3></div><div class="rlb-activity__chart" role="group" aria-label="Activity for Today" data-activity-range="today" data-activity-unit="hour" data-activity-density="today-18" data-activity-bucket-count="24"><div class="rlb-activity__plot" data-activity-density="today-18" style="--rlb-activity-columns:24;--rlb-activity-bar-width:18px">${columns}</div></div></section></div></div></div>`;
+    const expression = `(() => {
+        const dialog = document.querySelector('.rlb-dialog');
+        const chart = document.querySelector('.rlb-activity__chart');
+        const buckets = [...document.querySelectorAll('[data-activity-bucket]')];
+        const empty = buckets.find(node => node.classList.contains('rlb-activity__bucket--empty'));
+        const chartRect = chart.getBoundingClientRect();
+        const firstRect = buckets[0].getBoundingClientRect();
+        const lastRect = buckets.at(-1).getBoundingClientRect();
+        return {
+            dialogOverflow: dialog.scrollWidth > dialog.clientWidth + 1,
+            chartOverflowHidden: getComputedStyle(chart).overflowX === 'hidden',
+            bucketsInsideChart: firstRect.left >= chartRect.left - 1 && lastRect.right <= chartRect.right + 1,
+            bucketCount: buckets.length,
+            labels: buckets.map(node => node.querySelector('.rlb-activity__date').textContent).filter(Boolean),
+            emptyDuration: empty.querySelector('.rlb-activity__duration').textContent,
+            emptyDataset: empty.dataset.activityDuration,
+            emptyBaseline: empty.querySelector('.rlb-activity__bar').getBoundingClientRect().height,
+            emptyAria: empty.getAttribute('aria-label'),
+            emptyTitle: empty.title,
+        };
+    })()`;
+
+    for (const width of [960, 320]) {
+        const geometry = await withChromium(htmlWithLateHost(markup), expression, {
+            width,
+            height: 600,
+        });
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        assert.equal(geometry.dialogOverflow, false, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.chartOverflowHidden, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.bucketsInsideChart, true, JSON.stringify({ width, geometry }));
+        assert.equal(geometry.bucketCount, 24, JSON.stringify({ width, geometry }));
+        assert.deepEqual(geometry.labels, ['00', '06', '12', '18'], JSON.stringify({ width, geometry }));
+        assert.equal(geometry.emptyDuration, '', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.emptyDataset, '', JSON.stringify({ width, geometry }));
+        assert.equal(geometry.emptyBaseline, 2, JSON.stringify({ width, geometry }));
+        assert.match(geometry.emptyAria, /Aug 15, 2026 at 00:00.*0m.*0 Sessions/);
+        assert.match(geometry.emptyTitle, /Aug 15, 2026 at 00:00.*0m.*0 Sessions/);
+    }
 });

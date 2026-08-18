@@ -254,7 +254,7 @@ test('Activity running totals update from the cached snapshot without replacing 
     const readsAfterOpen = queryCount;
     const chart = document.querySelector('.rlb-activity__chart');
     const bucket = chart.querySelector('[data-activity-bucket="2026-08-15"]');
-    assert.equal(bucket.dataset.activityDuration, '0m');
+    assert.equal(bucket.dataset.activityDuration, '');
 
     nowMs += 61_000;
     tick();
@@ -262,6 +262,58 @@ test('Activity running totals update from the cached snapshot without replacing 
     assert.strictEqual(document.querySelector('.rlb-activity__chart'), chart);
     assert.equal(bucket.dataset.activityDuration, '1m');
     assert.match(bucket.getAttribute('aria-label'), /1m.*1 Session/);
+
+    dashboard.destroy();
+});
+
+test('Today Activity splits a running Session across local hours without another graph read', () => {
+    let nowMs = new Date('2026-08-15T10:00:00').getTime();
+    let tick;
+    const graph = installGraph([
+        TASK,
+        { uid: 'activity-hourly-drawer', string: 'LOGBOOK::', parent: TASK.uid },
+        {
+            uid: 'activity-hourly-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:30]',
+            parent: 'activity-hourly-drawer',
+        },
+    ]);
+    let queryCount = 0;
+    const query = graph.api.data.q;
+    graph.api.data.q = (...args) => {
+        queryCount += 1;
+        return query(...args);
+    };
+    clock.refresh();
+    const dashboard = createDashboard({
+        now: () => new Date(nowMs),
+        setIntervalFn: callback => {
+            tick = callback;
+            return 'hourly-activity-ticker';
+        },
+        clearIntervalFn: () => {},
+    });
+
+    dashboard.open();
+    const range = document.querySelector('.rlb-header select');
+    range.value = 'today';
+    range.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    const readsAfterRange = queryCount;
+    const chart = document.querySelector('.rlb-activity__chart');
+    const hourNine = chart.querySelector('[data-activity-bucket="2026-08-15T09"]');
+    const hourTen = chart.querySelector('[data-activity-bucket="2026-08-15T10"]');
+    assert.equal(chart.dataset.activityBucketCount, '24');
+    assert.equal(hourNine.dataset.activityDuration, '30m');
+    assert.equal(hourTen.dataset.activityDuration, '');
+
+    nowMs += 61_000;
+    tick();
+
+    assert.equal(queryCount, readsAfterRange);
+    assert.equal(document.querySelector('.rlb-activity__chart'), chart);
+    assert.equal(hourNine.dataset.activityDuration, '30m');
+    assert.equal(hourTen.dataset.activityDuration, '1m');
+    assert.match(hourTen.getAttribute('aria-label'), /1m.*1 Session/);
 
     dashboard.destroy();
 });
