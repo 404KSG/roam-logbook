@@ -69,6 +69,12 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
     assert.equal(popover.querySelector('.rlb-today__hidden-count')?.textContent, '+1');
 
+    popover.querySelector('[data-action="today-play"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(document.querySelector('body > .rlb-popover'), popover, 'Play keeps the task pool open');
+    assert.ok(popover.querySelector('[data-task-uid="daily-root"] .rlb-today__timing'));
+    assert.equal(popover.querySelector('[data-task-uid="daily-root"] [data-action="today-play"]'), null);
+
     const afterTodayRead = graph.fastQueryCount();
     tick();
     assert.equal(graph.fastQueryCount(), afterTodayRead, 'one-second ticker uses cached Active Work only');
@@ -77,14 +83,23 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     refresh.click();
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.ok(graph.fastQueryCount() > afterTodayRead, 'Refresh reloads the Today page');
+    const rowsBeforeFailure = [...popover.querySelectorAll('.rlb-today__row')].map(
+        row => row.dataset.taskUid
+    );
 
     const originalQuery = graph.api.data.q;
-    graph.api.data.q = () => {
-        throw new Error('Today refresh failed');
+    graph.api.data.q = (datalog, ...args) => {
+        if (datalog.includes(':find ?page-uid ?uid ?string ?order ?parent-uid')) {
+            throw new Error('Today refresh failed');
+        }
+        return originalQuery(datalog, ...args);
     };
     popover.querySelector('[data-action="refresh"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
-    assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
+    assert.deepEqual(
+        [...popover.querySelectorAll('.rlb-today__row')].map(row => row.dataset.taskUid),
+        rowsBeforeFailure
+    );
     assert.match(popover.textContent, /last saved view/);
     graph.api.data.q = originalQuery;
 

@@ -9,11 +9,11 @@ Today is a navigation/task-pool view, not another timing surface.
 ## Read boundary
 
 Today resolves the exact local Daily Notes title (for example, `August 19th,
-2026`) in `src/roam.js`, then follows only that page's direct children through
-bounded `getChildren` reads. The adapter caps depth at 24 and nodes at 500 and
-returns `success`, `empty`, or `error`; a failed read cannot erase a successful
-open-popover snapshot. Bare references have a finite second lookup for their
-target strings. No UI module calls `roamAlphaAPI`.
+2026`) in `src/roam.js`. One page-scoped query returns each descendant and its
+direct parent; the adapter rebuilds that tree in memory, caps depth at 24 and
+nodes at 500, and returns `success`, `empty`, or `error`. A failed read cannot
+erase a successful open-popover snapshot. Bare references have one finite
+second lookup for their target strings. No UI module calls `roamAlphaAPI`.
 
 ## Pure hierarchy
 

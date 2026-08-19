@@ -699,11 +699,17 @@ function getChildren(uid) {
     throw withGraphReadIssue(error, { source: "children", affectedUid: uid });
   }
 }
-var DAILY_PAGE_QUERY = `[:find ?page-uid
+var DAILY_PAGE_TREE_QUERY = `[:find ?page-uid ?uid ?string ?order ?parent-uid
   :in $ ?page-title
   :where
   [?page :node/title ?page-title]
-  [?page :block/uid ?page-uid]]`;
+  [?page :block/uid ?page-uid]
+  [?block :block/page ?page]
+  [?block :block/uid ?uid]
+  [?block :block/string ?string]
+  [?block :block/order ?order]
+  [?parent :block/children ?block]
+  [?parent :block/uid ?parent-uid]]`;
 var REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
   :in $ [?uid ...]
   :where
@@ -717,17 +723,11 @@ var boundedReadError = (message) => new GraphReadError(message, {
   issue: graphReadIssue({ source: "daily-note", message })
 });
 var normalizeBound = (value, fallback) => Number.isInteger(value) && value > 0 ? value : fallback;
-var readDailyPageUid = (pageTitle) => {
-  const result = queryResult(DAILY_PAGE_QUERY, pageTitle);
-  if (!result.ok)
-    throw result.error;
-  const rows = validateQueryRows(
-    result.rows,
-    "daily note page",
-    (row) => row.length >= 1 && typeof row[0] === "string" && row[0].length > 0
-  );
-  return rows[0]?.[0] || null;
-};
+var readDailyPageRows = (pageTitle) => validateQueryRows(
+  queryOrThrow(DAILY_PAGE_TREE_QUERY, pageTitle),
+  "daily note page tree",
+  (row) => row.length >= 5 && typeof row[0] === "string" && row[0].length > 0 && typeof row[1] === "string" && row[1].length > 0 && typeof row[2] === "string" && Number.isFinite(row[3]) && typeof row[4] === "string" && row[4].length > 0
+);
 var readReferencedBlockStrings = (uids) => {
   if (uids.length === 0)
     return {};
@@ -745,36 +745,73 @@ function readDailyNoteTree(pageTitle, { maxDepth = DAILY_NOTE_READ_LIMITS.maxDep
   const depthLimit = normalizeBound(maxDepth, DAILY_NOTE_READ_LIMITS.maxDepth);
   const nodeLimit = normalizeBound(maxNodes, DAILY_NOTE_READ_LIMITS.maxNodes);
   try {
-    const pageUid = readDailyPageUid(pageTitle);
-    if (!pageUid)
+    const rows = readDailyPageRows(pageTitle);
+    if (rows.length === 0) {
       return { ok: true, pageUid: null, roots: [], referenceStrings: {} };
-    let nodeCount = 0;
+    }
+    if (rows.length > nodeLimit) {
+      throw boundedReadError(
+        `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
+      );
+    }
+    const pageUids = new Set(rows.map((row) => row[0]));
+    if (pageUids.size !== 1) {
+      throw boundedReadError("Daily note returned blocks from more than one page.");
+    }
+    const pageUid = rows[0][0];
     const referencedUids = /* @__PURE__ */ new Set();
-    const visit = (block, depth) => {
-      if (++nodeCount > nodeLimit) {
-        throw boundedReadError(
-          `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
-        );
+    const nodes = /* @__PURE__ */ new Map();
+    const parentByUid = /* @__PURE__ */ new Map();
+    for (const [, uid, string, order, parentUid] of rows) {
+      if (nodes.has(uid)) {
+        throw boundedReadError("Daily note returned a duplicate block.");
       }
-      const uid = block?.uid;
-      const string = block?.string;
-      if (typeof uid !== "string" || typeof string !== "string") {
-        throw boundedReadError("Daily note returned a malformed block.");
-      }
-      const node = { uid, string, order: block.order, children: [] };
+      nodes.set(uid, { uid, string, order, children: [] });
+      parentByUid.set(uid, parentUid);
       const reference = referencedBlockUid(string);
       if (reference)
         referencedUids.add(reference);
-      const children = getChildren(uid);
-      if (depth >= depthLimit && children.length > 0) {
+    }
+    const rootNodes = [];
+    for (const node of nodes.values()) {
+      const parentUid = parentByUid.get(node.uid);
+      if (parentUid === pageUid) {
+        rootNodes.push(node);
+        continue;
+      }
+      const parent = nodes.get(parentUid);
+      if (!parent) {
+        throw boundedReadError("Daily note returned a block outside its page tree.");
+      }
+      parent.children.push(node);
+    }
+    for (const node of nodes.values()) {
+      node.children.sort((a, b) => a.order - b.order);
+    }
+    rootNodes.sort((a, b) => a.order - b.order);
+    const visiting = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new Set();
+    const validateTree = (node, depth) => {
+      if (depth > depthLimit) {
         throw boundedReadError(
           `Today's Daily Note exceeds the safe ${depthLimit}-level read limit.`
         );
       }
-      node.children = children.map((child) => visit(child, depth + 1));
-      return node;
+      if (visiting.has(node.uid)) {
+        throw boundedReadError("Daily note returned a cyclic block tree.");
+      }
+      if (visited.has(node.uid))
+        return;
+      visiting.add(node.uid);
+      node.children.forEach((child) => validateTree(child, depth + 1));
+      visiting.delete(node.uid);
+      visited.add(node.uid);
     };
-    const roots = getChildren(pageUid).map((child) => visit(child, 0));
+    rootNodes.forEach((root) => validateTree(root, 0));
+    if (visited.size !== nodes.size) {
+      throw boundedReadError("Daily note returned an unreachable block tree.");
+    }
+    const roots = rootNodes;
     let referenceStrings = {};
     try {
       referenceStrings = readReferencedBlockStrings([...referencedUids]);
@@ -7724,7 +7761,11 @@ function renderSessionSurface(root, model, options = {}) {
     const todayModel = options.todayModel || { count: 0 };
     for (const [view, label, count] of [
       ["threads", "Threads", model.activeCount ?? model.rows.length],
-      ["today", "Today", todayModel.count ?? 0]
+      [
+        "today",
+        "Today",
+        ["idle", "loading"].includes(todayModel.status) ? "\u2026" : todayModel.count ?? 0
+      ]
     ]) {
       const selected = activeView === view;
       const control = button(
@@ -7747,7 +7788,7 @@ function renderSessionSurface(root, model, options = {}) {
   if (activeView === "today") {
     const todayModel = options.todayModel;
     const rows = options.todayRows || flattenTodayRows(todayModel);
-    if (!todayModel || todayModel.status === "loading") {
+    if (!todayModel || ["idle", "loading"].includes(todayModel.status)) {
       sessionList.appendChild(el("div", "rlb-popover__empty", "Loading today\u2026"));
     } else if (todayModel.status === "error") {
       sessionList.appendChild(
@@ -8629,7 +8670,8 @@ function createTopbar({
     if (!force && todaySnapshot)
       return { ok: true, cached: true, snapshot: todaySnapshot };
     const token = ++todayRequestToken;
-    todayStatus = "loading";
+    if (!todaySnapshot)
+      todayStatus = "loading";
     todayNotice = "";
     renderSurfaces();
     const result = await Promise.resolve().then(() => readTodayTodoSnapshot(nowDate()));
@@ -8641,15 +8683,15 @@ function createTopbar({
       todayNotice = "";
     } else {
       todayStatus = todaySnapshot?.status || "error";
-      todayNotice = "Today tasks could not be refreshed; showing the last saved view.";
+      todayNotice = todaySnapshot ? "Today tasks could not be refreshed; showing the last saved view." : "Today tasks could not be read. Refresh to try again.";
     }
     renderSurfaces();
     return result;
   };
   const requestSessionRefresh = () => {
     const current = pendingOpenRefresh?.promise || refreshSessions();
-    void loadToday({ force: true });
-    return current;
+    const today = loadToday({ force: true });
+    return Promise.all([current, today]).then(([result]) => result);
   };
   const scheduleOpenRevalidation = () => {
     if (refreshRuntime.inFlight)

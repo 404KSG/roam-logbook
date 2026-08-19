@@ -38,8 +38,20 @@ globalThis.window = {
 };
 
 const { readAllEntries, readHierarchy } = await import(`${src}/entries.js`);
+const { readTodayTodoSnapshot } = await import(`${src}/roam.js`);
 const { buildDashboard, flattenForest } = await import(`${src}/stats.js`);
 const { formatMinutesHuman } = await import(`${src}/time.js`);
+const { buildTodayTodoTree } = await import(`${src}/today-todos.js`);
+
+const todaySnapshot = readTodayTodoSnapshot(new Date());
+if (!todaySnapshot.ok) throw todaySnapshot.error;
+const todayTasks = buildTodayTodoTree(todaySnapshot.roots, {
+    referenceStrings: todaySnapshot.referenceStrings,
+});
+console.log(
+    `today ${todaySnapshot.pageTitle}: ${todayTasks.count} unfinished TODOs` +
+        ` (${todaySnapshot.status})`
+);
 
 const entries = readAllEntries();
 console.log(`${entries.length} clock entries`);

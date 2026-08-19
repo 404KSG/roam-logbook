@@ -11,9 +11,10 @@
 - Today task titles support ordinary navigation and Shift+Click sidebar
   navigation; idle rows expose icon-only Play through the existing clock-switch
   path, while the current task has a non-interactive timing indicator.
-- Today data is loaded after the first Active Threads paint, cached for the open
-  popover, refreshed with the existing Refresh action, and never read by the
-  one-second ticker. Failed reads retain the last successful snapshot.
+- Today data is loaded after the first Active Threads paint with one page-scoped
+  tree query, cached for the open popover, refreshed with the existing Refresh
+  action, and never read by the one-second ticker. Failed reads retain the last
+  successful snapshot.
 
 ## 0.9.0-beta.44 — 2026-08-18
 

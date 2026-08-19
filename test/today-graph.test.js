@@ -50,3 +50,23 @@ test('Today read follows only a bounded page-anchored tree and resolves bare ref
     assert.equal(graph.pullCount(), 0, 'Today reads the Daily Notes page in one query, not one Pull per node');
     assert.ok(graph.fastQueryCount() <= 2, 'Today uses one page-tree query plus at most one finite reference query');
 });
+
+test('Today read rejects pages beyond its explicit node and depth bounds', () => {
+    installGraph([
+        { uid: 'bound-1', page: 'August 19th, 2026', parent: null, order: 0, string: '{{[[TODO]]}} One' },
+        { uid: 'bound-2', page: 'August 19th, 2026', parent: 'bound-1', order: 0, string: '{{[[TODO]]}} Two' },
+        { uid: 'bound-3', page: 'August 19th, 2026', parent: 'bound-2', order: 0, string: '{{[[TODO]]}} Three' },
+    ]);
+
+    const tooMany = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'), {
+        maxNodes: 2,
+    });
+    assert.equal(tooMany.ok, false);
+    assert.match(tooMany.error.message, /2-block read limit/);
+
+    const tooDeep = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'), {
+        maxDepth: 1,
+    });
+    assert.equal(tooDeep.ok, false);
+    assert.match(tooDeep.error.message, /1-level read limit/);
+});
