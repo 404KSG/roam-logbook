@@ -895,6 +895,42 @@ async function openBlock(uid) {
 }
 var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
 var sidebarOperationQueues = /* @__PURE__ */ new WeakMap();
+var knownSidebarBlockWindows = /* @__PURE__ */ new WeakMap();
+var SIDEBAR_WINDOW_CACHE_TTL_MS = 3e4;
+var sidebarWindowCache = (sidebar) => {
+  let cache = knownSidebarBlockWindows.get(sidebar);
+  if (!cache) {
+    cache = /* @__PURE__ */ new Map();
+    knownSidebarBlockWindows.set(sidebar, cache);
+  }
+  return cache;
+};
+var rememberSidebarWindows = (sidebar, windows) => {
+  if (!Array.isArray(windows))
+    return;
+  const cache = sidebarWindowCache(sidebar);
+  cache.clear();
+  for (const sidebarWindow of windows) {
+    const uid = sidebarWindow?.["block-uid"];
+    if (sidebarWindow?.type === "block" && typeof uid === "string" && uid) {
+      cache.set(uid, Date.now());
+    }
+  }
+};
+var rememberSidebarWindow = (sidebar, uid) => {
+  sidebarWindowCache(sidebar).set(uid, Date.now());
+};
+var forgetSidebarWindow = (sidebar, uid) => {
+  sidebarWindowCache(sidebar).delete(uid);
+};
+var hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
+  const knownAt = sidebarWindowCache(sidebar).get(uid);
+  if (!Number.isFinite(knownAt) || Date.now() - knownAt > SIDEBAR_WINDOW_CACHE_TTL_MS) {
+    forgetSidebarWindow(sidebar, uid);
+    return false;
+  }
+  return true;
+};
 var blockSidebarWindow = (uid, order) => {
   const sidebarWindow = { type: "block", "block-uid": uid };
   if (Number.isFinite(order))
@@ -950,6 +986,24 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
   }
   try {
     return await runSidebarOperation(sidebar, async () => {
+      if (hasRecentlyKnownSidebarWindow(sidebar, uid) && typeof sidebar.setWindowOrder === "function") {
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        try {
+          const visibility = await revealExistingBlockWindow(sidebar, uid, {
+            isCurrent,
+            requireOrder: true,
+            unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
+          });
+          if (visibility.ok) {
+            return { ok: true, deduped: true, reordered: visibility.reordered };
+          }
+          if (visibility.skipped)
+            return visibility;
+        } catch {
+        }
+        forgetSidebarWindow(sidebar, uid);
+      }
       await sidebar.open?.();
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
@@ -957,6 +1011,7 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
         const windows = await sidebar.getWindows();
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
+        rememberSidebarWindows(sidebar, windows);
         const existing = Array.isArray(windows) ? windows.find(
           (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
         ) : null;
@@ -968,11 +1023,13 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
           });
           if (visibility.ok === false)
             return visibility;
+          rememberSidebarWindow(sidebar, uid);
           return { ok: true, deduped: true, reordered: visibility.reordered };
         }
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
         await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        rememberSidebarWindow(sidebar, uid);
         return { ok: true, added: true };
       }
       let requested = requestedSidebarBlocks.get(sidebar);
@@ -987,8 +1044,10 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
       try {
         await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
         requested.add(uid);
+        rememberSidebarWindow(sidebar, uid);
       } catch (error) {
         requested.delete(uid);
+        forgetSidebarWindow(sidebar, uid);
         throw error;
       }
       return { ok: true, added: true };
@@ -3389,7 +3448,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.46";
+var PLUGIN_VERSION = "0.9.0-beta.47";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -5567,6 +5626,10 @@ var SURFACE = String.raw`/* ---- popover ---- */
     max-height: 70vh;
     overflow-x: hidden;
     overflow-y: auto;
+    /* Reserve the classic scrollbar's width without painting a permanent
+       scrollbar rail. This keeps the popover content from shifting when a
+       Today tree crosses the overflow threshold. */
+    scrollbar-gutter: stable;
     padding: 8px;
     text-align: left;
     cursor: default;
@@ -6155,6 +6218,25 @@ var SURFACE = String.raw`/* ---- popover ---- */
     display: grid;
     min-width: 0;
     padding: 0 2px 2px;
+}
+
+.rlb-today__controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.rlb-today__control {
+    color: var(--rlb-muted);
+}
+
+.rlb-today__control:hover,
+.rlb-today__control:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: var(--rlb-surface-hover);
 }
 
 .rlb-today__row {
@@ -7450,6 +7532,8 @@ var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
 var dashboardLabel = "Open Roam Logbook Dashboard";
+var expandTodayLabel = "Expand all Today tasks";
+var collapseTodayLabel = "Collapse all Today tasks";
 var switchLabel = (view) => `Show ${view === "today" ? "Today tasks" : "Active Threads"}`;
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
@@ -7742,6 +7826,8 @@ var renderRefreshControl = (options) => {
   return refreshCell;
 };
 function renderSessionSurface(root, model, options = {}) {
+  const activeView = options.view === "today" ? "today" : "threads";
+  const todayExpandableNodes = activeView === "today" && Array.isArray(options.todayModel?.nodes) ? options.todayModel.nodes.filter((node) => node?.children?.length > 0) : [];
   const title = el("div", "rlb-popover__title", surfaceTitle(model.activeCount ?? model.rows.length));
   if (options.titleId)
     title.id = options.titleId;
@@ -7758,6 +7844,27 @@ function renderSessionSurface(root, model, options = {}) {
     dashboard.dataset.action = "dashboard";
     headerActions.appendChild(dashboard);
   }
+  if (todayExpandableNodes.length > 0) {
+    const todayControls = el("div", "rlb-today__controls");
+    todayControls.setAttribute("role", "group");
+    todayControls.setAttribute("aria-label", "Today task tree controls");
+    const expandAll = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control",
+      "",
+      () => options.onExpandAllToday?.(),
+      { title: expandTodayLabel, ariaLabel: expandTodayLabel }
+    );
+    expandAll.dataset.action = "today-expand-all";
+    const collapseAll = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-collapse-all rlb-surface__icon-button rlb-today__control",
+      "",
+      () => options.onCollapseAllToday?.(),
+      { title: collapseTodayLabel, ariaLabel: collapseTodayLabel }
+    );
+    collapseAll.dataset.action = "today-collapse-all";
+    todayControls.append(expandAll, collapseAll);
+    headerActions.appendChild(todayControls);
+  }
   if (options.onRefresh)
     headerActions.appendChild(renderRefreshControl(options));
   if (options.onClose) {
@@ -7773,7 +7880,6 @@ function renderSessionSurface(root, model, options = {}) {
   if (headerActions.childElementCount > 0)
     header.appendChild(headerActions);
   root.replaceChildren(header);
-  const activeView = options.view === "today" ? "today" : "threads";
   if (options.onSwitchView) {
     const switcher = el("nav", "rlb-surface__view-switch");
     switcher.setAttribute("aria-label", "Logbook view");
@@ -8789,6 +8895,16 @@ function createTopbar({
         else
           next.add(uid);
         todayExpanded = next;
+        renderSurfaces();
+      },
+      onExpandAllToday: () => {
+        todayExpanded = new Set(
+          (today.nodes || []).filter((node) => node?.children?.length > 0).map((node) => node.uid)
+        );
+        renderSurfaces();
+      },
+      onCollapseAllToday: () => {
+        todayExpanded = /* @__PURE__ */ new Set();
         renderSurfaces();
       },
       onStartToday: (taskUid) => void run(() => clockIn(taskUid, { source: "active-work-switch" })),

@@ -1,5 +1,22 @@
 # Today Task Pool — beta.45 design
 
+## Follow-up — beta.47 responsive interactions
+
+Today exposes icon-only Expand all and Collapse all controls in the existing
+header action rail whenever at least one visible Task has children. The local
+expanded set accepts parent UIDs only; clearing it leaves the Timing Line branch
+visible because that path remains forced open by the pure tree model.
+
+The body-mounted popover reserves a stable vertical scrollbar gutter. Overflow
+continues to appear only when needed, but crossing the `70vh` threshold no longer
+changes the content width or shifts the fixed action rail.
+
+Confirmed Timing Line sidebar windows use a short-lived native-window hint to
+skip repeated `open` and `getWindows` calls when switching back to recent work.
+Native writes remain serialized and cancellable by a newer intent. A rejected
+fast reveal invalidates the hint and re-enters the authoritative read/add path,
+so a window closed outside the extension is recovered without duplication.
+
 ## Follow-up — beta.46 natural surface width
 
 The shared popover shell uses a controlled `460px` desktop width and shrinks to

@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.46**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.47**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.45 keeps the single-page Activity panel and adds the cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.47 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -44,7 +44,9 @@ The Command Palette exposes only three shortcut-ready actions: **Logbook: Focus 
 By default, a successful user Clock In also opens that Timing Line in Roam's
 native right sidebar at order 0. Switching work moves an existing block window
 back to the top instead of duplicating it, while preserving every other sidebar
-window. Task-title Shift+Click applies the same native re-fronting and expands
+window. A recently confirmed window takes a bounded fast path on later switches;
+if the user closed it, the plugin falls back to Roam's authoritative window list
+and recreates it once. Task-title Shift+Click applies native re-fronting and expands
 an existing block window when Roam exposes those APIs, so a task remains visible
 after switching away and back. Reload, Refresh, and graph reconciliation never
 move the sidebar. This behavior can be disabled in Settings without changing
@@ -144,7 +146,9 @@ Today preserves Daily Notes order and task hierarchy through plain intermediary
 blocks. DONE rows are hidden; unfinished children under a DONE parent are
 promoted to the nearest visible TODO ancestor. Parent rows are collapsed by
 default with a hidden descendant count, while the current Timing Line's path is
-expanded. A task title opens the block, Shift+Click uses Roam's right sidebar,
+expanded. Expand all and Collapse all are available whenever the tree has parent
+Tasks; collapsing still keeps the current Timing Line's ancestor path visible.
+A task title opens the block, Shift+Click uses Roam's right sidebar,
 and an idle TODO's Play icon transfers the existing single Timing Line without
 closing the popover. A failed Today read never masquerades as an empty list.
 

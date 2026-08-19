@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0-beta.47 — 2026-08-19
+
+- Added a bounded fast path for recently confirmed Timing Line sidebar windows,
+  avoiding repeated `open` and `getWindows` round trips during normal task
+  switching while preserving serialized native operations and newest-intent
+  wins. Closed or stale windows still fall back to Roam's authoritative list
+  and are recreated without duplication.
+- Added compact icon-only Expand all and Collapse all controls to the Today task
+  tree. Only parent Tasks enter the local expansion set, and Collapse all keeps
+  the current Timing Line's forced-open ancestor path visible.
+- Reserved the popover's vertical scrollbar gutter so long Today trees can begin
+  or stop overflowing without shifting the panel's content width. Chromium
+  geometry coverage verifies stable left, right, and width positions.
+
 ## 0.9.0-beta.46 — 2026-08-19
 
 - Expanded the Active Threads/Today popover to a controlled 460px desktop
