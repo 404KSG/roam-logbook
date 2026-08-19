@@ -272,27 +272,73 @@ function resolve(namespace, modernName, legacyName = modernName) {
     return api[legacyName].bind(api);
   return null;
 }
+function normalizeSequence(value) {
+  if (Array.isArray(value))
+    return value;
+  if (value === null || value === void 0 || typeof value === "string")
+    return null;
+  if (typeof value !== "object" && typeof value !== "function")
+    return null;
+  try {
+    if (typeof value[Symbol.iterator] === "function")
+      return [...value];
+  } catch {
+  }
+  if (Number.isInteger(value.length) && value.length >= 0) {
+    try {
+      return Array.from(value);
+    } catch {
+    }
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0)
+    return null;
+  if (keys.every((key) => /^\d+$/.test(key))) {
+    return keys.sort((a, b) => Number(a) - Number(b)).map((key) => value[key]);
+  }
+  return null;
+}
+function normalizeQueryRows(value) {
+  const rows = normalizeSequence(value);
+  if (!rows) {
+    throw new GraphReadError("Graph query returned a non-array result", {
+      cause: new TypeError("query rows must be an array of rows")
+    });
+  }
+  return rows.map((row) => {
+    const tuple = normalizeSequence(row);
+    if (!tuple) {
+      throw new GraphReadError("Graph query returned a non-array row", {
+        cause: new TypeError("query rows must contain array-like rows")
+      });
+    }
+    return tuple;
+  });
+}
 function queryResult(datalog, ...args) {
-  const run = resolve(null, "q");
-  if (!run) {
+  const fastRun = resolve("fast", "q");
+  const queryRun = resolve(null, "q");
+  const runs = [];
+  if (fastRun)
+    runs.push(fastRun);
+  if (queryRun && queryRun !== fastRun)
+    runs.push(queryRun);
+  if (runs.length === 0) {
     return {
       ok: false,
       rows: null,
       error: new GraphReadError("roamAlphaAPI q unavailable")
     };
   }
-  try {
-    const rows = run(datalog, ...args);
-    if (!Array.isArray(rows) || rows.some((row) => !Array.isArray(row))) {
-      throw new GraphReadError("Graph query returned a non-array result", {
-        cause: new TypeError("query rows must be an array of rows")
-      });
+  let lastError = null;
+  for (const run of runs) {
+    try {
+      return { ok: true, rows: normalizeQueryRows(run(datalog, ...args)), error: null };
+    } catch (error) {
+      lastError = error instanceof GraphReadError ? error : new GraphReadError(error?.message || "Graph query failed", { cause: error });
     }
-    return { ok: true, rows, error: null };
-  } catch (error) {
-    const graphError = error instanceof GraphReadError ? error : new GraphReadError(error?.message || "Graph query failed", { cause: error });
-    return { ok: false, rows: null, error: graphError };
   }
+  return { ok: false, rows: null, error: lastError };
 }
 function validateQueryRows(rows, label, predicate) {
   if (rows.some((row) => !predicate(row))) {
@@ -306,23 +352,77 @@ function queryOrThrow(datalog, ...args) {
     throw result.error;
   return result.rows;
 }
+var blockLookupRef = (uid) => [":block/uid", uid];
+function pullAttribute(entity, attribute) {
+  if (entity === null || entity === void 0 || typeof entity !== "object")
+    return void 0;
+  if (entity[attribute] !== void 0)
+    return entity[attribute];
+  return entity[attribute.replace(/^:/, "")];
+}
+function pulledString(entity, label) {
+  if (entity === null || entity === void 0)
+    return null;
+  if (typeof entity !== "object" || Array.isArray(entity)) {
+    throw new GraphReadError(`Graph pull returned malformed ${label}`);
+  }
+  const value = pullAttribute(entity, ":block/string");
+  if (value === void 0 || value === null)
+    return null;
+  if (typeof value !== "string") {
+    throw new GraphReadError(`Graph pull returned malformed ${label}`);
+  }
+  return value;
+}
+function normalizePullEntities(value) {
+  const entities = normalizeSequence(value);
+  if (!entities) {
+    throw new GraphReadError("Graph pull_many returned a non-array result", {
+      cause: new TypeError("pull_many results must be an array of entities")
+    });
+  }
+  for (const entity of entities) {
+    if (entity !== null && (typeof entity !== "object" || Array.isArray(entity))) {
+      throw new GraphReadError("Graph pull_many returned a malformed entity");
+    }
+  }
+  return entities;
+}
+function pullMany(pattern, eids) {
+  const run = resolve(null, "pull_many");
+  if (!run)
+    throw new GraphReadError("roamAlphaAPI pull_many unavailable");
+  try {
+    return normalizePullEntities(run(pattern, eids));
+  } catch (error) {
+    if (error instanceof GraphReadError)
+      throw error;
+    throw new GraphReadError(error?.message || "Graph pull_many failed", { cause: error });
+  }
+}
+var readBlockStringFromQuery = (uid) => validateQueryRows(
+  queryOrThrow(
+    "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
+    uid
+  ),
+  "block string",
+  (row) => row.length >= 1 && typeof row[0] === "string"
+)[0]?.[0] ?? null;
 function getBlockString(uid) {
   if (!uid)
     return null;
-  let rows;
+  const pull = resolve(null, "pull");
+  if (pull) {
+    try {
+      return pulledString(pull("[:block/string]", blockLookupRef(uid)), "block string");
+    } catch {
+    }
+  }
   try {
-    rows = validateQueryRows(
-      queryOrThrow(
-        "[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]",
-        uid
-      ),
-      "block string",
-      (row) => row.length >= 1 && typeof row[0] === "string"
-    );
+    return readBlockStringFromQuery(uid);
   } catch (error) {
     throw withGraphReadIssue(error, { source: "block-string", affectedUid: uid });
   }
-  return rows[0]?.[0] ?? null;
 }
 function watchBlockString(uid, onChange) {
   const add = resolve(null, "addPullWatch");
@@ -390,9 +490,35 @@ function resolveReferencedUid(uid) {
   }
   return current || uid;
 }
-function getChildren(uid) {
-  if (!uid)
+var CHILDREN_PULL_PATTERN = "[{:block/children [:block/uid :block/string :block/order]}]";
+function readChildrenFromPull(pull, uid) {
+  const entity = pull(CHILDREN_PULL_PATTERN, blockLookupRef(uid));
+  if (entity === null || entity === void 0)
     return [];
+  if (typeof entity !== "object" || Array.isArray(entity)) {
+    throw new GraphReadError("Graph pull returned malformed children");
+  }
+  const children = pullAttribute(entity, ":block/children");
+  if (children === null || children === void 0)
+    return [];
+  const childEntities = normalizeSequence(children);
+  if (!childEntities) {
+    throw new GraphReadError("Graph pull returned malformed children");
+  }
+  return childEntities.map((child) => {
+    if (child === null || typeof child !== "object" || Array.isArray(child)) {
+      throw new GraphReadError("Graph pull returned malformed child");
+    }
+    const childUid = pullAttribute(child, ":block/uid");
+    const string = pullAttribute(child, ":block/string");
+    const order = pullAttribute(child, ":block/order");
+    if (typeof childUid !== "string" || typeof string !== "string" || !Number.isFinite(order)) {
+      throw new GraphReadError("Graph pull returned malformed child");
+    }
+    return { uid: childUid, string, order };
+  }).sort((a, b) => a.order - b.order);
+}
+function readChildrenFromQuery(uid) {
   const rows = validateQueryRows(
     queryOrThrow(
       `[:find ?uid ?string ?order
@@ -409,6 +535,22 @@ function getChildren(uid) {
     (row) => row.length >= 3 && typeof row[0] === "string" && typeof row[1] === "string" && Number.isFinite(row[2])
   );
   return rows.map(([childUid, string, order]) => ({ uid: childUid, string, order })).sort((a, b) => a.order - b.order);
+}
+function getChildren(uid) {
+  if (!uid)
+    return [];
+  const pull = resolve(null, "pull");
+  if (pull) {
+    try {
+      return readChildrenFromPull(pull, uid);
+    } catch {
+    }
+  }
+  try {
+    return readChildrenFromQuery(uid);
+  } catch (error) {
+    throw withGraphReadIssue(error, { source: "children", affectedUid: uid });
+  }
 }
 async function createBlock({ parentUid, order, string, uid, open }) {
   const create = resolve("block", "create", "createBlock");
@@ -626,10 +768,27 @@ async function openBlockInRightSidebar(uid) {
 }
 
 // src/entries.js
-var entriesQuery = (predicate) => `[:find ?clock-uid ?clock-string ?drawer-string ?task-uid ?task-string ?page-title
+var DRAWER_SHAPES = [
+  { prefix: "", suffix: "::" },
+  { prefix: "", suffix: ":" },
+  { prefix: ":", suffix: ":" },
+  { prefix: ":", suffix: "::" }
+];
+var DRAWER_PADDING = ["", " ", "  ", "	"];
+var LOGBOOK_CASE_VARIANTS = ["LOGBOOK", "logbook", "Logbook", "LogBook"];
+var DRAWER_QUERY_STRINGS = Object.freeze(
+  DRAWER_SHAPES.flatMap(
+    ({ prefix, suffix }) => LOGBOOK_CASE_VARIANTS.flatMap(
+      (word) => DRAWER_PADDING.flatMap(
+        (leading) => DRAWER_PADDING.map((trailing) => `${leading}${prefix}${word}${suffix}${trailing}`)
+      )
+    )
+  )
+);
+var ENTRIES_QUERY = `[:find ?clock-uid ?clock-string ?drawer-string ?task-uid ?task-string ?page-title
+  :in $ [?drawer-string ...]
   :where
   [?d :block/string ?drawer-string]
-  [(clojure.string/${predicate} ?drawer-string "LOGBOOK:")]
   [?d :block/children ?c]
   [?c :block/uid ?clock-uid]
   [?c :block/string ?clock-string]
@@ -639,17 +798,7 @@ var entriesQuery = (predicate) => `[:find ?clock-uid ?clock-string ?drawer-strin
   [(get-else $ ?t :block/page "") ?p]
   [(get-else $ ?p :node/title "") ?page-title]]`;
 function queryEntryRows() {
-  try {
-    return queryOrThrow(entriesQuery("includes?"));
-  } catch (error) {
-    console.warn("[roam-logbook] includes? unavailable, using starts-with?", error);
-  }
-  try {
-    return queryOrThrow(entriesQuery("starts-with?"));
-  } catch (error) {
-    console.error("[roam-logbook] could not read logbook entries", error);
-    throw withGraphReadIssue(error, { source: "entries" });
-  }
+  return queryOrThrow(ENTRIES_QUERY, DRAWER_QUERY_STRINGS);
 }
 function readAllEntries() {
   let rows;
@@ -729,23 +878,50 @@ var BLOCK_STRINGS_QUERY = `[:find ?uid ?string
   :where
   [?b :block/uid ?uid]
   [?b :block/string ?string]]`;
-var readBlockStrings = (uids) => {
-  if (uids.length === 0)
-    return {};
+var BLOCK_STRINGS_PULL_PATTERN = "[:block/uid :block/string]";
+var readBlockStringsFromPull = (uids) => {
+  const entities = pullMany(
+    BLOCK_STRINGS_PULL_PATTERN,
+    uids.map((uid) => [":block/uid", uid])
+  );
   const result = {};
-  let rows;
-  try {
-    rows = validateQueryRows(
-      queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-      "block string batch",
-      (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
-    );
-  } catch (error) {
-    throw withGraphReadIssue(error, { source: "block-string", affectedUids: uids });
+  for (const entity of entities) {
+    if (entity === null || entity === void 0)
+      continue;
+    const uid = pullAttribute(entity, ":block/uid");
+    const string = pullAttribute(entity, ":block/string");
+    if (string === void 0 || string === null)
+      continue;
+    if (typeof uid !== "string" || typeof string !== "string") {
+      throw new Error("Graph pull_many returned malformed block string data");
+    }
+    result[uid] = string;
   }
+  return result;
+};
+var readBlockStringsFromQuery = (uids) => {
+  const rows = validateQueryRows(
+    queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+    "block string batch",
+    (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
+  );
+  const result = {};
   for (const [uid, string] of rows)
     result[uid] = string;
   return result;
+};
+var readBlockStrings = (uids) => {
+  if (uids.length === 0)
+    return {};
+  try {
+    return readBlockStringsFromPull(uids);
+  } catch {
+    try {
+      return readBlockStringsFromQuery(uids);
+    } catch (error) {
+      throw withGraphReadIssue(error, { source: "block-string", affectedUids: uids });
+    }
+  }
 };
 function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   const parentOf = {};

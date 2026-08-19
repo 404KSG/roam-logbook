@@ -48,6 +48,34 @@ test('the graph adapter distinguishes a successful empty query from a failed que
     assert.match(failed.error.message, /graph unavailable/);
 });
 
+test('fast.q is preferred and proxy-like rows are normalized before q fallback', async () => {
+    const roam = await import('../src/roam.js');
+    const originalFast = graph.api.data.fast.q;
+    const originalQuery = graph.api.data.q;
+    let queryCalls = 0;
+    graph.api.data.fast.q = () => ({ 0: { 0: 'fast result' }, length: 1 });
+    graph.api.data.q = () => {
+        queryCalls += 1;
+        return [['q result']];
+    };
+
+    try {
+        const fast = roam.queryResult(QUERY);
+        assert.deepEqual(fast.rows, [['fast result']]);
+        assert.equal(queryCalls, 0);
+
+        graph.api.data.fast.q = () => {
+            throw new Error('fast query unavailable');
+        };
+        const fallback = roam.queryResult(QUERY);
+        assert.deepEqual(fallback.rows, [['q result']]);
+        assert.equal(queryCalls, 1);
+    } finally {
+        graph.api.data.fast.q = originalFast;
+        graph.api.data.q = originalQuery;
+    }
+});
+
 test('a malformed graph query result is a failed read, not an empty graph', async () => {
     const roam = await import('../src/roam.js');
 

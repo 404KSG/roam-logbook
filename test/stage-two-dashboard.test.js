@@ -111,7 +111,7 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
     let graphReads = 0;
     const query = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return query(...args);
     };
     const dashboard = createDashboard({
@@ -245,7 +245,7 @@ test('Dashboard discard confirmation reuses the cached snapshot before the write
     const originalQuery = graph.api.data.q;
     let entryReads = 0;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) entryReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) entryReads += 1;
         return originalQuery(...args);
     };
     const dashboard = createDashboard({ now: () => new Date(nowMs) });

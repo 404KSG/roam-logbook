@@ -194,7 +194,7 @@ test('ordinary click paints cached Sessions and loading before post-paint graph 
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return originalQuery(...args);
     };
     t.after(() => {
@@ -360,7 +360,7 @@ test('closing before the post-paint callback cancels revalidation', async t => {
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return originalQuery(...args);
     };
     t.after(() => {
@@ -402,7 +402,7 @@ test('closing after graph revalidation starts updates shared cache without reope
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) {
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) {
             graphReads += 1;
             if (graphReads === 1) click(topbarButton());
         }
@@ -428,7 +428,7 @@ test('unmount cancels a pending open-time revalidation callback', async t => {
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return originalQuery(...args);
     };
     t.after(() => {
@@ -452,7 +452,7 @@ test('manual Refresh during pending and in-flight open revalidation reuses one g
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return originalQuery(...args);
     };
     t.after(() => {
@@ -978,7 +978,7 @@ test('fast Refresh clicks coalesce into one graph read', async t => {
     let reads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) reads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) reads += 1;
         return originalQuery(...args);
     };
     let notifications = 0;
@@ -1337,7 +1337,7 @@ test('pure Recent Active Work expires on the ticker without another graph read',
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) graphReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
         return originalQuery(...args);
     };
     try {

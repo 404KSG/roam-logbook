@@ -55,9 +55,9 @@ export function generateUid() {
 /**
  * Resolve a method to the namespace that owns it.
  *
- * `q` and the block operations exist both on `roamAlphaAPI` and on the newer
- * `roamAlphaAPI.data.*`; picking the function from one and calling it against
- * the other's `this` breaks, so the owner is chosen alongside the function.
+ * `q`, pull, and the block operations exist both on `roamAlphaAPI` and on
+ * the newer `roamAlphaAPI.data.*`; picking the function from one and calling
+ * it against the other's `this` breaks, so the owner is chosen alongside it.
  */
 function resolve(namespace, modernName, legacyName = modernName) {
     const api = getApi();
@@ -71,35 +71,90 @@ function resolve(namespace, modernName, legacyName = modernName) {
 }
 
 /**
+ * Roam's experimental fast namespace can return a JS proxy around a Clojure
+ * sequence/vector rather than a plain Array. Keep the graph adapter's public
+ * query contract stable for the rest of the extension.
+ */
+function normalizeSequence(value) {
+    if (Array.isArray(value)) return value;
+    if (value === null || value === undefined || typeof value === 'string') return null;
+    if (typeof value !== 'object' && typeof value !== 'function') return null;
+
+    try {
+        if (typeof value[Symbol.iterator] === 'function') return [...value];
+    } catch {
+        // Fall through to the array-like and numeric-key representations.
+    }
+
+    if (Number.isInteger(value.length) && value.length >= 0) {
+        try {
+            return Array.from(value);
+        } catch {
+            // Treat an unreadable proxy as a malformed graph response.
+        }
+    }
+
+    const keys = Object.keys(value);
+    if (keys.length === 0) return null;
+    if (keys.every(key => /^\d+$/.test(key))) {
+        return keys
+            .sort((a, b) => Number(a) - Number(b))
+            .map(key => value[key]);
+    }
+    return null;
+}
+
+function normalizeQueryRows(value) {
+    const rows = normalizeSequence(value);
+    if (!rows) {
+        throw new GraphReadError('Graph query returned a non-array result', {
+            cause: new TypeError('query rows must be an array of rows'),
+        });
+    }
+    return rows.map(row => {
+        const tuple = normalizeSequence(row);
+        if (!tuple) {
+            throw new GraphReadError('Graph query returned a non-array row', {
+                cause: new TypeError('query rows must contain array-like rows'),
+            });
+        }
+        return tuple;
+    });
+}
+
+/**
  * Read one graph query at the adapter boundary.
  *
  * `ok: true, rows: []` is a valid empty graph result. `ok: false` means the
  * caller cannot know what the graph contains and must not treat it as empty.
  */
 export function queryResult(datalog, ...args) {
-    const run = resolve(null, 'q');
-    if (!run) {
+    const fastRun = resolve('fast', 'q');
+    const queryRun = resolve(null, 'q');
+    const runs = [];
+    if (fastRun) runs.push(fastRun);
+    if (queryRun && queryRun !== fastRun) runs.push(queryRun);
+    if (runs.length === 0) {
         return {
             ok: false,
             rows: null,
             error: new GraphReadError('roamAlphaAPI q unavailable'),
         };
     }
-    try {
-        const rows = run(datalog, ...args);
-        if (!Array.isArray(rows) || rows.some(row => !Array.isArray(row))) {
-            throw new GraphReadError('Graph query returned a non-array result', {
-                cause: new TypeError('query rows must be an array of rows'),
-            });
+
+    let lastError = null;
+    for (const run of runs) {
+        try {
+            return { ok: true, rows: normalizeQueryRows(run(datalog, ...args)), error: null };
+        } catch (error) {
+            lastError =
+                error instanceof GraphReadError
+                    ? error
+                    : new GraphReadError(error?.message || 'Graph query failed', { cause: error });
         }
-        return { ok: true, rows, error: null };
-    } catch (error) {
-        const graphError =
-            error instanceof GraphReadError
-                ? error
-                : new GraphReadError(error?.message || 'Graph query failed', { cause: error });
-        return { ok: false, rows: null, error: graphError };
     }
+
+    return { ok: false, rows: null, error: lastError };
 }
 
 /** Validate the shape of a successful query at the adapter boundary. */
@@ -117,22 +172,87 @@ export function queryOrThrow(datalog, ...args) {
     return result.rows;
 }
 
+const blockLookupRef = uid => [':block/uid', uid];
+
+/**
+ * Pull results use keyword-shaped object keys in current Roam builds. The
+ * unprefixed fallback keeps this adapter tolerant of older/translated wrappers
+ * without turning a missing attribute into a successful non-empty read.
+ */
+export function pullAttribute(entity, attribute) {
+    if (entity === null || entity === undefined || typeof entity !== 'object') return undefined;
+    if (entity[attribute] !== undefined) return entity[attribute];
+    return entity[attribute.replace(/^:/, '')];
+}
+
+function pulledString(entity, label) {
+    if (entity === null || entity === undefined) return null;
+    if (typeof entity !== 'object' || Array.isArray(entity)) {
+        throw new GraphReadError(`Graph pull returned malformed ${label}`);
+    }
+    const value = pullAttribute(entity, ':block/string');
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string') {
+        throw new GraphReadError(`Graph pull returned malformed ${label}`);
+    }
+    return value;
+}
+
+function normalizePullEntities(value) {
+    const entities = normalizeSequence(value);
+    if (!entities) {
+        throw new GraphReadError('Graph pull_many returned a non-array result', {
+            cause: new TypeError('pull_many results must be an array of entities'),
+        });
+    }
+    for (const entity of entities) {
+        if (entity !== null && (typeof entity !== 'object' || Array.isArray(entity))) {
+            throw new GraphReadError('Graph pull_many returned a malformed entity');
+        }
+    }
+    return entities;
+}
+
+/** Pull many entities through modern or legacy Roam API names. */
+export function pullMany(pattern, eids) {
+    const run = resolve(null, 'pull_many');
+    if (!run) throw new GraphReadError('roamAlphaAPI pull_many unavailable');
+    try {
+        return normalizePullEntities(run(pattern, eids));
+    } catch (error) {
+        if (error instanceof GraphReadError) throw error;
+        throw new GraphReadError(error?.message || 'Graph pull_many failed', { cause: error });
+    }
+}
+
+const readBlockStringFromQuery = uid =>
+    validateQueryRows(
+        queryOrThrow(
+            '[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]',
+            uid
+        ),
+        'block string',
+        row => row.length >= 1 && typeof row[0] === 'string'
+    )[0]?.[0] ?? null;
+
 export function getBlockString(uid) {
     if (!uid) return null;
-    let rows;
+
+    const pull = resolve(null, 'pull');
+    if (pull) {
+        try {
+            return pulledString(pull('[:block/string]', blockLookupRef(uid)), 'block string');
+        } catch {
+            // A partially deployed/older Roam build may expose q but not a
+            // working pull implementation. Preserve the q fallback below.
+        }
+    }
+
     try {
-        rows = validateQueryRows(
-            queryOrThrow(
-                '[:find ?s :in $ ?uid :where [?b :block/uid ?uid] [?b :block/string ?s]]',
-                uid
-            ),
-            'block string',
-            row => row.length >= 1 && typeof row[0] === 'string'
-        );
+        return readBlockStringFromQuery(uid);
     } catch (error) {
         throw withGraphReadIssue(error, { source: 'block-string', affectedUid: uid });
     }
-    return rows[0]?.[0] ?? null;
 }
 
 /**
@@ -230,9 +350,38 @@ export function resolveReferencedUid(uid) {
     return current || uid;
 }
 
-/** Direct children of a block, in sibling order. */
-export function getChildren(uid) {
-    if (!uid) return [];
+const CHILDREN_PULL_PATTERN =
+    '[{:block/children [:block/uid :block/string :block/order]}]';
+
+function readChildrenFromPull(pull, uid) {
+    const entity = pull(CHILDREN_PULL_PATTERN, blockLookupRef(uid));
+    if (entity === null || entity === undefined) return [];
+    if (typeof entity !== 'object' || Array.isArray(entity)) {
+        throw new GraphReadError('Graph pull returned malformed children');
+    }
+    const children = pullAttribute(entity, ':block/children');
+    if (children === null || children === undefined) return [];
+    const childEntities = normalizeSequence(children);
+    if (!childEntities) {
+        throw new GraphReadError('Graph pull returned malformed children');
+    }
+    return childEntities
+        .map(child => {
+            if (child === null || typeof child !== 'object' || Array.isArray(child)) {
+                throw new GraphReadError('Graph pull returned malformed child');
+            }
+            const childUid = pullAttribute(child, ':block/uid');
+            const string = pullAttribute(child, ':block/string');
+            const order = pullAttribute(child, ':block/order');
+            if (typeof childUid !== 'string' || typeof string !== 'string' || !Number.isFinite(order)) {
+                throw new GraphReadError('Graph pull returned malformed child');
+            }
+            return { uid: childUid, string, order };
+        })
+        .sort((a, b) => a.order - b.order);
+}
+
+function readChildrenFromQuery(uid) {
     const rows = validateQueryRows(
         queryOrThrow(
             `[:find ?uid ?string ?order
@@ -246,11 +395,36 @@ export function getChildren(uid) {
             uid
         ),
         'children',
-        row => row.length >= 3 && typeof row[0] === 'string' && typeof row[1] === 'string' && Number.isFinite(row[2])
+        row =>
+            row.length >= 3 &&
+            typeof row[0] === 'string' &&
+            typeof row[1] === 'string' &&
+            Number.isFinite(row[2])
     );
     return rows
         .map(([childUid, string, order]) => ({ uid: childUid, string, order }))
         .sort((a, b) => a.order - b.order);
+}
+
+/** Direct children of a block, in sibling order. */
+export function getChildren(uid) {
+    if (!uid) return [];
+
+    const pull = resolve(null, 'pull');
+    if (pull) {
+        try {
+            return readChildrenFromPull(pull, uid);
+        } catch {
+            // Fall through to the proven q path when pull is unavailable or
+            // rejected by an older Roam build.
+        }
+    }
+
+    try {
+        return readChildrenFromQuery(uid);
+    } catch (error) {
+        throw withGraphReadIssue(error, { source: 'children', affectedUid: uid });
+    }
 }
 
 export async function createBlock({ parentUid, order, string, uid, open }) {

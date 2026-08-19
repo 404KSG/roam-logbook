@@ -7,8 +7,12 @@ import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 const { parseTimestamp } = await import('../src/time.js');
 const { parseClockLineDetailed } = await import('../src/org.js');
 const { readAllEntries, readHierarchy } = await import('../src/entries.js');
-const { GraphReadError } = await import('../src/roam.js');
-const { getBlockString } = await import('../src/roam.js');
+const {
+    GraphReadError,
+    getBlockString,
+    getChildren,
+    resolveReferencedUid,
+} = await import('../src/roam.js');
 const { buildDashboard } = await import('../src/stats.js');
 const { createDashboard } = await import('../src/dashboard.js');
 const { setExtensionAPI } = await import('../src/settings.js');
@@ -145,12 +149,71 @@ test('optional task and page metadata uses Roam-compatible empty defaults', () =
 
     const entries = readAllEntries();
 
-    const entryQuery = queries.find(query => query.includes('LOGBOOK:'));
+    const entryQuery = queries.find(query => query.includes(':in $ [?drawer-string ...]'));
     assert.ok(entryQuery);
     assert.match(entryQuery, /\[\(get-else \$ \?t :block\/string ""\) \?task-string\]/);
     assert.match(entryQuery, /\[\(get-else \$ \?t :block\/page ""\) \?p\]/);
     assert.match(entryQuery, /\[\(get-else \$ \?p :node\/title ""\) \?page-title\]/);
     assert.ok(entries.some(entry => entry.title === 'Deleted task · health-orphan'));
+});
+
+test('entry discovery binds drawer values and keeps the parser as the semantic gate', () => {
+    const graph = installGraph([
+        { uid: 'variant-task', string: '{{[[TODO]]}} variant task', parent: null },
+        { uid: 'variant-drawer', string: '  logbook::  ', parent: 'variant-task' },
+        {
+            uid: 'variant-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'variant-drawer',
+        },
+        { uid: 'not-drawer-task', string: '{{[[TODO]]}} not drawer', parent: null },
+        { uid: 'not-drawer', string: 'LOGBOOK:: notes', parent: 'not-drawer-task' },
+        {
+            uid: 'not-drawer-clock',
+            string: 'CLOCK:: [2026-08-15 Sat 09:00]--[2026-08-15 Sat 10:00] => 1:00',
+            parent: 'not-drawer',
+        },
+    ]);
+    const calls = [];
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':in $ [?drawer-string ...]')) calls.push({ datalog, args });
+        return originalQuery(datalog, ...args);
+    };
+
+    const entries = readAllEntries();
+
+    assert.deepEqual(entries.map(entry => entry.clockUid), ['variant-clock']);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].datalog, /:in \$ \[\?drawer-string \.\.\.\]/);
+    assert.match(calls[0].datalog, /\[\?d :block\/string \?drawer-string\]/);
+    assert.doesNotMatch(calls[0].datalog, /clojure\.string\/(?:includes|starts-with)\?/);
+    // The bound set covers the spellings writers actually produce, padded and
+    // in the historical Org shapes, rather than the full 2^7 ASCII case space.
+    for (const spelling of ['LOGBOOK::', ':LOGBOOK:', 'logbook:', '  logbook::  ', '\tLOGBOOK::']) {
+        assert.ok(calls[0].args[0].includes(spelling), `expected ${JSON.stringify(spelling)} to be bound`);
+    }
+    assert.ok(calls[0].args[0].length < 512, 'bound set stays small enough for index lookups');
+});
+
+test('graph stub exercises fast q, pull children, pull-many, and reference resolution', () => {
+    const graph = installGraph([
+        { uid: 'pull-task', string: '{{[[TODO]]}} pull task', parent: null },
+        { uid: 'pull-child-late', string: 'late child', parent: 'pull-task', order: 2 },
+        { uid: 'pull-child-first', string: 'first child', parent: 'pull-task', order: 0 },
+        { uid: 'pull-ref', string: '((pull-task))', parent: null },
+    ]);
+
+    assert.equal(getBlockString('pull-task'), '{{[[TODO]]}} pull task');
+    assert.deepEqual(getChildren('pull-task').map(child => child.uid), [
+        'pull-child-first',
+        'pull-child-late',
+    ]);
+    assert.equal(resolveReferencedUid('pull-ref'), 'pull-task');
+    readHierarchy(['pull-task'], { includeSeedStrings: true });
+
+    assert.ok(graph.pullCount() >= 3);
+    assert.equal(graph.pullManyCount(), 1);
 });
 
 test('Data issues is absent for a clean graph and exposes exact details only when needed', () => {
@@ -235,24 +298,34 @@ test('hierarchy read failures expose a structured GraphReadError issue', () => {
 test('block-string adapter failures identify the affected uid', () => {
     const graph = seed(false);
     const originalQuery = graph.api.data.q;
+    const originalPull = graph.api.data.pull;
+    graph.api.data.pull = (pattern, ...args) => {
+        if (pattern === '[:block/string]') throw new Error('block string pull unavailable');
+        return originalPull(pattern, ...args);
+    };
     graph.api.data.q = (datalog, ...args) => {
         if (String(datalog).includes(':find ?s')) throw new Error('block string query unavailable');
         return originalQuery(datalog, ...args);
     };
 
-    assert.throws(
-        () => getBlockString('health-task1'),
-        error => {
-            assert.equal(error instanceof GraphReadError, true);
-            assert.deepEqual(error.issue, {
-                kind: 'graph-read',
-                source: 'block-string',
-                message: 'block string query unavailable',
-                affectedUid: 'health-task1',
-            });
-            return true;
-        }
-    );
+    try {
+        assert.throws(
+            () => getBlockString('health-task1'),
+            error => {
+                assert.equal(error instanceof GraphReadError, true);
+                assert.deepEqual(error.issue, {
+                    kind: 'graph-read',
+                    source: 'block-string',
+                    message: 'block string query unavailable',
+                    affectedUid: 'health-task1',
+                });
+                return true;
+            }
+        );
+    } finally {
+        graph.api.data.q = originalQuery;
+        graph.api.data.pull = originalPull;
+    }
 });
 
 test('Dashboard treats a referenced parent string read failure as stale data, not a new root', async () => {
@@ -272,6 +345,10 @@ test('Dashboard treats a referenced parent string read failure as stale data, no
     assert.ok(document.querySelector('.rlb-task-link__text'));
 
     const originalQuery = graph.api.data.q;
+    const originalPullMany = graph.api.data.pull_many;
+    graph.api.data.pull_many = () => {
+        throw new Error('block string pull_many unavailable');
+    };
     graph.api.data.q = (datalog, ...args) => {
         if (String(datalog).includes(':find ?uid ?string')) throw new Error('block string query unavailable');
         return originalQuery(datalog, ...args);
@@ -283,6 +360,8 @@ test('Dashboard treats a referenced parent string read failure as stale data, no
     assert.equal(document.querySelectorAll('.rlb-tree__cell').length > 0, true);
     assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /block string query unavailable/i);
     assert.match(document.querySelector('.rlb-data-issues')?.textContent || '', /block-string/i);
+    graph.api.data.q = originalQuery;
+    graph.api.data.pull_many = originalPullMany;
     dashboard.destroy();
 });
 
@@ -317,7 +396,9 @@ test('Dashboard labels a graph read failure separately and clears it after recov
     const graph = seed(false);
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (datalog, ...args) => {
-        if (String(datalog).includes('LOGBOOK:')) throw new Error('entries query unavailable');
+        if (String(datalog).includes(':in $ [?drawer-string ...]')) {
+            throw new Error('entries query unavailable');
+        }
         return originalQuery(datalog, ...args);
     };
 

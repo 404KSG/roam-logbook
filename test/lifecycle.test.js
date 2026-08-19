@@ -241,7 +241,12 @@ test('the context menu offers clock in on a TODO block only', () => {
 test('context menu target text falls back to the host context after a graph read failure', () => {
     const clockIn = contextCommands.get('Logbook: Clock in');
     const originalQuery = graph.api.data.q;
+    const originalPull = graph.api.data.pull;
     let blockStringReads = 0;
+    graph.api.data.pull = (pattern, ...args) => {
+        if (pattern === '[:block/string]') throw new Error('target text pull failed');
+        return originalPull(pattern, ...args);
+    };
     graph.api.data.q = (datalog, ...args) => {
         if (String(datalog).includes(':find ?s')) {
             blockStringReads += 1;
@@ -260,6 +265,7 @@ test('context menu target text falls back to the host context after a graph read
         );
     } finally {
         graph.api.data.q = originalQuery;
+        graph.api.data.pull = originalPull;
     }
 });
 

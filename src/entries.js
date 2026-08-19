@@ -15,18 +15,49 @@ import {
     taskTitle,
 } from './org.js';
 import {
+    pullAttribute,
+    pullMany,
     queryOrThrow,
     validateQueryRows,
     withGraphReadIssue,
 } from './roam.js';
 
-// Filter on the drawer rather than on `CLOCK:` so that hand-written entries with
-// odd spacing still come back; the JS parser is the real gate.
-const entriesQuery = predicate =>
-    `[:find ?clock-uid ?clock-string ?drawer-string ?task-uid ?task-string ?page-title
+/*
+ * `isDrawerBlock` accepts Org's historical spellings and case-insensitive
+ * LOGBOOK text, but the query has to bind a finite set to reach the attribute
+ * index. Binding the whole 2^7 ASCII case space would be 8192 index lookups
+ * per read to cover spellings like `LoGbOoK::` that no writer produces: this
+ * plugin, org-mode itself, and the upstream extension all emit uppercase, and
+ * the predicate query this replaced was case-sensitive on `LOGBOOK:` — so the
+ * spellings below are already a superset of what was previously found. The JS
+ * parser remains the final semantic gate. Mixed-case spellings beyond these
+ * and arbitrarily long whitespace padding are explicit live-data coverage
+ * boundaries, not a silent predicate scan.
+ */
+const DRAWER_SHAPES = [
+    { prefix: '', suffix: '::' },
+    { prefix: '', suffix: ':' },
+    { prefix: ':', suffix: ':' },
+    { prefix: ':', suffix: '::' },
+];
+const DRAWER_PADDING = ['', ' ', '  ', '\t'];
+const LOGBOOK_CASE_VARIANTS = ['LOGBOOK', 'logbook', 'Logbook', 'LogBook'];
+const DRAWER_QUERY_STRINGS = Object.freeze(
+    DRAWER_SHAPES.flatMap(({ prefix, suffix }) =>
+        LOGBOOK_CASE_VARIANTS.flatMap(word =>
+            DRAWER_PADDING.flatMap(leading =>
+                DRAWER_PADDING.map(trailing => `${leading}${prefix}${word}${suffix}${trailing}`)
+            )
+        )
+    )
+);
+
+// Bind drawer strings before the :block/string clause so Roam can use the
+// attribute index instead of enumerating every block and filtering in Clojure.
+const ENTRIES_QUERY = `[:find ?clock-uid ?clock-string ?drawer-string ?task-uid ?task-string ?page-title
+  :in $ [?drawer-string ...]
   :where
   [?d :block/string ?drawer-string]
-  [(clojure.string/${predicate} ?drawer-string "LOGBOOK:")]
   [?d :block/children ?c]
   [?c :block/uid ?clock-uid]
   [?c :block/string ?clock-string]
@@ -36,22 +67,8 @@ const entriesQuery = predicate =>
   [(get-else $ ?t :block/page "") ?p]
   [(get-else $ ?p :node/title "") ?page-title]]`;
 
-/**
- * `includes?` also catches org's own `:LOGBOOK:` spelling, but it is the less
- * commonly whitelisted predicate — fall back rather than go silently inert.
- */
 function queryEntryRows() {
-    try {
-        return queryOrThrow(entriesQuery('includes?'));
-    } catch (error) {
-        console.warn('[roam-logbook] includes? unavailable, using starts-with?', error);
-    }
-    try {
-        return queryOrThrow(entriesQuery('starts-with?'));
-    } catch (error) {
-        console.error('[roam-logbook] could not read logbook entries', error);
-        throw withGraphReadIssue(error, { source: 'entries' });
-    }
+    return queryOrThrow(ENTRIES_QUERY, DRAWER_QUERY_STRINGS);
 }
 
 /**
@@ -180,21 +197,51 @@ const BLOCK_STRINGS_QUERY = `[:find ?uid ?string
   [?b :block/uid ?uid]
   [?b :block/string ?string]]`;
 
-const readBlockStrings = uids => {
-    if (uids.length === 0) return {};
+const BLOCK_STRINGS_PULL_PATTERN = '[:block/uid :block/string]';
+
+const readBlockStringsFromPull = uids => {
+    const entities = pullMany(
+        BLOCK_STRINGS_PULL_PATTERN,
+        uids.map(uid => [':block/uid', uid])
+    );
     const result = {};
-    let rows;
-    try {
-        rows = validateQueryRows(
-            queryOrThrow(BLOCK_STRINGS_QUERY, uids),
-            'block string batch',
-            row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
-        );
-    } catch (error) {
-        throw withGraphReadIssue(error, { source: 'block-string', affectedUids: uids });
+    for (const entity of entities) {
+        if (entity === null || entity === undefined) continue;
+        const uid = pullAttribute(entity, ':block/uid');
+        const string = pullAttribute(entity, ':block/string');
+        // A missing :block/string is the pull equivalent of q returning no row.
+        if (string === undefined || string === null) continue;
+        if (typeof uid !== 'string' || typeof string !== 'string') {
+            throw new Error('Graph pull_many returned malformed block string data');
+        }
+        result[uid] = string;
     }
+    return result;
+};
+
+const readBlockStringsFromQuery = uids => {
+    const rows = validateQueryRows(
+        queryOrThrow(BLOCK_STRINGS_QUERY, uids),
+        'block string batch',
+        row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
+    );
+    const result = {};
     for (const [uid, string] of rows) result[uid] = string;
     return result;
+};
+
+const readBlockStrings = uids => {
+    if (uids.length === 0) return {};
+
+    try {
+        return readBlockStringsFromPull(uids);
+    } catch {
+        try {
+            return readBlockStringsFromQuery(uids);
+        } catch (error) {
+            throw withGraphReadIssue(error, { source: 'block-string', affectedUids: uids });
+        }
+    }
 };
 
 /**

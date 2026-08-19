@@ -218,7 +218,7 @@ test('opening the dashboard consumes one entries snapshot for clock state and re
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (...args) => {
         const result = originalQuery(...args);
-        if (String(args[0]).includes('LOGBOOK:')) entryQueries += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) entryQueries += 1;
         return result;
     };
     const dashboard = createDashboard({

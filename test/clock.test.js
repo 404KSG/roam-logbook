@@ -336,7 +336,7 @@ test('batch close confirms all written CLOCKs with one read and one notification
     const originalQuery = graph.api.data.q;
     let entryReads = 0;
     graph.api.data.q = (...args) => {
-        if (String(args[0]).includes('LOGBOOK:')) entryReads += 1;
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) entryReads += 1;
         return originalQuery(...args);
     };
     let notifications = 0;
@@ -419,6 +419,13 @@ test('discard reports uncertain drawer cleanup after the CLOCK delete succeeds',
     const graph = seed([TASK]);
     const { clockUid } = await clock.clockIn(TASK.uid, { now: AT_1558 });
     const originalQuery = graph.api.data.q;
+    const originalPull = graph.api.data.pull;
+    graph.api.data.pull = (pattern, ...args) => {
+        if (pattern.includes(':block/children') && args[0]?.[1] === TASK.uid) {
+            throw new Error('drawer pull lookup failed after discard');
+        }
+        return originalPull(pattern, ...args);
+    };
     graph.api.data.q = (datalog, ...args) => {
         if (String(datalog).includes(':find ?uid ?string ?order') && args[0] === TASK.uid) {
             throw new Error('drawer lookup failed after discard');
@@ -437,6 +444,7 @@ test('discard reports uncertain drawer cleanup after the CLOCK delete succeeds',
         assert.equal(graph.store.has(clockUid), false);
     } finally {
         graph.api.data.q = originalQuery;
+        graph.api.data.pull = originalPull;
     }
 });
 

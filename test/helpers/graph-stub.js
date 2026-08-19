@@ -13,6 +13,7 @@ export function installGraph(blocks = []) {
     nextUid = 0;
     const store = new Map();
     const pullWatches = new Map();
+    const pullCalls = { pull: 0, pullMany: 0, fastQ: 0 };
 
     const nextOrderByParent = new Map();
     for (const block of blocks) {
@@ -35,11 +36,45 @@ export function installGraph(blocks = []) {
             .filter(block => block.parent === uid)
             .sort((a, b) => a.order - b.order);
 
+    const uidFromEntity = entity => {
+        if (Array.isArray(entity)) return entity[1];
+        const match = String(entity).match(/\[:block\/uid\s+"([^"]+)"\]/);
+        return match?.[1] || null;
+    };
+
+    const pull = (pattern, entity) => {
+        pullCalls.pull += 1;
+        const block = store.get(uidFromEntity(entity));
+        if (!block) return null;
+        const result = {};
+        if (pattern.includes(':block/uid')) result[':block/uid'] = block.uid;
+        if (pattern.includes(':block/string')) result[':block/string'] = block.string;
+        if (pattern.includes(':block/order')) result[':block/order'] = block.order;
+        if (pattern.includes(':block/children')) {
+            result[':block/children'] = childrenOf(block.uid).map(child => ({
+                ':block/uid': child.uid,
+                ':block/string': child.string,
+                ':block/order': child.order,
+            }));
+        }
+        return result;
+    };
+
+    const pullMany = (pattern, entities) => {
+        pullCalls.pullMany += 1;
+        return entities.map(entity => pull(pattern, entity));
+    };
+
     const q = (datalog, ...args) => {
-        if (datalog.includes('LOGBOOK:')) {
+        if (
+            datalog.includes(':find ?clock-uid ?clock-string') &&
+            datalog.includes(':in $ [?drawer-string ...]') &&
+            datalog.includes('[?d :block/string ?drawer-string]')
+        ) {
+            const wanted = new Set(Array.isArray(args[0]) ? args[0] : []);
             const rows = [];
             for (const drawer of store.values()) {
-                if (typeof drawer.string !== 'string' || !drawer.string.includes('LOGBOOK:')) continue;
+                if (!wanted.has(drawer.string)) continue;
                 const task = drawer.parent ? store.get(drawer.parent) : null;
                 if (!task) continue;
                 for (const child of childrenOf(drawer.uid)) {
@@ -72,10 +107,6 @@ export function installGraph(blocks = []) {
             }
             return rows;
         }
-        if (datalog.includes(':find ?title')) {
-            const block = store.get(args[0]);
-            return block ? [[block.page]] : [];
-        }
         if (datalog.includes(':find ?uid ?string ?order')) {
             return childrenOf(args[0]).map(block => [block.uid, block.string, block.order]);
         }
@@ -90,6 +121,14 @@ export function installGraph(blocks = []) {
         util: { generateUID: () => `uid${++nextUid}` },
         data: {
             q,
+            fast: {
+                q: (...args) => {
+                    pullCalls.fastQ += 1;
+                    return api.data.q(...args);
+                },
+            },
+            pull,
+            pull_many: pullMany,
             addPullWatch: (pattern, entity, callback) => {
                 const match = String(entity).match(/\[:block\/uid\s+"([^"]+)"\]/);
                 if (!match) throw new Error(`graph-stub: unsupported pull-watch entity ${entity}`);
@@ -159,6 +198,9 @@ export function installGraph(blocks = []) {
         api,
         pullWatchCount: () => [...pullWatches.values()].reduce((count, watchers) => count + watchers.size, 0),
         pullWatchUids: () => [...pullWatches.keys()],
+        pullCount: () => pullCalls.pull,
+        pullManyCount: () => pullCalls.pullMany,
+        fastQueryCount: () => pullCalls.fastQ,
     };
 }
 
