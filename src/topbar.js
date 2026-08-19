@@ -30,6 +30,8 @@ const REFRESH_SUCCESS_DURATION = 1800;
 const REFRESH_LOADING_MESSAGE = 'Refreshing Active Work from graph…';
 const REFRESH_SUCCESS_MESSAGE = 'Updated just now';
 const REFRESH_ERROR_MESSAGE = 'Refresh failed; last valid snapshot kept. Retry.';
+const RECOVERY_TIMEOUT_MS = 15_000;
+const RECOVERY_FLUSH_LIMIT = 32;
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 export const activeCount = count => `${count} Thread${count === 1 ? '' : 's'}`;
@@ -154,6 +156,10 @@ export function createTopbar({
     let themeRuntime = null;
     const layoutHosts = new Set();
     const searchHosts = new Set();
+    const layoutHostDisplay = new Map();
+    let recoveryShutdownTimer = null;
+    let recoveryFlushes = 0;
+    let recoveryDisabled = false;
 
     const nowDate = () => {
         const value = nowFn();
@@ -681,7 +687,40 @@ export function createTopbar({
         ticker = setIntervalFn(tick, 1000);
     };
 
+    const clearRecoveryShutdown = () => {
+        if (recoveryShutdownTimer) clearTimeout(recoveryShutdownTimer);
+        recoveryShutdownTimer = null;
+    };
+
+    const disableRecovery = () => {
+        if (recoveryDisabled) return;
+        recoveryDisabled = true;
+        clearRecoveryShutdown();
+        recoveryObserver?.disconnect();
+        recoveryObserver = null;
+        outerRecoveryObserver?.disconnect();
+        outerRecoveryObserver = null;
+        observer = null;
+        recoveryTarget = null;
+        outerRecoveryTarget = null;
+        console.warn('[roam-logbook] Roam topbar host not found; widget disabled');
+    };
+
+    const armRecoveryShutdown = () => {
+        if (recoveryDisabled || recoveryShutdownTimer) return;
+        recoveryShutdownTimer = setTimeout(() => {
+            recoveryShutdownTimer = null;
+            if (!destroyed && !document.querySelector(TOPBAR_SELECTOR)) disableRecovery();
+        }, RECOVERY_TIMEOUT_MS);
+    };
+
+    const noteRecoveryMiss = () => {
+        recoveryFlushes += 1;
+        if (recoveryFlushes >= RECOVERY_FLUSH_LIMIT) disableRecovery();
+    };
+
     const stopAttachmentObservers = () => {
+        clearRecoveryShutdown();
         observer?.disconnect();
         observer = null;
         hostObserver?.disconnect();
@@ -721,8 +760,13 @@ export function createTopbar({
         observeRecoveryTarget(topbar);
         if (!topbar) {
             stopTicker();
+            noteRecoveryMiss();
             return;
         }
+        clearRecoveryShutdown();
+        recoveryFlushes = 0;
+        recoveryDisabled = false;
+        themeRuntime?.refresh();
         startTicker();
         if (topbar !== observedTopbar) observeTopbar(topbar);
         if (!container) build();
@@ -758,7 +802,16 @@ export function createTopbar({
         // Inserting or updating our widget is expected to happen inside the
         // observed host. Do not let that self-mutation trigger a re-attach.
         if (nodes.length > 0 && nodes.every(isPluginNode)) return false;
-        if (record.target?.closest?.(TOPBAR_SELECTOR)) return true;
+        const target = record.target;
+        if (target?.matches?.(TOPBAR_SELECTOR) || target?.closest?.(TOPBAR_SELECTOR)) return true;
+
+        // During boot the observer is the body subtree. Most records are
+        // ordinary descendants, so only the subtree root is allowed to fall
+        // through to a descendant query; direct topbar insertions are enough
+        // for the other targets.
+        if (recoveryTarget === document.body && target !== recoveryTarget) {
+            return nodes.some(node => node?.matches?.(TOPBAR_SELECTOR));
+        }
         return nodes.some(
             node => node?.matches?.(TOPBAR_SELECTOR) || node?.querySelector?.(TOPBAR_SELECTOR)
         );
@@ -797,6 +850,14 @@ export function createTopbar({
      * the re-attach path altogether.
      */
     const observeRecoveryTarget = topbar => {
+        if (!topbar && recoveryDisabled) return;
+        if (topbar) {
+            clearRecoveryShutdown();
+            recoveryFlushes = 0;
+            recoveryDisabled = false;
+        } else {
+            armRecoveryShutdown();
+        }
         const target = topbar?.parentElement || document.body;
         const subtree = !topbar;
         const outerTarget = topbar?.parentElement?.parentElement || null;
@@ -901,8 +962,39 @@ export function createTopbar({
                 [...(element.querySelectorAll?.('*') || [])].some(isMainControl)
         );
 
+    const restoreLayoutHostDisplay = host => {
+        const previous = layoutHostDisplay.get(host);
+        if (!previous || !host?.style) return;
+        if (previous.value) host.style.setProperty('display', previous.value, previous.priority);
+        else host.style.removeProperty('display');
+        layoutHostDisplay.delete(host);
+    };
+
+    const clearLayoutHost = host => {
+        host.classList.remove('rlb-topbar__layout');
+        restoreLayoutHostDisplay(host);
+    };
+
+    const ensureLayoutHostDisplay = host => {
+        if (!host?.style) return;
+        let display = '';
+        try {
+            display = document.defaultView?.getComputedStyle?.(host)?.display || '';
+        } catch {
+            // Fall back to the inline write when an embedded host has no style view.
+        }
+        if (display === 'flex') return;
+        if (!layoutHostDisplay.has(host)) {
+            layoutHostDisplay.set(host, {
+                value: host.style.getPropertyValue('display'),
+                priority: host.style.getPropertyPriority('display'),
+            });
+        }
+        host.style.setProperty('display', 'flex');
+    };
+
     const syncTopbarLayout = placement => {
-        for (const host of layoutHosts) host.classList.remove('rlb-topbar__layout');
+        for (const host of layoutHosts) clearLayoutHost(host);
         for (const host of searchHosts) host.classList.remove('rlb-topbar__search');
         layoutHosts.clear();
         searchHosts.clear();
@@ -910,6 +1002,7 @@ export function createTopbar({
         const host = placement.parent;
         if (!host?.classList) return;
         host.classList.add('rlb-topbar__layout');
+        ensureLayoutHostDisplay(host);
         layoutHosts.add(host);
         for (const child of host.children) {
             if (child === container || !containsMainControl(child)) continue;
@@ -946,8 +1039,8 @@ export function createTopbar({
     };
 
     const remove = () => {
-        closePopover();
-        for (const host of layoutHosts) host.classList.remove('rlb-topbar__layout');
+        closePopover({ restoreFocus: false });
+        for (const host of layoutHosts) clearLayoutHost(host);
         for (const host of searchHosts) host.classList.remove('rlb-topbar__search');
         layoutHosts.clear();
         searchHosts.clear();
@@ -956,12 +1049,12 @@ export function createTopbar({
 
     return {
         mount() {
-            ensureThemeRuntime();
             unsubscribe = clock.subscribe(() => {
                 renderButton();
                 renderSurfaces();
             });
             attach();
+            ensureThemeRuntime();
         },
         refresh: attach,
         getPerformanceSnapshot() {
@@ -969,6 +1062,7 @@ export function createTopbar({
         },
         unmount() {
             destroyed = true;
+            confirmation?.setOnChange(null);
             cancelPendingOpenRefresh();
             if (refreshClearTimer) clearTimeout(refreshClearTimer);
             refreshClearTimer = null;

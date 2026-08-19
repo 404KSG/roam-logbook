@@ -48,7 +48,7 @@ async function mountInto(topbarHtml) {
 async function mountIntoNestedTopbar() {
     const dom = new JSDOM(`<!doctype html><html><body>
         <div class="rm-topbar">
-            <div class="rm-topbar__inner" data-name="shell">
+            <div class="rm-topbar__inner" data-name="shell" style="display: grid">
                 <nav class="rm-topbar__navigation" data-name="navigation" aria-label="Page navigation">
                     <button title="Open left sidebar"><span class="bp3-icon bp3-icon-menu"></span></button>
                     <button aria-label="Back"><span class="bp3-icon bp3-icon-chevron-left"></span></button>
@@ -91,11 +91,17 @@ test.after(() => loaded?.onunload());
 
 test('lands after a nested Back/Forward navigation wrapper and before main controls', async () => {
     const placement = await mountIntoNestedTopbar();
+    const shell = document.querySelector('[data-name="shell"]');
 
     assert.deepEqual(placement.topbarOrder, ['shell']);
     assert.deepEqual(placement.shellOrder, ['navigation', 'WIDGET', 'main', 'right']);
-    assert.equal(document.querySelector('[data-name="shell"]').classList.contains('rlb-topbar__layout'), true);
+    assert.equal(shell.classList.contains('rlb-topbar__layout'), true);
+    assert.equal(window.getComputedStyle(shell).display, 'flex');
+    assert.notEqual(window.getComputedStyle(shell).containerType, 'inline-size');
     assert.equal(document.querySelector('[data-name="main"]').classList.contains('rlb-topbar__search'), true);
+
+    loaded.onunload();
+    assert.equal(shell.style.display, 'grid', 'unmount restores the host display value');
 });
 
 test('lands after the back/forward arrows, before the rest of the topbar', async () => {

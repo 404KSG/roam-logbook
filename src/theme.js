@@ -14,16 +14,23 @@ export const DARK_SYNC_GREEN = '#8ed0aa';
 
 const PLUGIN_ROOT_SELECTOR =
     '.rlb-root, .rlb-popover, #roam-logbook-topbar, [data-roam-logbook]';
-const ROAM_HOST_SELECTOR =
-    '.roam-article, .roam-log-page, .rm-block-text, .roam-body-main, .roam-body';
 const PAGE_REF_SELECTORS = [
     '.rm-page-ref--link',
     '.rm-page-ref-link-color',
     '.rm-page-ref',
 ];
-const PAGE_REF_SELECTOR = PAGE_REF_SELECTORS.join(', ');
 const TOPBAR_SELECTOR = '.rm-topbar';
 const THEME_ROOT_ATTRIBUTES = new Set(['class', 'style', 'data-theme']);
+const SYNC_ATTRIBUTES = [
+    'class',
+    'style',
+    'aria-label',
+    'title',
+    'data-state',
+    'data-status',
+];
+const SYNC_STATUS_PATTERN = /saving|saved|sync|synced|synchroniz/i;
+const SYNC_GEOMETRY_LIMIT = 200;
 const CUSTOM_LINK_PROPERTIES = [
     '--page-link-color',
     '--page-links',
@@ -101,11 +108,27 @@ const computedColor = (documentRef, node) => {
 };
 
 const firstHost = documentRef => {
-    for (const host of documentRef?.querySelectorAll?.(ROAM_HOST_SELECTOR) || []) {
-        if (!isPluginNode(host) && host.isConnected) return host;
-    }
+    // Roam's page/block surfaces may be React-owned. The body is outside those
+    // managed roots and is safe for a short-lived, hidden probe.
     return documentRef?.body || documentRef?.documentElement || null;
 };
+
+const themeSignature = documentRef => {
+    const root = documentRef?.documentElement;
+    const body = documentRef?.body;
+    return [
+        root?.getAttribute?.('class'),
+        root?.getAttribute?.('style'),
+        root?.getAttribute?.('data-theme'),
+        body?.getAttribute?.('class'),
+        body?.getAttribute?.('style'),
+        body?.getAttribute?.('data-theme'),
+    ]
+        .map(value => normalized(value))
+        .join('\u001f');
+};
+
+const probePaletteByDocument = new WeakMap();
 
 const findVisiblePageRef = documentRef => {
     for (const selector of PAGE_REF_SELECTORS) {
@@ -165,7 +188,12 @@ export function readRoamPageLinkPalette(documentRef = document) {
     if (visible) return { color: visible.color, hoverColor: visible.color, source: visible.source };
 
     const host = firstHost(documentRef);
-    if (host?.appendChild) {
+    const signature = themeSignature(documentRef);
+    const cachedProbe = probePaletteByDocument.get(documentRef);
+    let probeColor = null;
+    if (cachedProbe?.signature === signature) {
+        probeColor = cachedProbe.color;
+    } else if (host?.appendChild && documentRef?.createElement) {
         const probe = documentRef.createElement('span');
         probe.className = 'rm-page-ref rm-page-ref--link rm-page-ref-link-color';
         probe.textContent = 'Roam Logbook palette probe';
@@ -178,12 +206,15 @@ export function readRoamPageLinkPalette(documentRef = document) {
             host.appendChild(probe);
             const color = computedColor(documentRef, probe);
             if (color && !isBrowserDefaultTextColor(color)) {
-                return { color, hoverColor: color, source: 'probe' };
+                probeColor = color;
             }
         } finally {
             probe.remove();
         }
     }
+
+    probePaletteByDocument.set(documentRef, { signature, color: probeColor });
+    if (probeColor) return { color: probeColor, hoverColor: probeColor, source: 'probe' };
 
     const custom = readCustomLinkColor(documentRef, host);
     if (custom) return { color: custom.color, hoverColor: custom.color, source: custom.source };
@@ -217,9 +248,8 @@ const isStableGreen = color => {
 
 const semanticSyncCandidate = node => {
     if (!node || isPluginNode(node)) return false;
-    const className = typeof node.className === 'string' ? node.className : '';
     const signal = [
-        className,
+        node.getAttribute?.('class'),
         node.getAttribute?.('aria-label'),
         node.getAttribute?.('title'),
         node.getAttribute?.('data-state'),
@@ -227,8 +257,21 @@ const semanticSyncCandidate = node => {
     ]
         .filter(Boolean)
         .join(' ');
-    return /saving|saved|sync|synced|synchroniz/i.test(signal);
+    return SYNC_STATUS_PATTERN.test(signal);
 };
+
+const syncSignal = node =>
+    [
+        node?.getAttribute?.('class'),
+        node?.getAttribute?.('style'),
+        node?.getAttribute?.('aria-label'),
+        node?.getAttribute?.('title'),
+        node?.getAttribute?.('data-state'),
+        node?.getAttribute?.('data-status'),
+        semanticSyncCandidate(node) ? node?.textContent : '',
+    ]
+        .map(value => normalized(value))
+        .join('\u001f');
 
 const candidateColors = (documentRef, node) => {
     const values = [];
@@ -257,6 +300,24 @@ const smallGeometry = node => {
     }
 };
 
+const syncGeometryCacheByDocument = new WeakMap();
+
+const sameNodes = (left, right) =>
+    Boolean(
+        left &&
+            right &&
+            left.length === right.length &&
+            left.every((node, index) => node === right[index])
+    );
+
+const syncPaletteCacheKey = (documentRef, all, semantic) =>
+    [
+        themeSignature(documentRef),
+        all.length,
+        semantic.map(syncSignal).join('\u001e'),
+        all.slice(0, SYNC_GEOMETRY_LIMIT).map(syncSignal).join('\u001e'),
+    ].join('\u001d');
+
 /** Find Roam's stable synced/save green, ignoring transient orange/red states. */
 export function readRoamSyncPalette(documentRef = document) {
     const topbar = documentRef?.querySelector?.('.rm-topbar') || documentRef?.body;
@@ -269,14 +330,37 @@ export function readRoamSyncPalette(documentRef = document) {
         const color = candidateColors(documentRef, node).find(isStableGreen);
         if (color) return { color, source: 'semantic' };
     }
+
+    const sampledNodes = all.slice(0, SYNC_GEOMETRY_LIMIT);
+    const cacheKey = syncPaletteCacheKey(documentRef, all, semantic);
+    const documentCache = syncGeometryCacheByDocument.get(documentRef) || new WeakMap();
+    const cached = documentCache.get(topbar);
+    if (
+        cached?.key === cacheKey &&
+        sameNodes(cached.sampledNodes, sampledNodes)
+    ) {
+        return cached.palette;
+    }
+
     // A few Roam builds expose only a small colored status dot. Geometry is a
     // fallback for candidate selection; color still comes from computed CSS.
-    for (const node of all) {
+    for (const node of sampledNodes) {
         if (isPluginNode(node) || !smallGeometry(node)) continue;
         const color = candidateColors(documentRef, node).find(isStableGreen);
-        if (color) return { color, source: 'geometry' };
+        if (color) {
+            const palette = { color, source: 'geometry' };
+            documentCache.set(topbar, { key: cacheKey, palette, sampledNodes });
+            syncGeometryCacheByDocument.set(documentRef, documentCache);
+            return palette;
+        }
     }
-    return { color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN, source: 'fallback' };
+    const palette = {
+        color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN,
+        source: 'fallback',
+    };
+    documentCache.set(topbar, { key: cacheKey, palette, sampledNodes });
+    syncGeometryCacheByDocument.set(documentRef, documentCache);
+    return palette;
 }
 
 const runtimeByDocument = new WeakMap();
@@ -298,42 +382,24 @@ const cancelScheduled = (documentRef, scheduled) => {
     else clearTimeout(scheduled.id);
 };
 
-const matchesOrContains = (node, selector) =>
-    Boolean(node?.matches?.(selector) || node?.querySelector?.(selector));
-
-const isTopbarRoot = node => Boolean(node?.matches?.(TOPBAR_SELECTOR));
-
-const isTopbarDescendant = node => Boolean(node?.closest?.(TOPBAR_SELECTOR));
-
-const isPageRefNode = node =>
-    Boolean(
-        node?.matches?.(PAGE_REF_SELECTOR) ||
-            node?.closest?.(PAGE_REF_SELECTOR) ||
-            node?.querySelector?.(PAGE_REF_SELECTOR)
-    );
-
-const containsPluginRoot = node => Boolean(node?.querySelector?.(PLUGIN_ROOT_SELECTOR));
-
-const isSyncCandidate = (documentRef, node) =>
-    semanticSyncCandidate(node) ||
-    (smallGeometry(node) && candidateColors(documentRef, node).some(isStableGreen));
+const isSyncCandidate = node => semanticSyncCandidate(node);
 
 const isPreviousSyncCandidate = record => {
     const node = record?.target;
     if (record?.type !== 'attributes' || !node) return false;
     const values = [
-        record.attributeName === 'class' ? record.oldValue : node.className,
+        record.attributeName === 'class' ? record.oldValue : node.getAttribute?.('class'),
         record.attributeName === 'aria-label' ? record.oldValue : node.getAttribute?.('aria-label'),
         record.attributeName === 'title' ? record.oldValue : node.getAttribute?.('title'),
         record.attributeName === 'data-state' ? record.oldValue : node.getAttribute?.('data-state'),
         record.attributeName === 'data-status' ? record.oldValue : node.getAttribute?.('data-status'),
     ];
-    return /saving|saved|sync|synced|synchroniz/i.test(values.filter(Boolean).join(' '));
+    return SYNC_STATUS_PATTERN.test(values.filter(Boolean).join(' '));
 };
 
-const containsSyncCandidate = (documentRef, node) =>
-    isSyncCandidate(documentRef, node) ||
-    Boolean([...node?.querySelectorAll?.('*') || []].some(child => isSyncCandidate(documentRef, child)));
+const containsSyncCandidate = node =>
+    isSyncCandidate(node) ||
+    Boolean([...node?.querySelectorAll?.('*') || []].some(child => isSyncCandidate(child)));
 
 const isDocumentThemeNode = node =>
     Boolean(
@@ -341,48 +407,33 @@ const isDocumentThemeNode = node =>
             (node === node.ownerDocument?.documentElement || node === node.ownerDocument?.body)
     );
 
+const isRelevantThemeMutation = record =>
+    record?.type === 'attributes' &&
+    THEME_ROOT_ATTRIBUTES.has(record.attributeName) &&
+    isDocumentThemeNode(record.target);
+
 /**
- * Keep the document observer cheap: arbitrary page mutations cannot change the
- * sampled palette, so only theme roots, page-ref-bearing nodes, and Roam's
- * sync topbar are allowed to schedule a full palette read.
+ * The sync observer is attached to one topbar only. Its filter is deliberately
+ * string/attribute based; computed styles and geometry belong to the rAF read.
  */
-const isRelevantMutation = (record, documentRef) => {
-    const target = record.target;
-    if (target?.closest?.('[data-rlb-palette-probe]')) return false;
-    if (target?.closest?.(PLUGIN_ROOT_SELECTOR)) return false;
+const isRelevantSyncMutation = record => {
+    const target = record?.target;
+    if (!target || target?.closest?.(PLUGIN_ROOT_SELECTOR)) return false;
 
     if (record.type === 'attributes') {
-        const oldClass = record.attributeName === 'class' ? record.oldValue || '' : '';
-        const wasTopbar = /(^|\s)rm-topbar(?:\s|$)/.test(oldClass);
-        const wasPageRef = /(^|\s)rm-page-ref(?:[-_]|\s|$)/.test(oldClass);
-        if (
-            THEME_ROOT_ATTRIBUTES.has(record.attributeName) &&
-            containsPluginRoot(target)
-        ) {
-            return true;
-        }
-        if (isTopbarRoot(target) || wasTopbar) return true;
-        if (isTopbarDescendant(target)) {
-            return isSyncCandidate(documentRef, target) || isPreviousSyncCandidate(record);
-        }
-        if (isPageRefNode(target) || wasPageRef) return true;
-        return (
-            THEME_ROOT_ATTRIBUTES.has(record.attributeName) &&
-            (isDocumentThemeNode(target) || target?.matches?.(ROAM_HOST_SELECTOR))
-        );
+        if (isSyncCandidate(target) || isPreviousSyncCandidate(record)) return true;
+        return false;
     }
 
-    const allNodes = [...(record.addedNodes || []), ...(record.removedNodes || [])];
-    const nodes = allNodes.filter(node => {
-        if (node?.matches?.('[data-rlb-palette-probe]')) return false;
-        if (node?.closest?.('[data-rlb-palette-probe]')) return false;
-        return !node?.closest?.(PLUGIN_ROOT_SELECTOR);
-    });
-    if (isTopbarRoot(target)) return true;
-    if (isTopbarDescendant(target)) {
-        return nodes.some(node => containsSyncCandidate(documentRef, node));
+    if (record.type === 'childList') {
+        if (isSyncCandidate(target)) return true;
+        const nodes = [...(record.addedNodes || []), ...(record.removedNodes || [])].filter(
+            node => !node?.closest?.(PLUGIN_ROOT_SELECTOR)
+        );
+        return nodes.some(containsSyncCandidate);
     }
-    return nodes.some(node => matchesOrContains(node, TOPBAR_SELECTOR) || isPageRefNode(node));
+
+    return false;
 };
 
 const applyPalette = (root, palette) => {
@@ -408,7 +459,9 @@ export function acquireThemeRuntime({ documentRef = document, onChange = () => {
             page,
             sync,
             scheduled: null,
-            observer: null,
+            themeObserver: null,
+            syncObserver: null,
+            syncTopbar: null,
             media: null,
             mediaListener: null,
         };
@@ -426,7 +479,31 @@ export function acquireThemeRuntime({ documentRef = document, onChange = () => {
         for (const listener of state.listeners) listener(current);
     };
 
+    const MutationObserverCtor =
+        getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
+
+    const connectSyncObserver = () => {
+        if (!MutationObserverCtor) return;
+        const topbar = documentRef?.querySelector?.(TOPBAR_SELECTOR) || null;
+        if (state.syncTopbar === topbar && (topbar === null || state.syncObserver)) return;
+        state.syncObserver?.disconnect();
+        state.syncObserver = null;
+        state.syncTopbar = topbar;
+        if (!topbar) return;
+        state.syncObserver = new MutationObserverCtor(records => {
+            if (records.some(isRelevantSyncMutation)) scheduleRefresh();
+        });
+        state.syncObserver.observe(topbar, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeOldValue: true,
+            attributeFilter: SYNC_ATTRIBUTES,
+        });
+    };
+
     const refresh = () => {
+        connectSyncObserver();
         const page = readRoamPageLinkPalette(documentRef);
         const sync = readRoamSyncPalette(documentRef);
         // A real source wins. If it temporarily disappears, keep the last-good
@@ -445,27 +522,19 @@ export function acquireThemeRuntime({ documentRef = document, onChange = () => {
     };
 
     if (state.refs === 0) {
-        const target = documentRef.documentElement || documentRef.body;
-        const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
-        if (MutationObserverCtor && target) {
-            state.observer = new MutationObserverCtor(records => {
-                if (records.some(record => isRelevantMutation(record, documentRef))) scheduleRefresh();
+        if (MutationObserverCtor) {
+            state.themeObserver = new MutationObserverCtor(records => {
+                if (records.some(isRelevantThemeMutation)) scheduleRefresh();
             });
-            state.observer.observe(target, {
-                subtree: true,
-                childList: true,
-                attributes: true,
-                attributeOldValue: true,
-                attributeFilter: [
-                    'class',
-                    'style',
-                    'aria-label',
-                    'title',
-                    'data-state',
-                    'data-status',
-                    'data-theme',
-                ],
-            });
+            for (const target of [documentRef?.documentElement, documentRef?.body]) {
+                if (!target) continue;
+                state.themeObserver.observe(target, {
+                    subtree: false,
+                    attributes: true,
+                    attributeFilter: [...THEME_ROOT_ATTRIBUTES],
+                });
+            }
+            connectSyncObserver();
         }
         const view = getWindow(documentRef);
         state.media = view?.matchMedia?.('(prefers-color-scheme: dark)') || null;
@@ -490,8 +559,11 @@ export function acquireThemeRuntime({ documentRef = document, onChange = () => {
             state.listeners.delete(onChange);
             state.refs -= 1;
             if (state.refs > 0) return;
-            state.observer?.disconnect();
-            state.observer = null;
+            state.themeObserver?.disconnect();
+            state.themeObserver = null;
+            state.syncObserver?.disconnect();
+            state.syncObserver = null;
+            state.syncTopbar = null;
             if (state.media?.removeEventListener) state.media.removeEventListener('change', state.mediaListener);
             else state.media?.removeListener?.(state.mediaListener);
             state.media = null;

@@ -2822,15 +2822,23 @@ var DARK_PAGE_LINK = "#7eb7d5";
 var LIGHT_SYNC_GREEN = "#7eb794";
 var DARK_SYNC_GREEN = "#8ed0aa";
 var PLUGIN_ROOT_SELECTOR = ".rlb-root, .rlb-popover, #roam-logbook-topbar, [data-roam-logbook]";
-var ROAM_HOST_SELECTOR = ".roam-article, .roam-log-page, .rm-block-text, .roam-body-main, .roam-body";
 var PAGE_REF_SELECTORS = [
   ".rm-page-ref--link",
   ".rm-page-ref-link-color",
   ".rm-page-ref"
 ];
-var PAGE_REF_SELECTOR = PAGE_REF_SELECTORS.join(", ");
 var TOPBAR_SELECTOR = ".rm-topbar";
 var THEME_ROOT_ATTRIBUTES = /* @__PURE__ */ new Set(["class", "style", "data-theme"]);
+var SYNC_ATTRIBUTES = [
+  "class",
+  "style",
+  "aria-label",
+  "title",
+  "data-state",
+  "data-status"
+];
+var SYNC_STATUS_PATTERN = /saving|saved|sync|synced|synchroniz/i;
+var SYNC_GEOMETRY_LIMIT = 200;
 var CUSTOM_LINK_PROPERTIES = [
   "--page-link-color",
   "--page-links",
@@ -2893,12 +2901,21 @@ var computedColor = (documentRef, node) => {
   return isUsableColor(color) ? color : null;
 };
 var firstHost = (documentRef) => {
-  for (const host of documentRef?.querySelectorAll?.(ROAM_HOST_SELECTOR) || []) {
-    if (!isPluginNode(host) && host.isConnected)
-      return host;
-  }
   return documentRef?.body || documentRef?.documentElement || null;
 };
+var themeSignature = (documentRef) => {
+  const root = documentRef?.documentElement;
+  const body = documentRef?.body;
+  return [
+    root?.getAttribute?.("class"),
+    root?.getAttribute?.("style"),
+    root?.getAttribute?.("data-theme"),
+    body?.getAttribute?.("class"),
+    body?.getAttribute?.("style"),
+    body?.getAttribute?.("data-theme")
+  ].map((value) => normalized(value)).join("");
+};
+var probePaletteByDocument = /* @__PURE__ */ new WeakMap();
 var findVisiblePageRef = (documentRef) => {
   for (const selector of PAGE_REF_SELECTORS) {
     for (const node of documentRef?.querySelectorAll?.(selector) || []) {
@@ -2951,7 +2968,12 @@ function readRoamPageLinkPalette(documentRef = document) {
   if (visible)
     return { color: visible.color, hoverColor: visible.color, source: visible.source };
   const host = firstHost(documentRef);
-  if (host?.appendChild) {
+  const signature = themeSignature(documentRef);
+  const cachedProbe = probePaletteByDocument.get(documentRef);
+  let probeColor = null;
+  if (cachedProbe?.signature === signature) {
+    probeColor = cachedProbe.color;
+  } else if (host?.appendChild && documentRef?.createElement) {
     const probe = documentRef.createElement("span");
     probe.className = "rm-page-ref rm-page-ref--link rm-page-ref-link-color";
     probe.textContent = "Roam Logbook palette probe";
@@ -2962,12 +2984,15 @@ function readRoamPageLinkPalette(documentRef = document) {
       host.appendChild(probe);
       const color2 = computedColor(documentRef, probe);
       if (color2 && !isBrowserDefaultTextColor(color2)) {
-        return { color: color2, hoverColor: color2, source: "probe" };
+        probeColor = color2;
       }
     } finally {
       probe.remove();
     }
   }
+  probePaletteByDocument.set(documentRef, { signature, color: probeColor });
+  if (probeColor)
+    return { color: probeColor, hoverColor: probeColor, source: "probe" };
   const custom = readCustomLinkColor(documentRef, host);
   if (custom)
     return { color: custom.color, hoverColor: custom.color, source: custom.source };
@@ -3000,16 +3025,24 @@ var isStableGreen = (color) => {
 var semanticSyncCandidate = (node) => {
   if (!node || isPluginNode(node))
     return false;
-  const className = typeof node.className === "string" ? node.className : "";
   const signal = [
-    className,
+    node.getAttribute?.("class"),
     node.getAttribute?.("aria-label"),
     node.getAttribute?.("title"),
     node.getAttribute?.("data-state"),
     node.getAttribute?.("data-status")
   ].filter(Boolean).join(" ");
-  return /saving|saved|sync|synced|synchroniz/i.test(signal);
+  return SYNC_STATUS_PATTERN.test(signal);
 };
+var syncSignal = (node) => [
+  node?.getAttribute?.("class"),
+  node?.getAttribute?.("style"),
+  node?.getAttribute?.("aria-label"),
+  node?.getAttribute?.("title"),
+  node?.getAttribute?.("data-state"),
+  node?.getAttribute?.("data-status"),
+  semanticSyncCandidate(node) ? node?.textContent : ""
+].map((value) => normalized(value)).join("");
 var candidateColors = (documentRef, node) => {
   const values = [];
   for (const pseudo of [void 0, "::before", "::after"]) {
@@ -3032,6 +3065,16 @@ var smallGeometry = (node) => {
     return false;
   }
 };
+var syncGeometryCacheByDocument = /* @__PURE__ */ new WeakMap();
+var sameNodes = (left, right) => Boolean(
+  left && right && left.length === right.length && left.every((node, index) => node === right[index])
+);
+var syncPaletteCacheKey = (documentRef, all, semantic) => [
+  themeSignature(documentRef),
+  all.length,
+  semantic.map(syncSignal).join(""),
+  all.slice(0, SYNC_GEOMETRY_LIMIT).map(syncSignal).join("")
+].join("");
 function readRoamSyncPalette(documentRef = document) {
   const topbar = documentRef?.querySelector?.(".rm-topbar") || documentRef?.body;
   if (!topbar) {
@@ -3044,14 +3087,31 @@ function readRoamSyncPalette(documentRef = document) {
     if (color)
       return { color, source: "semantic" };
   }
-  for (const node of all) {
+  const sampledNodes = all.slice(0, SYNC_GEOMETRY_LIMIT);
+  const cacheKey = syncPaletteCacheKey(documentRef, all, semantic);
+  const documentCache = syncGeometryCacheByDocument.get(documentRef) || /* @__PURE__ */ new WeakMap();
+  const cached = documentCache.get(topbar);
+  if (cached?.key === cacheKey && sameNodes(cached.sampledNodes, sampledNodes)) {
+    return cached.palette;
+  }
+  for (const node of sampledNodes) {
     if (isPluginNode(node) || !smallGeometry(node))
       continue;
     const color = candidateColors(documentRef, node).find(isStableGreen);
-    if (color)
-      return { color, source: "geometry" };
+    if (color) {
+      const palette2 = { color, source: "geometry" };
+      documentCache.set(topbar, { key: cacheKey, palette: palette2, sampledNodes });
+      syncGeometryCacheByDocument.set(documentRef, documentCache);
+      return palette2;
+    }
   }
-  return { color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN, source: "fallback" };
+  const palette = {
+    color: isDarkTheme(documentRef) ? DARK_SYNC_GREEN : LIGHT_SYNC_GREEN,
+    source: "fallback"
+  };
+  documentCache.set(topbar, { key: cacheKey, palette, sampledNodes });
+  syncGeometryCacheByDocument.set(documentRef, documentCache);
+  return palette;
 }
 var runtimeByDocument = /* @__PURE__ */ new WeakMap();
 var scheduleWith = (documentRef, callback) => {
@@ -3072,67 +3132,43 @@ var cancelScheduled = (documentRef, scheduled) => {
   else
     clearTimeout(scheduled.id);
 };
-var matchesOrContains = (node, selector) => Boolean(node?.matches?.(selector) || node?.querySelector?.(selector));
-var isTopbarRoot = (node) => Boolean(node?.matches?.(TOPBAR_SELECTOR));
-var isTopbarDescendant = (node) => Boolean(node?.closest?.(TOPBAR_SELECTOR));
-var isPageRefNode = (node) => Boolean(
-  node?.matches?.(PAGE_REF_SELECTOR) || node?.closest?.(PAGE_REF_SELECTOR) || node?.querySelector?.(PAGE_REF_SELECTOR)
-);
-var containsPluginRoot = (node) => Boolean(node?.querySelector?.(PLUGIN_ROOT_SELECTOR));
-var isSyncCandidate = (documentRef, node) => semanticSyncCandidate(node) || smallGeometry(node) && candidateColors(documentRef, node).some(isStableGreen);
+var isSyncCandidate = (node) => semanticSyncCandidate(node);
 var isPreviousSyncCandidate = (record) => {
   const node = record?.target;
   if (record?.type !== "attributes" || !node)
     return false;
   const values = [
-    record.attributeName === "class" ? record.oldValue : node.className,
+    record.attributeName === "class" ? record.oldValue : node.getAttribute?.("class"),
     record.attributeName === "aria-label" ? record.oldValue : node.getAttribute?.("aria-label"),
     record.attributeName === "title" ? record.oldValue : node.getAttribute?.("title"),
     record.attributeName === "data-state" ? record.oldValue : node.getAttribute?.("data-state"),
     record.attributeName === "data-status" ? record.oldValue : node.getAttribute?.("data-status")
   ];
-  return /saving|saved|sync|synced|synchroniz/i.test(values.filter(Boolean).join(" "));
+  return SYNC_STATUS_PATTERN.test(values.filter(Boolean).join(" "));
 };
-var containsSyncCandidate = (documentRef, node) => isSyncCandidate(documentRef, node) || Boolean([...node?.querySelectorAll?.("*") || []].some((child) => isSyncCandidate(documentRef, child)));
+var containsSyncCandidate = (node) => isSyncCandidate(node) || Boolean([...node?.querySelectorAll?.("*") || []].some((child) => isSyncCandidate(child)));
 var isDocumentThemeNode = (node) => Boolean(
   node?.nodeType === 1 && (node === node.ownerDocument?.documentElement || node === node.ownerDocument?.body)
 );
-var isRelevantMutation = (record, documentRef) => {
-  const target = record.target;
-  if (target?.closest?.("[data-rlb-palette-probe]"))
-    return false;
-  if (target?.closest?.(PLUGIN_ROOT_SELECTOR))
+var isRelevantThemeMutation = (record) => record?.type === "attributes" && THEME_ROOT_ATTRIBUTES.has(record.attributeName) && isDocumentThemeNode(record.target);
+var isRelevantSyncMutation = (record) => {
+  const target = record?.target;
+  if (!target || target?.closest?.(PLUGIN_ROOT_SELECTOR))
     return false;
   if (record.type === "attributes") {
-    const oldClass = record.attributeName === "class" ? record.oldValue || "" : "";
-    const wasTopbar = /(^|\s)rm-topbar(?:\s|$)/.test(oldClass);
-    const wasPageRef = /(^|\s)rm-page-ref(?:[-_]|\s|$)/.test(oldClass);
-    if (THEME_ROOT_ATTRIBUTES.has(record.attributeName) && containsPluginRoot(target)) {
+    if (isSyncCandidate(target) || isPreviousSyncCandidate(record))
       return true;
-    }
-    if (isTopbarRoot(target) || wasTopbar)
-      return true;
-    if (isTopbarDescendant(target)) {
-      return isSyncCandidate(documentRef, target) || isPreviousSyncCandidate(record);
-    }
-    if (isPageRefNode(target) || wasPageRef)
-      return true;
-    return THEME_ROOT_ATTRIBUTES.has(record.attributeName) && (isDocumentThemeNode(target) || target?.matches?.(ROAM_HOST_SELECTOR));
+    return false;
   }
-  const allNodes = [...record.addedNodes || [], ...record.removedNodes || []];
-  const nodes = allNodes.filter((node) => {
-    if (node?.matches?.("[data-rlb-palette-probe]"))
-      return false;
-    if (node?.closest?.("[data-rlb-palette-probe]"))
-      return false;
-    return !node?.closest?.(PLUGIN_ROOT_SELECTOR);
-  });
-  if (isTopbarRoot(target))
-    return true;
-  if (isTopbarDescendant(target)) {
-    return nodes.some((node) => containsSyncCandidate(documentRef, node));
+  if (record.type === "childList") {
+    if (isSyncCandidate(target))
+      return true;
+    const nodes = [...record.addedNodes || [], ...record.removedNodes || []].filter(
+      (node) => !node?.closest?.(PLUGIN_ROOT_SELECTOR)
+    );
+    return nodes.some(containsSyncCandidate);
   }
-  return nodes.some((node) => matchesOrContains(node, TOPBAR_SELECTOR) || isPageRefNode(node));
+  return false;
 };
 var applyPalette = (root, palette) => {
   if (!root?.style || !palette)
@@ -3153,7 +3189,9 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
       page,
       sync,
       scheduled: null,
-      observer: null,
+      themeObserver: null,
+      syncObserver: null,
+      syncTopbar: null,
       media: null,
       mediaListener: null
     };
@@ -3169,7 +3207,32 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
     for (const listener of state.listeners)
       listener(current);
   };
+  const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
+  const connectSyncObserver = () => {
+    if (!MutationObserverCtor)
+      return;
+    const topbar = documentRef?.querySelector?.(TOPBAR_SELECTOR) || null;
+    if (state.syncTopbar === topbar && (topbar === null || state.syncObserver))
+      return;
+    state.syncObserver?.disconnect();
+    state.syncObserver = null;
+    state.syncTopbar = topbar;
+    if (!topbar)
+      return;
+    state.syncObserver = new MutationObserverCtor((records) => {
+      if (records.some(isRelevantSyncMutation))
+        scheduleRefresh();
+    });
+    state.syncObserver.observe(topbar, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: SYNC_ATTRIBUTES
+    });
+  };
   const refresh2 = () => {
+    connectSyncObserver();
     const page = readRoamPageLinkPalette(documentRef);
     const sync = readRoamSyncPalette(documentRef);
     if (page.source !== "fallback" || state.page.source === "fallback")
@@ -3187,28 +3250,21 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
     });
   };
   if (state.refs === 0) {
-    const target = documentRef.documentElement || documentRef.body;
-    const MutationObserverCtor = getWindow(documentRef)?.MutationObserver || globalThis.MutationObserver;
-    if (MutationObserverCtor && target) {
-      state.observer = new MutationObserverCtor((records) => {
-        if (records.some((record) => isRelevantMutation(record, documentRef)))
+    if (MutationObserverCtor) {
+      state.themeObserver = new MutationObserverCtor((records) => {
+        if (records.some(isRelevantThemeMutation))
           scheduleRefresh();
       });
-      state.observer.observe(target, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeOldValue: true,
-        attributeFilter: [
-          "class",
-          "style",
-          "aria-label",
-          "title",
-          "data-state",
-          "data-status",
-          "data-theme"
-        ]
-      });
+      for (const target of [documentRef?.documentElement, documentRef?.body]) {
+        if (!target)
+          continue;
+        state.themeObserver.observe(target, {
+          subtree: false,
+          attributes: true,
+          attributeFilter: [...THEME_ROOT_ATTRIBUTES]
+        });
+      }
+      connectSyncObserver();
     }
     const view = getWindow(documentRef);
     state.media = view?.matchMedia?.("(prefers-color-scheme: dark)") || null;
@@ -3236,8 +3292,11 @@ function acquireThemeRuntime({ documentRef = document, onChange = () => {
       state.refs -= 1;
       if (state.refs > 0)
         return;
-      state.observer?.disconnect();
-      state.observer = null;
+      state.themeObserver?.disconnect();
+      state.themeObserver = null;
+      state.syncObserver?.disconnect();
+      state.syncObserver = null;
+      state.syncTopbar = null;
       if (state.media?.removeEventListener)
         state.media.removeEventListener("change", state.mediaListener);
       else
@@ -4241,6 +4300,7 @@ function createDashboard({
       activityNode = null;
       lastModel = null;
       refreshInFlight = null;
+      focusInFlight = null;
       refreshButton = null;
       refreshStatusNode = null;
     }
@@ -4623,11 +4683,8 @@ var STYLES = `
    These classes are applied to the actual host/child found at attach time, so
    the search can shrink into remaining space without ever shrinking this unit. */
 .rlb-topbar__layout {
-    display: flex;
     align-items: center;
     min-width: 0;
-    container-type: inline-size;
-    container-name: rlb-topbar;
 }
 
 .rlb-topbar__layout > .rlb-topbar {
@@ -4645,17 +4702,6 @@ var STYLES = `
 /* At genuinely narrow widths the elapsed value is the useful invariant. The
    session count remains available in the surface header rather than forcing a
    second line or overlapping Roam's search control. */
-@container rlb-topbar (max-width: 420px) {
-    .rlb-topbar__button--parallel {
-        grid-template-columns: max-content !important;
-    }
-
-    .rlb-topbar__button--parallel > .rlb-topbar__separator,
-    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
-        display: none !important;
-    }
-}
-
 @media (max-width: 420px) {
     .rlb-topbar__button--parallel {
         grid-template-columns: max-content !important;
@@ -7017,6 +7063,8 @@ var REFRESH_SUCCESS_DURATION = 1800;
 var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
 var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
 var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
+var RECOVERY_TIMEOUT_MS = 15e3;
+var RECOVERY_FLUSH_LIMIT = 32;
 var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
 var activeWorkDescription = (timingCount, openLineCount, windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) => {
   const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
@@ -7120,6 +7168,10 @@ function createTopbar({
   let themeRuntime = null;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
+  const layoutHostDisplay = /* @__PURE__ */ new Map();
+  let recoveryShutdownTimer = null;
+  let recoveryFlushes = 0;
+  let recoveryDisabled = false;
   const nowDate = () => {
     const value = nowFn();
     return value instanceof Date ? value : new Date(value);
@@ -7578,7 +7630,41 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       return;
     ticker = setIntervalFn(tick, 1e3);
   };
+  const clearRecoveryShutdown = () => {
+    if (recoveryShutdownTimer)
+      clearTimeout(recoveryShutdownTimer);
+    recoveryShutdownTimer = null;
+  };
+  const disableRecovery = () => {
+    if (recoveryDisabled)
+      return;
+    recoveryDisabled = true;
+    clearRecoveryShutdown();
+    recoveryObserver?.disconnect();
+    recoveryObserver = null;
+    outerRecoveryObserver?.disconnect();
+    outerRecoveryObserver = null;
+    observer = null;
+    recoveryTarget = null;
+    outerRecoveryTarget = null;
+    console.warn("[roam-logbook] Roam topbar host not found; widget disabled");
+  };
+  const armRecoveryShutdown = () => {
+    if (recoveryDisabled || recoveryShutdownTimer)
+      return;
+    recoveryShutdownTimer = setTimeout(() => {
+      recoveryShutdownTimer = null;
+      if (!destroyed && !document.querySelector(TOPBAR_SELECTOR2))
+        disableRecovery();
+    }, RECOVERY_TIMEOUT_MS);
+  };
+  const noteRecoveryMiss = () => {
+    recoveryFlushes += 1;
+    if (recoveryFlushes >= RECOVERY_FLUSH_LIMIT)
+      disableRecovery();
+  };
   const stopAttachmentObservers = () => {
+    clearRecoveryShutdown();
     observer?.disconnect();
     observer = null;
     hostObserver?.disconnect();
@@ -7615,8 +7701,13 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     observeRecoveryTarget(topbar);
     if (!topbar) {
       stopTicker();
+      noteRecoveryMiss();
       return;
     }
+    clearRecoveryShutdown();
+    recoveryFlushes = 0;
+    recoveryDisabled = false;
+    themeRuntime?.refresh();
     startTicker();
     if (topbar !== observedTopbar)
       observeTopbar(topbar);
@@ -7643,8 +7734,12 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     const nodes = [...record.addedNodes, ...record.removedNodes];
     if (nodes.length > 0 && nodes.every(isPluginNode2))
       return false;
-    if (record.target?.closest?.(TOPBAR_SELECTOR2))
+    const target = record.target;
+    if (target?.matches?.(TOPBAR_SELECTOR2) || target?.closest?.(TOPBAR_SELECTOR2))
       return true;
+    if (recoveryTarget === document.body && target !== recoveryTarget) {
+      return nodes.some((node) => node?.matches?.(TOPBAR_SELECTOR2));
+    }
     return nodes.some(
       (node) => node?.matches?.(TOPBAR_SELECTOR2) || node?.querySelector?.(TOPBAR_SELECTOR2)
     );
@@ -7673,6 +7768,15 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     hostObserver.observe(topbar, { childList: true, subtree: true });
   };
   const observeRecoveryTarget = (topbar) => {
+    if (!topbar && recoveryDisabled)
+      return;
+    if (topbar) {
+      clearRecoveryShutdown();
+      recoveryFlushes = 0;
+      recoveryDisabled = false;
+    } else {
+      armRecoveryShutdown();
+    }
     const target = topbar?.parentElement || document.body;
     const subtree = !topbar;
     const outerTarget = topbar?.parentElement?.parentElement || null;
@@ -7735,9 +7839,41 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   const containsMainControl = (element) => isMainControl(element) || Boolean(
     element.querySelector?.('input, textarea, select, [contenteditable="true"]') || [...element.querySelectorAll?.("*") || []].some(isMainControl)
   );
+  const restoreLayoutHostDisplay = (host) => {
+    const previous = layoutHostDisplay.get(host);
+    if (!previous || !host?.style)
+      return;
+    if (previous.value)
+      host.style.setProperty("display", previous.value, previous.priority);
+    else
+      host.style.removeProperty("display");
+    layoutHostDisplay.delete(host);
+  };
+  const clearLayoutHost = (host) => {
+    host.classList.remove("rlb-topbar__layout");
+    restoreLayoutHostDisplay(host);
+  };
+  const ensureLayoutHostDisplay = (host) => {
+    if (!host?.style)
+      return;
+    let display = "";
+    try {
+      display = document.defaultView?.getComputedStyle?.(host)?.display || "";
+    } catch {
+    }
+    if (display === "flex")
+      return;
+    if (!layoutHostDisplay.has(host)) {
+      layoutHostDisplay.set(host, {
+        value: host.style.getPropertyValue("display"),
+        priority: host.style.getPropertyPriority("display")
+      });
+    }
+    host.style.setProperty("display", "flex");
+  };
   const syncTopbarLayout = (placement) => {
     for (const host2 of layoutHosts)
-      host2.classList.remove("rlb-topbar__layout");
+      clearLayoutHost(host2);
     for (const host2 of searchHosts)
       host2.classList.remove("rlb-topbar__search");
     layoutHosts.clear();
@@ -7746,6 +7882,7 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     if (!host?.classList)
       return;
     host.classList.add("rlb-topbar__layout");
+    ensureLayoutHostDisplay(host);
     layoutHosts.add(host);
     for (const child of host.children) {
       if (child === container || !containsMainControl(child))
@@ -7770,9 +7907,9 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     return boundary;
   };
   const remove = () => {
-    closePopover();
+    closePopover({ restoreFocus: false });
     for (const host of layoutHosts)
-      host.classList.remove("rlb-topbar__layout");
+      clearLayoutHost(host);
     for (const host of searchHosts)
       host.classList.remove("rlb-topbar__search");
     layoutHosts.clear();
@@ -7781,12 +7918,12 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
   };
   return {
     mount() {
-      ensureThemeRuntime();
       unsubscribe = subscribe(() => {
         renderButton();
         renderSurfaces();
       });
       attach2();
+      ensureThemeRuntime();
     },
     refresh: attach2,
     getPerformanceSnapshot() {
@@ -7794,6 +7931,7 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     },
     unmount() {
       destroyed = true;
+      confirmation?.setOnChange(null);
       cancelPendingOpenRefresh();
       if (refreshClearTimer)
         clearTimeout(refreshClearTimer);

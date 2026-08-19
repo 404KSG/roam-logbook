@@ -1080,6 +1080,7 @@ export function createDashboard({
             activityNode = null;
             lastModel = null;
             refreshInFlight = null;
+            focusInFlight = null;
             refreshButton = null;
             refreshStatusNode = null;
         },

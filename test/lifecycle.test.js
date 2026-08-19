@@ -156,6 +156,8 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /--rlb-surface-link:\s*#316a9f/);
     assert.match(css, /--rlb-session-running:\s*#7eb794/);
     assert.doesNotMatch(css, /#2d72d2|rgba\(45, 114, 210/);
+    assert.doesNotMatch(css, /container-type|@container/);
+    assert.doesNotMatch(css.match(/\.rlb-topbar__layout\s*\{([^}]*)\}/)?.[1] ?? '', /display:/);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title\s*\{[^}]*text-decoration: none/s);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:hover,[\s\S]*?text-decoration: none/);
     assert.match(css, /\.bp3-button\.bp3-minimal\.rlb-run__title:focus-visible\s*\{[^}]*outline: 2px solid currentColor/s);

@@ -72,6 +72,29 @@ test('plugin-owned DOM mutations do not schedule a re-attach', async () => {
     topbar.unmount();
 });
 
+test('boot recovery stops after bounded misses and disables the widget', async () => {
+    document.body.innerHTML = '';
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = message => warnings.push(message);
+    const topbar = createTopbar({ onOpenDashboard: () => {} });
+
+    try {
+        topbar.mount();
+        for (let index = 0; index < 31; index += 1) topbar.refresh();
+        assert.deepEqual(warnings, [
+            '[roam-logbook] Roam topbar host not found; widget disabled',
+        ]);
+
+        document.body.innerHTML = '<div class="rm-topbar"></div>';
+        await settleMutations();
+        assert.equal(document.querySelector('#roam-logbook-topbar'), null);
+    } finally {
+        topbar.unmount();
+        console.warn = originalWarn;
+    }
+});
+
 test('the retired topbar setting cannot disable the core widget or duplicate its ticker', async () => {
     settings.set('showTopbarWidget', false);
     const timers = [];

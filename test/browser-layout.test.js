@@ -314,7 +314,7 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     for (const width of [720, 480, 360]) {
         const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rm-topbar" style="width:${width}px"><div class="rlb-topbar__layout" style="width:100%"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar rlb-topbar__widget"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button></div><div class="rlb-topbar__search"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
+            htmlWithLateHost(`<div class="rm-topbar" style="width:${width}px"><div class="rlb-topbar__layout" style="width:100%;display:flex"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar rlb-topbar__widget"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--parallel"><span class="rlb-topbar__time rlb-topbar__time--neutral">16:41</span><span class="rlb-topbar__separator" aria-hidden="true"></span><span class="rlb-topbar__parallel">3 Sessions</span></button></div><div class="rlb-topbar__search"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
             `(() => {
                 const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
                 const layout = document.querySelector('.rlb-topbar__layout');
@@ -338,7 +338,7 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
                     narrowKeepsTime: timeInk.width > 0 && timeInk.right <= rect(widget).right + .5,
                     centeredDot: parallel.getBoundingClientRect().width === 0 || Math.abs((separatorRect.top + separatorRect.height / 2) - (time.getBoundingClientRect().top + time.getBoundingClientRect().height / 2)) <= 1,
                     fullLabel: ${width} > 420 ? parallelInk.width > 0 && parallel.textContent === '3 Sessions' : true,
-                    computed: { widgetFlex:getComputedStyle(widget).flex, widgetMin:getComputedStyle(widget).minWidth, widgetWhiteSpace:getComputedStyle(widget).whiteSpace, searchFlex:getComputedStyle(search).flex, searchMin:getComputedStyle(search).minWidth }
+                    computed: { layoutDisplay:getComputedStyle(layout).display, containerType:getComputedStyle(layout).containerType, widgetFlex:getComputedStyle(widget).flex, widgetMin:getComputedStyle(widget).minWidth, widgetWhiteSpace:getComputedStyle(widget).whiteSpace, searchFlex:getComputedStyle(search).flex, searchMin:getComputedStyle(search).minWidth }
                 };
             })()`
         );
@@ -348,6 +348,8 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
         assert.equal(geometry.timeVisible, true, JSON.stringify(geometry));
         assert.equal(geometry.narrowKeepsTime, true, JSON.stringify(geometry));
         assert.equal(geometry.fullLabel, true, JSON.stringify(geometry));
+        assert.equal(geometry.computed.layoutDisplay, 'flex', JSON.stringify(geometry));
+        assert.notEqual(geometry.computed.containerType, 'inline-size', JSON.stringify(geometry));
         assert.equal(geometry.computed.widgetFlex, '0 0 auto', JSON.stringify(geometry));
         assert.equal(geometry.computed.widgetMin, 'max-content', JSON.stringify(geometry));
         assert.equal(geometry.computed.widgetWhiteSpace, 'nowrap', JSON.stringify(geometry));
@@ -358,7 +360,7 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
 test('idle topbar icon keeps a square hit target through focus and narrow search layout', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rm-topbar" style="width:360px"><div class="rlb-topbar__layout" style="width:100%"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div><div class="rlb-topbar__search" style="flex:1 1 auto"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
+        htmlWithLateHost(`<div class="rm-topbar" style="width:360px"><div class="rlb-topbar__layout" style="width:100%;display:flex"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div><div class="rlb-topbar__search" style="flex:1 1 auto"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
         `(() => {
             const button = document.querySelector('.rlb-topbar__button');
             const icon = document.querySelector('.rlb-topbar__icon');

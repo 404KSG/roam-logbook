@@ -92,11 +92,8 @@ export const STYLES = `
    These classes are applied to the actual host/child found at attach time, so
    the search can shrink into remaining space without ever shrinking this unit. */
 .rlb-topbar__layout {
-    display: flex;
     align-items: center;
     min-width: 0;
-    container-type: inline-size;
-    container-name: rlb-topbar;
 }
 
 .rlb-topbar__layout > .rlb-topbar {
@@ -114,17 +111,6 @@ export const STYLES = `
 /* At genuinely narrow widths the elapsed value is the useful invariant. The
    session count remains available in the surface header rather than forcing a
    second line or overlapping Roam's search control. */
-@container rlb-topbar (max-width: 420px) {
-    .rlb-topbar__button--parallel {
-        grid-template-columns: max-content !important;
-    }
-
-    .rlb-topbar__button--parallel > .rlb-topbar__separator,
-    .rlb-topbar__button--parallel > .rlb-topbar__parallel {
-        display: none !important;
-    }
-}
-
 @media (max-width: 420px) {
     .rlb-topbar__button--parallel {
         grid-template-columns: max-content !important;
