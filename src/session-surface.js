@@ -13,7 +13,7 @@ import { findStaleClocks } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 
-const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
+export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
 
 const rowFigures = (entry, now) => {

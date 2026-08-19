@@ -11,105 +11,34 @@ import { buildActivity } from './activity.js';
 import { renderActivity, syncActivityView } from './activity-view.js';
 import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
-import { openBlock, openBlockInRightSidebar } from './roam.js';
+import { createConfirmationController } from './confirmation.js';
+import { createFocusTrap } from './focus-trap.js';
+import { dataIssuesSection, issueRow } from './dashboard-issues.js';
+import { headerRow, statusMark, taskLink as renderTaskLinkBase } from './dashboard-table.js';
+import { runningSection as renderRunningSection } from './dashboard-running.js';
+import { tasksSection as renderTasksSection } from './dashboard-task-tree.js';
 import {
     buildDashboard,
     entryMinutes,
     filterByRange,
-    findStaleClocks,
-    flattenForest,
     getRange,
     RANGES,
     summariseSessionMetrics,
-    transformTaskForest,
 } from './stats.js';
-import { staleHours } from './settings.js';
 import { formatDisplayTitle } from './task-display.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
-import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { formatElapsed, formatMinutesHuman } from './time.js';
+import { acquireDocumentScrollLock } from './scroll-lock.js';
+import { createRefreshState, REFRESH_MESSAGES } from './refresh-state.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Roam Logbook';
-const REFRESH_LOADING_MESSAGE = 'Refreshing Dashboard from graph…';
-const REFRESH_SUCCESS_MESSAGE = 'Dashboard updated just now';
-const REFRESH_ERROR_MESSAGE = 'Dashboard refresh failed; last valid snapshot kept. Retry.';
-
-// Dashboard overlays are allowed to outlive a single render, and hot reloads
-// can briefly create more than one controller. Keep the document lock shared
-// and reference-counted so the last close restores the exact pre-open state.
-const documentScrollLocks = new WeakMap();
-
-const restoreInlineStyle = (node, value) => {
-    if (!node) return;
-    if (value === null) node.removeAttribute('style');
-    else node.setAttribute('style', value);
-};
-
-const releaseDocumentScrollLock = (documentRef, state) => {
-    const current = documentScrollLocks.get(documentRef);
-    if (current !== state) return;
-    current.count -= 1;
-    if (current.count > 0) return;
-
-    restoreInlineStyle(current.html, current.htmlStyle);
-    restoreInlineStyle(current.body, current.bodyStyle);
-    try {
-        window.scrollTo(current.scrollX, current.scrollY);
-    } catch {
-        // jsdom and older embedded WebViews may not implement scrollTo.
-    }
-    documentScrollLocks.delete(documentRef);
-};
-
-const acquireDocumentScrollLock = () => {
-    const documentRef = document;
-    const html = documentRef.documentElement;
-    const body = documentRef.body;
-    if (!html || !body) return () => {};
-
-    let state = documentScrollLocks.get(documentRef);
-    if (!state) {
-        const scrollX = Number(window.scrollX) || 0;
-        const scrollY = Number(window.scrollY) || 0;
-        const scrollbarWidth = Math.max(0, (Number(window.innerWidth) || 0) - html.clientWidth);
-        const computedPadding = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
-        state = {
-            count: 0,
-            html,
-            body,
-            htmlStyle: html.getAttribute('style'),
-            bodyStyle: body.getAttribute('style'),
-            scrollX,
-            scrollY,
-        };
-        documentScrollLocks.set(documentRef, state);
-        try {
-            html.style.overflow = 'hidden';
-            body.style.overflow = 'hidden';
-            if (scrollbarWidth > 0) {
-                body.style.paddingRight = `${computedPadding + scrollbarWidth}px`;
-            }
-        } catch (error) {
-            restoreInlineStyle(html, state.htmlStyle);
-            restoreInlineStyle(body, state.bodyStyle);
-            documentScrollLocks.delete(documentRef);
-            throw error;
-        }
-    }
-
-    state.count += 1;
-    let released = false;
-    return () => {
-        if (released) return;
-        released = true;
-        releaseDocumentScrollLock(documentRef, state);
-    };
-};
 
 export function createDashboard({
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
     clearIntervalFn = ticker => clearInterval(ticker),
+    confirmation = createConfirmationController(),
 } = {}) {
     let root = null;
     let summaryNode = null;
@@ -118,12 +47,9 @@ export function createDashboard({
     let rangeId = 'week';
     let returnFocusTo = null;
     let liveTicker = null;
-    let discardConfirmUid = null;
-    let discardConfirmTimer = null;
-    let refreshInFlight = null;
     let refreshButton = null;
     let refreshStatusNode = null;
-    let refreshState = { state: 'idle', message: '' };
+    let refreshAlertNode = null;
     let lastSnapshot = null;
     let lastModel = null;
     let lastTransientIssues = [];
@@ -131,6 +57,7 @@ export function createDashboard({
     let focusInFlight = null;
     let themeRuntime = null;
     let releaseScrollLock = null;
+    const focusTrap = createFocusTrap(() => root?.querySelector('.rlb-dialog'));
     // Kept across re-renders and reopens, keyed by task: changing the range or
     // clocking out should not throw away how the user arranged the tree.
     const collapsed = new Set();
@@ -153,37 +80,27 @@ export function createDashboard({
         liveTicker = null;
     };
 
-    const syncRefreshUi = () => {
+    const syncRefreshUi = state => {
+        const current = state || refreshRuntime.state;
         if (refreshButton) {
-            refreshButton.dataset.refreshState = refreshState.state;
-            refreshButton.disabled = refreshState.state === 'loading';
-            if (refreshState.state === 'loading') refreshButton.setAttribute('aria-busy', 'true');
+            refreshButton.dataset.refreshState = current.state;
+            refreshButton.disabled = current.state === 'loading';
+            if (current.state === 'loading') refreshButton.setAttribute('aria-busy', 'true');
             else refreshButton.removeAttribute('aria-busy');
         }
-        if (refreshStatusNode) {
-            refreshStatusNode.textContent = refreshState.message;
-            refreshStatusNode.setAttribute(
-                'role',
-                refreshState.state === 'error' ? 'alert' : 'status'
-            );
-            refreshStatusNode.setAttribute(
-                'aria-live',
-                refreshState.state === 'error' ? 'assertive' : 'polite'
-            );
-            refreshStatusNode.setAttribute('aria-atomic', 'true');
+        if (refreshStatusNode && refreshAlertNode) {
+            const isError = current.state === 'error';
+            refreshStatusNode.textContent = isError ? '' : current.message;
+            refreshAlertNode.textContent = isError ? current.message : '';
         }
     };
 
-    const setRefreshState = (state, message) => {
-        refreshState = { state, message };
-        syncRefreshUi();
-    };
+    const refreshRuntime = createRefreshState({
+        onRender: syncRefreshUi,
+        messages: REFRESH_MESSAGES.dashboard,
+    });
 
-    const resetDiscardConfirmation = () => {
-        discardConfirmUid = null;
-        if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
-        discardConfirmTimer = null;
-    };
+    const resetDiscardConfirmation = () => confirmation?.reset();
 
     const updateLiveMetricNodes = now => {
         if (!lastModel) return;
@@ -228,7 +145,7 @@ export function createDashboard({
         liveTicker = setIntervalFn(updateRunningElapsed, 1000);
     };
 
-    const paint = now => {
+    const paintDashboard = now => {
         if (!bodyNode || !lastModel) return;
         clearLiveTicker();
         const model = lastModel;
@@ -236,7 +153,7 @@ export function createDashboard({
         const transientIssues = lastTransientIssues;
         const refreshNotice = lastRefreshNotice;
         summaryNode.replaceChildren();
-        summaryNode.appendChild(overviewBar(model, now));
+        summaryNode.appendChild(overviewBar(model));
         bodyNode.replaceChildren();
         activityNode = null;
 
@@ -254,7 +171,20 @@ export function createDashboard({
             ...transientIssues.map(issueRow),
         ];
 
-        if (model.running.length > 0) bodyNode.appendChild(runningSection(model.running, now));
+        if (model.running.length > 0) {
+            bodyNode.appendChild(
+                renderRunningSection({
+                    running: model.running,
+                    now,
+                    isDiscarding: uid => confirmation?.isArmed(`discard:${uid}`, 'dashboard'),
+                    onDiscard: handleDiscard,
+                    onClockOut: entry => act(() => clock.clockOut(entry.clockUid)),
+                    headerRow,
+                    statusMark,
+                    taskLink: renderTaskLink,
+                })
+            );
+        }
         if (model.entries.length === 0) {
             bodyNode.appendChild(el('div', 'rlb-empty', 'No clock entries in this range yet.'));
             if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
@@ -264,7 +194,15 @@ export function createDashboard({
 
         activityNode = renderActivity(model.activity);
         if (activityNode) bodyNode.appendChild(activityNode);
-        bodyNode.appendChild(tasksSection(model.tree));
+        bodyNode.appendChild(
+            renderTasksSection(model.tree, {
+                taskView,
+                collapsedByFilter,
+                taskLink: renderTaskLink,
+                statusMark,
+                taskTimingAction,
+            })
+        );
         if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
         startLiveTicker();
     };
@@ -324,91 +262,22 @@ export function createDashboard({
         lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
         lastTransientIssues = transientIssues;
         lastRefreshNotice = refreshNotice;
-        paint(now);
+        paintDashboard(now);
         return { ok: true, refreshFailed };
     };
 
-    const refreshDashboard = () => {
-        if (refreshInFlight) return refreshInFlight;
-        setRefreshState('loading', REFRESH_LOADING_MESSAGE);
-        const request = Promise.resolve()
-            .then(() => render())
-            .then(
-                result => {
-                    if (result?.ok && !result.refreshFailed) {
-                        setRefreshState('success', REFRESH_SUCCESS_MESSAGE);
-                    } else {
-                        setRefreshState('error', REFRESH_ERROR_MESSAGE);
-                    }
-                    return result;
-                },
-                error => {
-                    console.error('[roam-logbook] could not refresh Dashboard', error);
-                    setRefreshState('error', REFRESH_ERROR_MESSAGE);
-                    return { ok: false, error };
-                }
-            );
-        refreshInFlight = request.finally(() => {
-            refreshInFlight = null;
+    const refreshDashboard = () =>
+        refreshRuntime.run(() => render(), {
+            isSuccess: result => result?.ok && !result.refreshFailed,
+            onError: error => {
+                console.error('[roam-logbook] could not refresh Dashboard', error);
+                return { ok: false, error };
+            },
         });
-        return refreshInFlight;
-    };
 
-    const issueRow = issue => ({
-        title: issue.title || issue.parentUid || issue.affectedUid || 'Unresolved graph data',
-        rawClock:
-            issue.rawClock ||
-            (issue.source ? `(graph ${issue.source} read)` : '(hierarchy query)'),
-        issues: [issue],
-    });
-
-    const dataIssuesSection = issues => {
-        const details = el('details', 'rlb-data-issues rlb-dashboard__inline-status');
-        const issueGroups = issues.map(entry => (entry.issues || [entry.issue]).filter(Boolean));
-        const graphReadCount = issueGroups.filter(group =>
-            group.some(issue => issue.kind === 'graph-read')
-        ).length;
-        const timingCount = issueGroups.length - graphReadCount;
-        const summaryParts = [];
-        if (timingCount > 0) {
-            summaryParts.push(
-                `${timingCount} timing record${timingCount === 1 ? '' : 's'} ${
-                    timingCount === 1 ? 'needs' : 'need'
-                } review`
-            );
-        }
-        if (graphReadCount > 0) {
-            summaryParts.push(
-                `${graphReadCount} graph read issue${graphReadCount === 1 ? '' : 's'} ${
-                    graphReadCount === 1 ? 'needs' : 'need'
-                } review`
-            );
-        }
-        const summary = el(
-            'summary',
-            'rlb-data-issues__summary',
-            summaryParts.join(' · ')
-        );
-        details.appendChild(summary);
-        const list = el('div', 'rlb-data-issues__list');
-        for (const entry of issues) {
-            const entryIssues = (entry.issues || [entry.issue]).filter(Boolean);
-            const issueText = entryIssues
-                .map(issue => `${issue.source ? `${issue.source}: ` : ''}${issue.message}`)
-                .join(' ');
-            const raw = entry.rawClock || '(CLOCK text unavailable)';
-            const label = `Task: ${entry.title} · CLOCK: ${raw} · Issue: ${issueText}`;
-            const item = el('div', 'rlb-data-issues__item', label);
-            item.title = label;
-            item.setAttribute('aria-label', label);
-            list.appendChild(item);
-        }
-        details.appendChild(list);
-        return details;
-    };
-
-    const overviewBar = (model, now) => {
+    const overviewBar = model => {
         const wrapper = el('dl', 'rlb-overview rlb-overview--compact');
+        wrapper.setAttribute('role', 'group');
         wrapper.setAttribute('aria-label', `${DASHBOARD_TITLE} overview`);
         const rangeLabel = getRange(model.rangeId).label;
         const metrics = [
@@ -418,438 +287,20 @@ export function createDashboard({
             ['Tasks tracked', String(model.tasks.length), rangeLabel, 'tasks'],
         ];
         for (const [label, value, context, key] of metrics) {
-            const item = el('div', 'rlb-overview__item rlb-overview__panel');
-            const heading = el('div', 'rlb-overview__heading');
+            const item = el('div', 'rlb-overview__item rlb-overview__panel rlb-overview__heading');
             const valueNode = el('dd', 'rlb-overview__value');
             const number = el('span', 'rlb-overview__number', value);
             number.dataset.liveMetric = key;
             valueNode.append(number);
             if (context) valueNode.append(el('span', 'rlb-overview__context', context));
-            heading.append(el('dt', 'rlb-overview__label', label), valueNode);
-            item.appendChild(heading);
+            item.append(el('dt', 'rlb-overview__label', label), valueNode);
             wrapper.appendChild(item);
         }
         return wrapper;
     };
 
-    const runningSection = (running, now) => {
-        const stale = new Set(findStaleClocks(running, now, staleHours()).map(e => e.clockUid));
-        const section = el('section', 'rlb-dashboard-section rlb-running');
-        section.classList.add('rlb-dashboard-panel');
-        const heading = el('div', 'rlb-panel__header');
-        heading.appendChild(el('h3', 'rlb-section__title', 'Timing'));
-        if (stale.size > 0) {
-            heading.appendChild(
-                el('span', 'bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice', `${stale.size} stale`)
-            );
-        }
-        section.appendChild(heading);
-
-        const table = el('table', 'rlb-table');
-        table.appendChild(
-            headerRow([
-                'Task',
-                'Started',
-                { label: 'Elapsed', numeric: true },
-                { label: 'Actions', visuallyHidden: true },
-            ])
-        );
-        const tbody = el('tbody');
-        for (const entry of running) {
-            const row = el('tr');
-            const task = el('td', 'rlb-cell');
-            const mark = statusMark(entry.status);
-            if (mark) task.appendChild(mark);
-            task.appendChild(taskLink(entry));
-            if (stale.has(entry.clockUid)) {
-                task.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'stale'));
-            }
-
-            const actions = el('td', 'rlb-table__num');
-            const discarding = discardConfirmUid === entry.clockUid;
-            const discardTitle = discarding
-                ? 'Confirm discard of this CLOCK entry'
-                : 'Discard this CLOCK entry (cannot be undone)';
-            const discard = button(
-                `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? ' bp3-intent-danger' : ''}`,
-                '',
-                event => {
-                    event.stopPropagation();
-                    if (!discarding) {
-                        discardConfirmUid = entry.clockUid;
-                        if (discardConfirmTimer) clearTimeout(discardConfirmTimer);
-                        discardConfirmTimer = setTimeout(() => {
-                            resetDiscardConfirmation();
-                            render({ readGraph: false });
-                        }, 5000);
-                        render({ readGraph: false });
-                        return;
-                    }
-                    resetDiscardConfirmation();
-                    void act(() => clock.discardClock(entry.clockUid));
-                },
-                { title: discardTitle }
-            );
-            discard.dataset.action = 'discard';
-            actions.append(
-                button(
-                    'bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout',
-                    '',
-                    event => {
-                        event.stopPropagation();
-                        void act(() => clock.clockOut(entry.clockUid));
-                    },
-                    { title: 'Check Out' }
-                ),
-                discard
-            );
-            actions.firstElementChild.dataset.action = 'clock-out';
-
-            const started = formatStarted(entry.start, now);
-            const startedTime = el('time', 'rlb-started', '');
-            startedTime.title = started.raw;
-            startedTime.setAttribute('aria-label', started.raw);
-            if (started.datetime) startedTime.dateTime = started.datetime;
-            if (started.valid) {
-                startedTime.append(
-                    el('span', 'rlb-started__date', started.dateLabel),
-                    el('span', 'rlb-started__time', started.timeLabel)
-                );
-            } else {
-                startedTime.textContent = started.raw;
-            }
-
-            const startedCell = el('td', 'rlb-muted rlb-started-cell');
-            startedCell.appendChild(startedTime);
-
-            const elapsed = el(
-                'td',
-                'rlb-table__num rlb-running-elapsed',
-                formatElapsed(now.getTime() - entry.start.getTime())
-            );
-            elapsed.dataset.runningElapsed = 'true';
-            elapsed.dataset.clockUid = entry.clockUid;
-            elapsed.dataset.startMs = String(entry.start.getTime());
-            row.append(task, startedCell, elapsed, actions);
-            tbody.appendChild(row);
-        }
-        table.appendChild(tbody);
-        section.appendChild(table);
-        return section;
-    };
-
-    const tasksSection = tree => {
-        const section = el('section', 'rlb-dashboard-section rlb-dashboard-panel rlb-by-task');
-        const heading = el('div', 'rlb-section__heading rlb-panel__header');
-        heading.appendChild(el('h3', 'rlb-section__title', 'By task'));
-
-        const taskCount = el('span', 'rlb-task-count');
-        heading.appendChild(taskCount);
-
-        const rollupHelp =
-            'Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.';
-        const info = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info',
-            '',
-            () => {},
-            { title: rollupHelp }
-        );
-        info.setAttribute('aria-describedby', 'roam-logbook-task-rollup-help');
-        heading.appendChild(info);
-        const help = el('span', 'rlb-visually-hidden', rollupHelp);
-        help.id = 'roam-logbook-task-rollup-help';
-        section.appendChild(help);
-
-        const filterGroup = el('div', 'rlb-task-filters');
-        filterGroup.setAttribute('role', 'group');
-        filterGroup.setAttribute('aria-label', 'Filter tasks by status');
-        for (const [value, label] of [
-            ['ALL', 'All'],
-            ['TODO', 'TODO'],
-            ['DONE', 'DONE'],
-        ]) {
-            const filterButton = button(
-                'bp3-button bp3-minimal bp3-small rlb-task-filter',
-                label,
-                () => {
-                    taskView.filter = value;
-                    paint();
-                },
-                { title: `Show ${label === 'All' ? 'all tasks' : `${label} tasks`}` }
-            );
-            filterButton.dataset.filter = value;
-            filterButton.setAttribute('aria-pressed', String(taskView.filter === value));
-            filterGroup.appendChild(filterButton);
-        }
-        heading.appendChild(filterGroup);
-
-        let visibleParentUids = [];
-        const toggleAll = button('bp3-button bp3-minimal bp3-small rlb-tree__collapse-all', '', () => {
-            const viewCollapsed = collapsedByFilter[taskView.filter];
-            const anyExpanded = visibleParentUids.some(uid => !viewCollapsed.has(uid));
-            if (anyExpanded) {
-                for (const uid of visibleParentUids) viewCollapsed.add(uid);
-            } else {
-                for (const uid of visibleParentUids) viewCollapsed.delete(uid);
-            }
-            paint();
-        });
-        heading.appendChild(toggleAll);
-        section.appendChild(heading);
-
-        const tableHost = el('div', 'rlb-task-table-host');
-        section.appendChild(tableHost);
-
-        function paint() {
-            const transformed = transformTaskForest(tree, {
-                filter: taskView.filter,
-                sortBy: taskView.sortBy,
-                direction: taskView.direction,
-            });
-            const viewCollapsed = collapsedByFilter[taskView.filter];
-            const completeViewRows = flattenForest(transformed.forest);
-            visibleParentUids = [
-                ...new Set(
-                    completeViewRows
-                        .filter(node => node.hasChildren)
-                        .map(node => node.taskUid)
-                ),
-            ];
-            const rows = flattenForest(transformed.forest, {
-                isCollapsed: node => viewCollapsed.has(node.taskUid),
-            });
-            const anyExpanded = visibleParentUids.some(uid => !viewCollapsed.has(uid));
-            taskCount.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
-            for (const filterButton of filterGroup.querySelectorAll('[data-filter]')) {
-                filterButton.setAttribute(
-                    'aria-pressed',
-                    String(filterButton.dataset.filter === taskView.filter)
-                );
-            }
-            toggleAll.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
-            toggleAll.hidden = visibleParentUids.length === 0;
-
-            if (transformed.forest.length === 0) {
-                const emptyMessage =
-                    taskView.filter === 'TODO'
-                        ? 'No TODO Tasks in the selected range.'
-                        : taskView.filter === 'DONE'
-                          ? 'No DONE Tasks in the selected range.'
-                          : 'No tasks in the selected range.';
-                tableHost.replaceChildren(el('div', 'rlb-task-empty', emptyMessage));
-                return;
-            }
-
-            const table = el('table', 'rlb-table rlb-task-table');
-            const columns = el('colgroup');
-            for (const className of [
-                'rlb-task-table__task',
-                'rlb-task-table__sessions',
-                'rlb-task-table__own',
-                'rlb-task-table__total',
-            ]) {
-                columns.appendChild(el('col', className));
-            }
-            table.appendChild(columns);
-            table.appendChild(
-                headerRow([
-                    'Task',
-                    {
-                        label: 'Sessions',
-                        numeric: true,
-                        sortKey: 'sessions',
-                        title: 'Sort by Sessions',
-                    },
-                    {
-                        label: 'Own',
-                        numeric: true,
-                        sortKey: 'own',
-                        title: 'Time recorded directly on this Task',
-                    },
-                    {
-                        label: 'Total',
-                        numeric: true,
-                        sortKey: 'total',
-                        title: 'Own time plus all sub-tasks',
-                    },
-                ], {
-                    sortBy: taskView.sortBy,
-                    direction: taskView.direction,
-                    onSort: sortBy => {
-                        if (taskView.sortBy === sortBy) {
-                            taskView.direction = taskView.direction === 'desc' ? 'asc' : 'desc';
-                        } else {
-                            taskView.sortBy = sortBy;
-                            taskView.direction = 'desc';
-                        }
-                        paint();
-                    },
-                })
-            );
-            const tbody = el('tbody');
-
-            for (const node of rows) {
-                const row = el('tr');
-                const name = el('td', 'rlb-tree__cell');
-                const layout = el('div', 'rlb-tree__layout');
-                const leading = el('div', 'rlb-tree__leading');
-                const content = el('div', 'rlb-tree__content');
-                name.style.paddingLeft = `${8 + node.depth * 20}px`;
-
-                if (node.hasChildren) {
-                    const caret = button(
-                        `bp3-button bp3-minimal bp3-small rlb-tree__toggle bp3-icon-chevron-${
-                            node.collapsed ? 'right' : 'down'
-                        }`,
-                        '',
-                        () => {
-                            if (viewCollapsed.has(node.taskUid)) viewCollapsed.delete(node.taskUid);
-                            else viewCollapsed.add(node.taskUid);
-                            paint();
-                        },
-                        { title: node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks' }
-                    );
-                    caret.setAttribute('aria-expanded', String(!node.collapsed));
-                    leading.appendChild(caret);
-                } else {
-                    // Keeps every title on the same left edge, caret or not.
-                    leading.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
-                }
-
-                const mark = statusMark(node.status);
-                if (mark) leading.appendChild(mark);
-                if (node.status === 'DONE') row.classList.add('rlb-row--done');
-                if (node.context) row.classList.add('rlb-row--context');
-                content.appendChild(taskLink(node));
-                // A task reachable from more than one parent is counted under each
-                // of them; say so on the row rather than let the columns look wrong.
-                if (node.occurrences > 1) {
-                    const badge = el('span', 'bp3-tag bp3-minimal rlb-tree__badge', `×${node.occurrences}`);
-                    badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-                    content.appendChild(badge);
-                }
-                if (node.truncated) {
-                    content.appendChild(el('span', 'bp3-tag bp3-minimal bp3-intent-warning', 'loop'));
-                }
-                // Keep the third layout item compatible with the existing
-                // collapsed-summary rail; actions live inside that rail so a
-                // play/status cue never steals width from the wrapped title.
-                const actions = el('div', 'rlb-muted rlb-tree__actions');
-                if (node.collapsed) {
-                    const hidden = countDescendants(node);
-                    actions.appendChild(
-                        el(
-                            'span',
-                            'rlb-muted rlb-tree__hidden',
-                            `+${hidden} sub-task${hidden > 1 ? 's' : ''}`
-                        )
-                    );
-                }
-                const timingAction = taskTimingAction(node);
-                if (timingAction) actions.appendChild(timingAction);
-                layout.append(leading, content, actions);
-                name.appendChild(layout);
-
-                row.append(
-                    name,
-                    el('td', 'rlb-table__num rlb-muted', node.sessions ? String(node.sessions) : ''),
-                    el('td', 'rlb-table__num rlb-muted', node.own > 0 ? formatMinutesHuman(node.own) : ''),
-                    el('td', 'rlb-table__num rlb-tree__total', formatMinutesHuman(node.total))
-                );
-                tbody.appendChild(row);
-            }
-
-            table.appendChild(tbody);
-            tableHost.replaceChildren(table);
-        }
-
-        paint();
-
-        return section;
-    };
-
-    const countDescendants = node =>
-        node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
-
-    // Numeric headers have to be right-aligned like their cells, or the column
-    // label and the figures under it sit against opposite edges.
-    const headerRow = (columns, { sortBy = null, direction = 'desc', onSort = null } = {}) => {
-        const thead = el('thead');
-        const row = el('tr');
-        for (const column of columns) {
-            const config = typeof column === 'object' ? column : { label: column };
-            const numeric = config.numeric;
-            const visuallyHidden = config.visuallyHidden;
-            const classes = [numeric ? 'rlb-table__num' : '', visuallyHidden ? 'rlb-visually-hidden' : '']
-                .filter(Boolean)
-                .join(' ');
-            const header = el('th', classes);
-            header.setAttribute('scope', 'col');
-            if (config.sortKey) header.dataset.sortKey = config.sortKey;
-            if (config.sortKey && onSort) {
-                const active = config.sortKey === sortBy;
-                if (active) {
-                    header.setAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
-                }
-                const sortButton = button(
-                    'bp3-button bp3-minimal bp3-small rlb-task-sort-button',
-                    '',
-                    () => onSort(config.sortKey),
-                    { title: config.title || `Sort by ${config.label}` }
-                );
-                sortButton.setAttribute('aria-pressed', String(active));
-                sortButton.appendChild(el('span', 'rlb-task-sort-label', config.label));
-                if (active) {
-                    const arrow = el(
-                        'span',
-                        'rlb-task-sort-arrow',
-                        direction === 'asc' ? '↑' : '↓'
-                    );
-                    arrow.setAttribute('aria-hidden', 'true');
-                    sortButton.appendChild(arrow);
-                }
-                header.appendChild(sortButton);
-            } else {
-                header.textContent = config.label;
-            }
-            row.appendChild(header);
-        }
-        thead.appendChild(row);
-        return thead;
-    };
-
-    /** A checkbox drawn in CSS, so it does not depend on Blueprint's icon font. */
-    const statusMark = status => {
-        if (!status) return null;
-        const done = status === 'DONE';
-        const mark = el('span', `rlb-status rlb-status--${done ? 'done' : 'todo'}`);
-        mark.title = done ? 'DONE' : 'TODO';
-        mark.setAttribute('role', 'img');
-        mark.setAttribute('aria-label', done ? 'Done' : 'To do');
-        return mark;
-    };
-
-    const taskLink = row => {
-        const title = formatDisplayTitle(row);
-        const accessibleName = `Open this block: ${title}`;
-        const link = button(
-            'bp3-button bp3-minimal bp3-small rlb-task-link',
-            '',
-            event => {
-                event.stopPropagation();
-                if (event.shiftKey) {
-                    event.preventDefault();
-                    void openBlockInRightSidebar(row.taskUid);
-                    return;
-                }
-                close();
-                void openBlock(row.taskUid);
-            },
-            { title: accessibleName }
-        );
-        link.appendChild(el('span', 'rlb-task-link__text', title));
-        return link;
-    };
+    const renderTaskLink = row =>
+        renderTaskLinkBase(row, { onClose: () => close() });
 
     const act = async action => {
         try {
@@ -858,6 +309,15 @@ export function createDashboard({
             console.error('[roam-logbook]', error);
         }
         render();
+    };
+
+    const handleDiscard = entry => {
+        const key = `discard:${entry.clockUid}`;
+        if (!confirmation?.arm(key, 'dashboard')) {
+            render({ readGraph: false });
+            return;
+        }
+        void act(() => clock.discardClock(entry.clockUid));
     };
 
     const startTaskTiming = taskUid => {
@@ -900,43 +360,11 @@ export function createDashboard({
         return play;
     };
 
-    const dialogFocusables = dialog =>
-        [...dialog.querySelectorAll('button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter(
-            node => !node.disabled && node.getAttribute('aria-hidden') !== 'true'
-        );
-
     const onKeyDown = event => {
-        if (!root?.classList.contains('rlb-root--open')) return;
-        const dialog = root.querySelector('.rlb-dialog');
-        if (!dialog) return;
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            close();
-            return;
-        }
-        if (event.key !== 'Tab') return;
-
-        const focusables = dialogFocusables(dialog);
+        if (!root?.classList.contains('rlb-root--open') || event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
-        if (focusables.length === 0) {
-            dialog.focus();
-            return;
-        }
-
-        const first = focusables[0];
-        const last = focusables.at(-1);
-        const active = document.activeElement;
-        const index = focusables.indexOf(active);
-        if (event.shiftKey) {
-            if (index <= 0) last.focus();
-            else focusables[index - 1].focus();
-        } else if (index < 0 || index === focusables.length - 1) {
-            first.focus();
-        } else {
-            focusables[index + 1].focus();
-        }
+        close();
     };
 
     const build = () => {
@@ -990,6 +418,13 @@ export function createDashboard({
         );
         refreshButton.dataset.action = 'refresh';
         refreshStatusNode = el('span', 'rlb-dashboard__refresh-status rlb-visually-hidden');
+        refreshStatusNode.setAttribute('role', 'status');
+        refreshStatusNode.setAttribute('aria-live', 'polite');
+        refreshStatusNode.setAttribute('aria-atomic', 'true');
+        refreshAlertNode = el('span', 'rlb-dashboard__refresh-alert rlb-visually-hidden');
+        refreshAlertNode.setAttribute('role', 'alert');
+        refreshAlertNode.setAttribute('aria-live', 'assertive');
+        refreshAlertNode.setAttribute('aria-atomic', 'true');
 
         header.append(
             selectWrapper,
@@ -1000,7 +435,8 @@ export function createDashboard({
                 close,
                 { title: 'Close' }
             ),
-            refreshStatusNode
+            refreshStatusNode,
+            refreshAlertNode
         );
 
         summaryNode = el('div', 'rlb-summary');
@@ -1025,6 +461,7 @@ export function createDashboard({
         }
         clearLiveTicker();
         resetDiscardConfirmation();
+        focusTrap.deactivate();
         root.classList.remove('rlb-root--open');
         root.setAttribute('aria-hidden', 'true');
         document.removeEventListener('keydown', onKeyDown, true);
@@ -1054,14 +491,18 @@ export function createDashboard({
                 root.classList.add('rlb-root--open');
                 root.setAttribute('aria-hidden', 'false');
                 document.addEventListener('keydown', onKeyDown, true);
+                focusTrap.activate();
                 render();
                 const dialog = root.querySelector('.rlb-dialog');
-                const initial = dialogFocusables(dialog)[0];
+                const initial = dialog.querySelector(
+                    'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+                );
                 (initial || dialog)?.focus();
             } catch (error) {
                 root?.classList.remove('rlb-root--open');
                 root?.setAttribute('aria-hidden', 'true');
                 document.removeEventListener('keydown', onKeyDown, true);
+                focusTrap.deactivate();
                 releaseScrollLock?.();
                 releaseScrollLock = null;
                 returnFocusTo = null;
@@ -1079,10 +520,12 @@ export function createDashboard({
             bodyNode = null;
             activityNode = null;
             lastModel = null;
-            refreshInFlight = null;
+            refreshRuntime.dispose();
+            focusTrap.deactivate();
             focusInFlight = null;
             refreshButton = null;
             refreshStatusNode = null;
+            refreshAlertNode = null;
         },
     };
 }
