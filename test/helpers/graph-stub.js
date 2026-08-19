@@ -12,6 +12,7 @@ let nextUid = 0;
 export function installGraph(blocks = []) {
     nextUid = 0;
     const store = new Map();
+    const pageUids = new Map();
     const pullWatches = new Map();
     const pullCalls = { pull: 0, pullMany: 0, fastQ: 0 };
 
@@ -29,12 +30,19 @@ export function installGraph(blocks = []) {
             page: block.page === undefined ? 'Test Page' : block.page,
         });
         nextOrderByParent.set(parent, Math.max(nextOrder, blockOrder + 1));
+        if (!pageUids.has(block.page)) pageUids.set(block.page, `page-${pageUids.size + 1}`);
     }
 
-    const childrenOf = uid =>
-        [...store.values()]
-            .filter(block => block.parent === uid)
+    const childrenOf = uid => {
+        const pageTitle = [...pageUids.entries()].find(([, pageUid]) => pageUid === uid)?.[0];
+        return [...store.values()]
+            .filter(block =>
+                pageTitle
+                    ? block.page === pageTitle && block.parent === null
+                    : block.parent === uid
+            )
             .sort((a, b) => a.order - b.order);
+    };
 
     const uidFromEntity = entity => {
         if (Array.isArray(entity)) return entity[1];
@@ -44,6 +52,19 @@ export function installGraph(blocks = []) {
 
     const pull = (pattern, entity) => {
         pullCalls.pull += 1;
+        const pageTitle = [...pageUids.entries()].find(([, pageUid]) => pageUid === uidFromEntity(entity))?.[0];
+        if (pageTitle) {
+            const result = {};
+            if (pattern.includes(':block/uid')) result[':block/uid'] = pageUids.get(pageTitle);
+            if (pattern.includes(':block/children')) {
+                result[':block/children'] = childrenOf(pageUids.get(pageTitle)).map(child => ({
+                    ':block/uid': child.uid,
+                    ':block/string': child.string,
+                    ':block/order': child.order,
+                }));
+            }
+            return result;
+        }
         const block = store.get(uidFromEntity(entity));
         if (!block) return null;
         const result = {};
@@ -66,6 +87,28 @@ export function installGraph(blocks = []) {
     };
 
     const q = (datalog, ...args) => {
+        if (
+            datalog.includes(':find ?page-uid ?uid ?string ?order ?parent-uid') &&
+            datalog.includes('[?block :block/page ?page]')
+        ) {
+            const title = args[0];
+            const pageUid = pageUids.get(title);
+            if (!pageUid) return [];
+            return [...store.values()]
+                .filter(block => block.page === title)
+                .map(block => [
+                    pageUid,
+                    block.uid,
+                    block.string,
+                    block.order,
+                    block.parent || pageUid,
+                ]);
+        }
+        if (datalog.includes(':find ?page-uid') && datalog.includes(':node/title ?page-title')) {
+            const title = args[0];
+            const pageUid = pageUids.get(title);
+            return pageUid ? [[pageUid]] : [];
+        }
         if (
             datalog.includes(':find ?clock-uid ?clock-string') &&
             datalog.includes(':in $ [?drawer-string ...]') &&

@@ -12,6 +12,7 @@ import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
+import { flattenTodayRows } from './today-todos.js';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
@@ -29,6 +30,7 @@ const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
 const dashboardLabel = 'Open Roam Logbook Dashboard';
+const switchLabel = view => `Show ${view === 'today' ? 'Today tasks' : 'Active Threads'}`;
 
 /** Backward-compatible seam; Active Work and Dashboard now share one formatter. */
 export const activeWorkDisplayTitle = formatDisplayTitle;
@@ -63,9 +65,81 @@ const renderTitle = (row, onOpenTask) => {
         `bp3-button bp3-minimal rlb-run__title${recent ? ' rlb-run__title--recent' : ''}`,
         title,
         event => onOpenTask?.(row.taskUid, event),
-        { title: fullTaskLabel(title) }
+        // The visible text is the task title alone; the accessible name has to
+        // add the action, so this is an override rather than a duplicate.
+        { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
     );
     return taskButton;
+};
+
+const renderTodayRow = (row, options) => {
+    const node = row.node;
+    const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
+    const rowNode = el('div', 'rlb-today__row');
+    rowNode.dataset.taskUid = node.uid;
+    rowNode.style.setProperty('--rlb-today-depth', String(row.depth));
+    rowNode.setAttribute('role', 'treeitem');
+    rowNode.setAttribute('aria-level', String(row.depth + 1));
+    if (node.children.length > 0) {
+        rowNode.setAttribute('aria-expanded', String(row.expanded));
+    }
+
+    const rail = el('div', 'rlb-today__rail');
+    if (node.children.length > 0) {
+        const toggle = button(
+            `bp3-button bp3-minimal bp3-small bp3-icon-chevron-${row.expanded ? 'down' : 'right'} rlb-today__toggle`,
+            '',
+            event => {
+                event.stopPropagation();
+                options.onToggleToday?.(node.uid);
+            },
+            { title: row.expanded ? 'Collapse sub-tasks' : `Expand ${node.hiddenDescendantCount} sub-tasks` }
+        );
+        toggle.setAttribute('aria-label', row.expanded ? `Collapse ${title}` : `Expand ${title}`);
+        toggle.dataset.action = 'today-toggle';
+        rail.appendChild(toggle);
+    } else {
+        rail.appendChild(el('span', 'rlb-today__spacer'));
+    }
+
+    const titleButton = button(
+        'bp3-button bp3-minimal rlb-today__title',
+        title,
+        event => options.onOpenTask?.(node.uid, event, { today: true }),
+        { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+    );
+    titleButton.dataset.action = 'today-open';
+    rail.appendChild(titleButton);
+    rowNode.appendChild(rail);
+
+    const action = el('div', 'rlb-today__action');
+    if (node.uid === options.currentTaskUid) {
+        const timing = el('span', 'bp3-icon bp3-icon-time rlb-today__timing');
+        timing.setAttribute('role', 'img');
+        timing.setAttribute('aria-label', 'Currently timing');
+        timing.title = 'Currently timing';
+        action.appendChild(timing);
+    } else {
+        const play = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play',
+            '',
+            event => {
+                event.stopPropagation();
+                options.onStartToday?.(node.uid, event);
+            },
+            { title: `Start timing ${title}` }
+        );
+        play.setAttribute('aria-label', `Start timing ${title}`);
+        play.dataset.action = 'today-play';
+        action.appendChild(play);
+    }
+    if (!row.expanded && node.hiddenDescendantCount > 0) {
+        action.appendChild(
+            el('span', 'rlb-today__hidden-count', `+${node.hiddenDescendantCount}`)
+        );
+    }
+    rowNode.appendChild(action);
+    return rowNode;
 };
 
 const renderRunningRow = (row, now, options) => {
@@ -305,12 +379,58 @@ export function renderSessionSurface(root, model, options = {}) {
     if (headerActions.childElementCount > 0) header.appendChild(headerActions);
     root.replaceChildren(header);
 
+    const activeView = options.view === 'today' ? 'today' : 'threads';
+    if (options.onSwitchView) {
+        const switcher = el('nav', 'rlb-surface__view-switch');
+        switcher.setAttribute('aria-label', 'Logbook view');
+        const todayModel = options.todayModel || { count: 0 };
+        for (const [view, label, count] of [
+            ['threads', 'Threads', model.activeCount ?? model.rows.length],
+            [
+                'today',
+                'Today',
+                ['idle', 'loading'].includes(todayModel.status) ? '…' : (todayModel.count ?? 0),
+            ],
+        ]) {
+            const selected = activeView === view;
+            const control = button(
+                `bp3-button bp3-minimal rlb-surface__view-control${selected ? ' is-selected' : ''}`,
+                `${label} · ${count}`,
+                () => options.onSwitchView(view),
+                { title: switchLabel(view) }
+            );
+            control.dataset.action = 'switch-view';
+            control.dataset.view = view;
+            control.setAttribute('aria-pressed', String(selected));
+            switcher.appendChild(control);
+        }
+        root.appendChild(switcher);
+    }
+
     const sessionList = el('div', 'rlb-surface__list');
     sessionList.setAttribute('role', 'group');
-    sessionList.setAttribute('aria-label', 'Active Threads');
+    sessionList.setAttribute('aria-label', activeView === 'today' ? 'Today TODOs' : 'Active Threads');
     root.appendChild(sessionList);
 
-    if (model.rows.length === 0) {
+    if (activeView === 'today') {
+        const todayModel = options.todayModel;
+        const rows = options.todayRows || flattenTodayRows(todayModel);
+        if (!todayModel || ['idle', 'loading'].includes(todayModel.status)) {
+            sessionList.appendChild(el('div', 'rlb-popover__empty', 'Loading today…'));
+        } else if (todayModel.status === 'error') {
+            sessionList.appendChild(
+                el('div', 'rlb-popover__empty', 'Today tasks could not be read.')
+            );
+        } else if (rows.length === 0) {
+            sessionList.appendChild(el('div', 'rlb-popover__empty', 'No unfinished TODOs today.'));
+        } else {
+            const tree = el('div', 'rlb-today__tree');
+            tree.setAttribute('role', 'tree');
+            tree.setAttribute('aria-label', 'Today unfinished TODOs');
+            for (const row of rows) tree.appendChild(renderTodayRow(row, options));
+            sessionList.appendChild(tree);
+        }
+    } else if (model.rows.length === 0) {
         sessionList.appendChild(
             el('div', 'rlb-popover__empty', options.emptyMessage || 'No Timing Line is active.')
         );
@@ -354,7 +474,7 @@ export function renderSessionSurface(root, model, options = {}) {
         root.appendChild(node);
     }
 
-    if (model.runningCount > 1 && options.onClockOutAll) {
+    if (activeView === 'threads' && model.runningCount > 1 && options.onClockOutAll) {
         const footer = el('footer', 'rlb-surface__footer');
         const confirming = Boolean(options.clockOutAllConfirm);
         footer.appendChild(

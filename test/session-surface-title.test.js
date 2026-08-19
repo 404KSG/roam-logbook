@@ -101,6 +101,7 @@ test('Timing and Parallel Thread buttons expose the same bracket-preserving visi
     const completed = root.querySelector('.rlb-run--recent .rlb-run__completed');
     assert.ok(completed, 'a DONE Parallel Thread exposes a completed status indicator');
     assert.equal(completed.tagName, 'SPAN');
+    // Non-interactive role="img" is named by aria-label, not by a tooltip.
     assert.equal(completed.getAttribute('role'), 'img');
     assert.equal(completed.title, 'Completed');
     assert.equal(completed.getAttribute('aria-label'), 'Completed');

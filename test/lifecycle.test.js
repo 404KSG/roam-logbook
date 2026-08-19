@@ -487,8 +487,8 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         ]);
         const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
         assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
-        assert.equal(headerRefresh.title, '');
-        assert.equal(headerRefresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+        assert.equal(headerRefresh.title, 'Refresh Active Work from graph');
+        assert.equal(headerRefresh.getAttribute('aria-label'), null);
         assert.equal(popover.querySelector('.rlb-surface__footer'), null);
         click(topbarWidget().querySelector('button'));
     } finally {
@@ -527,12 +527,12 @@ test('the popover lists the running clock', () => {
     const checkout = popover.querySelector('[data-action="clock-out"]');
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
-    assert.equal(checkout.title, '');
-    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+    assert.equal(checkout.title, 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), null);
     const discard = popover.querySelector('.bp3-icon-trash');
     assert.ok(discard, 'discard action should be present');
-    assert.match(discard.getAttribute('aria-label'), /Discard this CLOCK entry/);
-    assert.equal(discard.title, '');
+    assert.match(discard.title, /Discard this CLOCK entry/);
+    assert.equal(discard.getAttribute('aria-label'), null);
     const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
     assert.deepEqual(headerActions.map(action => action.dataset.action || 'refresh-cell'), [
         'dashboard',
@@ -540,8 +540,8 @@ test('the popover lists the running clock', () => {
     ]);
     const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(refresh.title, '');
-    assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+    assert.equal(refresh.title, 'Refresh Active Work from graph');
+    assert.equal(refresh.getAttribute('aria-label'), null);
     assert.equal(popover.querySelector('.rlb-surface__footer'), null);
 
     click(topbarWidget().querySelector('button'));
@@ -579,9 +579,10 @@ test('the dashboard renders totals and the task breakdown', () => {
     for (const selector of ['.bp3-icon-refresh', '.bp3-icon-cross']) {
         const action = dialog().querySelector(selector);
         assert.ok(action.classList.contains('rlb-icon-button'));
+        // Icon-only: the tooltip is also the accessible name, so aria-label is
+        // not set to the same string a second time.
         assert.ok(action.title);
-        assert.ok(action.getAttribute('aria-label'));
-        assert.equal(action.title, '');
+        assert.equal(action.getAttribute('aria-label'), null);
     }
     assert.match(dialog().textContent, /Today/);
     assert.match(dialog().textContent, /Graph Engineering:/);

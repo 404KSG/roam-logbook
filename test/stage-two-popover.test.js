@@ -77,6 +77,9 @@ const settlePostPaint = async () => {
 };
 const topbarButton = () => document.querySelector('#roam-logbook-topbar button');
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
+// The Thread/timing detail lives in a polite live region rather than in the
+// button tooltip, so the button's accessible name stays stable per second.
+const statusRegion = () => topbarWidget().querySelector('[aria-live="polite"]');
 const openPopover = () => {
     click(topbarButton());
     return document.querySelector('body > .rlb-popover');
@@ -495,11 +498,17 @@ test('Active Work header keeps Dashboard and Refresh together with no empty foot
     assert.ok(dashboard.classList.contains('bp3-icon-dashboard'));
     assert.equal(dashboard.classList.contains('bp3-icon-home'), false);
     assert.equal(dashboard.title, 'Open Roam Logbook Dashboard');
-    assert.equal(dashboard.getAttribute('aria-label'), dashboard.title);
+    // An icon-only button takes its accessible name from title; a
+    // duplicate aria-label would only be announced twice.
+    assert.ok(dashboard.title);
+    assert.equal(dashboard.getAttribute('aria-label'), null);
     assert.equal(dashboard.type, 'button');
     assert.ok(refresh.classList.contains('bp3-icon-refresh'));
     assert.equal(refresh.title, 'Refresh Active Work from graph');
-    assert.equal(refresh.getAttribute('aria-label'), refresh.title);
+    // An icon-only button takes its accessible name from title; a
+    // duplicate aria-label would only be announced twice.
+    assert.ok(refresh.title);
+    assert.equal(refresh.getAttribute('aria-label'), null);
     assert.equal(refresh.disabled, true);
     assert.equal(refresh.getAttribute('aria-busy'), 'true');
     assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
@@ -526,7 +535,10 @@ test('shared Active Work header orders Dashboard, Refresh, and Close actions', (
         assert.equal(action.type, 'button');
         assert.equal(action.tabIndex, 0);
         assert.ok(action.title);
-        assert.equal(action.getAttribute('aria-label'), action.title);
+        // An icon-only button takes its accessible name from title; a
+    // duplicate aria-label would only be announced twice.
+    assert.ok(action.title);
+    assert.equal(action.getAttribute('aria-label'), null);
     }
 });
 
@@ -541,8 +553,11 @@ test('single Focused Task has no bulk footer while retaining header actions', as
     assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Thread`);
     assert.equal(topbar.querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
     assert.equal(count.textContent, '1 Thread');
-    assert.match(topbar.title, /^1 Thread\n/);
-    assert.equal(topbar.getAttribute('aria-label'), topbar.title);
+    assert.equal(topbar.title, 'Open Active Work details');
+    assert.match(statusRegion().textContent, /^1 Thread/);
+    // The tooltip and the accessible name say different things here, so both
+    // are set; only identical strings would be a duplicate announcement.
+    assert.equal(topbar.getAttribute('aria-label'), 'Open Roam Logbook Active Work');
     assert.equal(
         [...count.classList].some(className =>
             className.startsWith('rlb-topbar__parallel--load-')
@@ -675,8 +690,9 @@ test('live Thread count reclassifies only the count node without duplicate DOM',
     const countNode = () => button.querySelector('.rlb-topbar__parallel');
     const timeNode = () => button.querySelector('.rlb-topbar__time');
     assert.equal(countNode().textContent, '3 Threads');
-    assert.match(button.title, /^3 Threads\n/);
-    assert.equal(button.getAttribute('aria-label'), button.title);
+    assert.equal(button.title, 'Open Active Work details');
+    assert.match(statusRegion().textContent, /^3 Threads/);
+    assert.equal(button.getAttribute('aria-label'), 'Open Roam Logbook Active Work');
     assert.equal(
         [...countNode().classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
         false
@@ -784,11 +800,14 @@ test('running rows expose compact cycle metadata without misleading per-session 
     assert.equal(checkout.classList.contains('bp3-icon-stop'), false);
     assert.equal(checkout.classList.contains('bp3-intent-success'), false);
     assert.equal(checkout.title, 'Check Out');
-    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), null);
 
     const discard = row.querySelector('[data-action="discard"]');
     assert.match(discard.title, /Discard this CLOCK|discard this Session/i);
-    assert.equal(discard.getAttribute('aria-label'), discard.title);
+    // An icon-only button takes its accessible name from title; a
+    // duplicate aria-label would only be announced twice.
+    assert.ok(discard.title);
+    assert.equal(discard.getAttribute('aria-label'), null);
     await settle();
 });
 
@@ -878,7 +897,7 @@ test('Active Work header keeps Refresh copy hidden while preserving accessible s
     assert.ok(refresh, 'Refresh belongs in the surface header');
     assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
     assert.equal(refresh.title, 'Refresh Active Work from graph');
-    assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
+    assert.equal(refresh.getAttribute('aria-label'), null);
     assert.ok(refresh.classList.contains('bp3-icon-refresh'));
     assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
     const live = popover.querySelector('.rlb-surface__refresh-status');
@@ -890,7 +909,7 @@ test('Active Work header keeps Refresh copy hidden while preserving accessible s
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.title, 'Check Out');
-    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), null);
 
     click(refresh);
     const loading = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
@@ -1124,12 +1143,14 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     assert.equal(recentSection.querySelectorAll('.rlb-run').length, 1);
     assert.ok(focused.querySelector('.rlb-run__actions'));
     const recentTitle = recent.querySelector('.rlb-run__title');
+    // The button's visible text is the task title, so aria-label overrides it
+    // to include the action rather than duplicating the tooltip for nothing.
     assert.equal(recentTitle.title, 'Open this block: Graph Engineering: a deliberately long task title that must remain accessible');
-    assert.equal(recentTitle.getAttribute('aria-label'), 'Open this block: Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.equal(recentTitle.getAttribute('aria-label'), recentTitle.title);
     const recentFocus = recent.querySelector('[data-action="focus-recent"]');
     assert.ok(recentFocus);
     assert.equal(recentFocus.title, 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
-    assert.equal(recentFocus.getAttribute('aria-label'), 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.equal(recentFocus.getAttribute('aria-label'), null);
     assert.ok(recentFocus.classList.contains('bp3-icon-play'));
     assert.equal(focused.querySelector('.rlb-run__elapsed').textContent, '3:00');
 
@@ -1204,7 +1225,9 @@ test('the Recent Focus action switches it to the one Focused CLOCK', async t => 
     const recentFocus = surface.querySelector(
         '.rlb-surface__section--recent [data-action="focus-recent"]'
     );
-    assert.equal(recentFocus.getAttribute('aria-label'), 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    // Icon-only action: the tooltip is the accessible name.
+    assert.equal(recentFocus.title, 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
+    assert.equal(recentFocus.getAttribute('aria-label'), null);
     const sidebarCalls = [];
     const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
     window.roamAlphaAPI.ui.rightSidebar = {
@@ -1590,7 +1613,7 @@ test('discarding a CLOCK entry is a two-step low-level cleanup action', async t 
     assert.ok(graph.store.has(clockUid), 'the first click must not delete the CLOCK');
     const confirm = document.querySelector('[data-action="discard"]');
     assert.match(confirm.title, /confirm discard/i);
-    assert.match(confirm.getAttribute('aria-label'), /confirm discard/i);
+    assert.equal(confirm.getAttribute('aria-label'), null);
 
     click(confirm);
     await settle();

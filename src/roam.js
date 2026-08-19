@@ -7,6 +7,7 @@
  */
 
 import { referencedBlockUid } from './org.js';
+import { dateToPageTitle } from './today-todos.js';
 
 export class GraphReadError extends Error {
     constructor(message, { cause, issue } = {}) {
@@ -425,6 +426,203 @@ export function getChildren(uid) {
     } catch (error) {
         throw withGraphReadIssue(error, { source: 'children', affectedUid: uid });
     }
+}
+
+const DAILY_PAGE_TREE_QUERY = `[:find ?page-uid ?uid ?string ?order ?parent-uid
+  :in $ ?page-title
+  :where
+  [?page :node/title ?page-title]
+  [?page :block/uid ?page-uid]
+  [?block :block/page ?page]
+  [?block :block/uid ?uid]
+  [?block :block/string ?string]
+  [?block :block/order ?order]
+  [?parent :block/children ?block]
+  [?parent :block/uid ?parent-uid]]`;
+
+const REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
+  :in $ [?uid ...]
+  :where
+  [?b :block/uid ?uid]
+  [?b :block/string ?string]]`;
+
+export const DAILY_NOTE_READ_LIMITS = Object.freeze({
+    maxDepth: 24,
+    maxNodes: 500,
+});
+
+const boundedReadError = message =>
+    new GraphReadError(message, {
+        issue: graphReadIssue({ source: 'daily-note', message }),
+    });
+
+const normalizeBound = (value, fallback) =>
+    Number.isInteger(value) && value > 0 ? value : fallback;
+
+const readDailyPageRows = pageTitle =>
+    validateQueryRows(
+        queryOrThrow(DAILY_PAGE_TREE_QUERY, pageTitle),
+        'daily note page tree',
+        row =>
+            row.length >= 5 &&
+            typeof row[0] === 'string' &&
+            row[0].length > 0 &&
+            typeof row[1] === 'string' &&
+            row[1].length > 0 &&
+            typeof row[2] === 'string' &&
+            Number.isFinite(row[3]) &&
+            typeof row[4] === 'string' &&
+            row[4].length > 0
+    );
+
+const readReferencedBlockStrings = uids => {
+    if (uids.length === 0) return {};
+    const rows = validateQueryRows(
+        queryOrThrow(REFERENCED_BLOCK_STRINGS_QUERY, uids),
+        'daily note reference',
+        row => row.length >= 2 && typeof row[0] === 'string' && typeof row[1] === 'string'
+    );
+    return Object.fromEntries(rows.map(([uid, string]) => [uid, string]));
+};
+
+/**
+ * Read one page's bounded block tree and the strings for its bare references.
+ *
+ * The page title is an exact Datalog input. One page-scoped query returns the
+ * direct-parent edge for every descendant, then the tree is rebuilt in memory
+ * with hard depth/node caps. This avoids one Pull/query per nested block.
+ * Reference targets are a second, finite lookup because a daily note commonly
+ * contains `((uid))` rather than a copied task string. A missing page is a
+ * confirmed empty result; an unavailable or malformed read is not.
+ */
+export function readDailyNoteTree(
+    pageTitle,
+    { maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth, maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes } = {}
+) {
+    if (typeof pageTitle !== 'string' || pageTitle.trim() === '') {
+        return { ok: false, roots: null, pageUid: null, error: boundedReadError('Daily note title is required.') };
+    }
+
+    const depthLimit = normalizeBound(maxDepth, DAILY_NOTE_READ_LIMITS.maxDepth);
+    const nodeLimit = normalizeBound(maxNodes, DAILY_NOTE_READ_LIMITS.maxNodes);
+
+    try {
+        const rows = readDailyPageRows(pageTitle);
+        if (rows.length === 0) {
+            return { ok: true, pageUid: null, roots: [], referenceStrings: {} };
+        }
+        if (rows.length > nodeLimit) {
+            throw boundedReadError(
+                `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
+            );
+        }
+
+        const pageUids = new Set(rows.map(row => row[0]));
+        if (pageUids.size !== 1) {
+            throw boundedReadError('Daily note returned blocks from more than one page.');
+        }
+        const pageUid = rows[0][0];
+        const referencedUids = new Set();
+        const nodes = new Map();
+        const parentByUid = new Map();
+        for (const [, uid, string, order, parentUid] of rows) {
+            if (nodes.has(uid)) {
+                throw boundedReadError('Daily note returned a duplicate block.');
+            }
+            nodes.set(uid, { uid, string, order, children: [] });
+            parentByUid.set(uid, parentUid);
+            const reference = referencedBlockUid(string);
+            if (reference) referencedUids.add(reference);
+        }
+
+        const rootNodes = [];
+        for (const node of nodes.values()) {
+            const parentUid = parentByUid.get(node.uid);
+            if (parentUid === pageUid) {
+                rootNodes.push(node);
+                continue;
+            }
+            const parent = nodes.get(parentUid);
+            if (!parent) {
+                throw boundedReadError('Daily note returned a block outside its page tree.');
+            }
+            parent.children.push(node);
+        }
+        for (const node of nodes.values()) {
+            node.children.sort((a, b) => a.order - b.order);
+        }
+        rootNodes.sort((a, b) => a.order - b.order);
+
+        const visiting = new Set();
+        const visited = new Set();
+        const validateTree = (node, depth) => {
+            if (depth > depthLimit) {
+                throw boundedReadError(
+                    `Today's Daily Note exceeds the safe ${depthLimit}-level read limit.`
+                );
+            }
+            if (visiting.has(node.uid)) {
+                throw boundedReadError('Daily note returned a cyclic block tree.');
+            }
+            if (visited.has(node.uid)) return;
+            visiting.add(node.uid);
+            node.children.forEach(child => validateTree(child, depth + 1));
+            visiting.delete(node.uid);
+            visited.add(node.uid);
+        };
+        rootNodes.forEach(root => validateTree(root, 0));
+        if (visited.size !== nodes.size) {
+            throw boundedReadError('Daily note returned an unreachable block tree.');
+        }
+
+        const roots = rootNodes;
+        let referenceStrings = {};
+        try {
+            referenceStrings = readReferencedBlockStrings([...referencedUids]);
+        } catch (error) {
+            throw withGraphReadIssue(error, {
+                source: 'daily-note-reference',
+                affectedUids: [...referencedUids],
+            });
+        }
+        return { ok: true, pageUid, roots, referenceStrings };
+    } catch (error) {
+        const wrapped =
+            error instanceof GraphReadError
+                ? error
+                : withGraphReadIssue(error, { source: 'daily-note' });
+        return { ok: false, roots: null, pageUid: null, error: wrapped };
+    }
+}
+
+/**
+ * Read today's Daily Notes page as a cacheable, explicitly tri-stated result.
+ * `empty` means the page was confirmed absent or contained no blocks; `error`
+ * means callers must retain any last successful snapshot instead of clearing it.
+ */
+export function readTodayTodoSnapshot(date = new Date(), limits = {}) {
+    const pageTitle = dateToPageTitle(date);
+    const result = readDailyNoteTree(pageTitle, limits);
+    if (!result.ok) {
+        return {
+            ok: false,
+            status: 'error',
+            pageTitle,
+            pageUid: result.pageUid || null,
+            roots: null,
+            referenceStrings: null,
+            error: result.error,
+        };
+    }
+    return {
+        ok: true,
+        status: result.pageUid && result.roots.length > 0 ? 'success' : 'empty',
+        pageTitle,
+        pageUid: result.pageUid,
+        roots: result.roots,
+        referenceStrings: result.referenceStrings || {},
+        error: null,
+    };
 }
 
 export async function createBlock({ parentUid, order, string, uid, open }) {

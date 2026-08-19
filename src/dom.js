@@ -10,11 +10,12 @@ export function el(tag, className, text) {
 export function button(className, text, onClick, { title, ariaLabel } = {}) {
     const node = el('button', className, text);
     node.type = 'button';
-    // Keep the visual tooltip: `title` also supplies the accessible name for an
-    // icon-only button, so adding an identical aria-label would only make
-    // assistive tech announce the same string twice.
+    // `title` alone already names an icon-only button, so it is no longer
+    // copied into aria-label — that copy made assistive tech announce the same
+    // string twice. An explicit ariaLabel is still honoured: a button with
+    // visible text needs it to say more than the text does.
     if (title) node.title = title;
-    if (ariaLabel && ariaLabel !== title) node.setAttribute('aria-label', ariaLabel);
+    if (ariaLabel) node.setAttribute('aria-label', ariaLabel);
     node.addEventListener('click', onClick);
     return node;
 }

@@ -228,7 +228,7 @@ test('Dashboard running actions use neutral stop semantics and confirm CLOCK dis
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.title, 'Check Out');
-    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
+    assert.equal(checkout.getAttribute('aria-label'), null);
     assert.equal(checkout.classList.contains('bp3-intent-success'), false);
 
     const discard = running.querySelector('[data-action="discard"]');
@@ -337,11 +337,15 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         assert.equal(play.type, 'button');
         assert.ok(play.classList.contains('bp3-icon-play'));
         assert.equal(play.title, 'Start timing: Idle TODO task');
-        assert.equal(play.getAttribute('aria-label'), play.title);
+        // An icon-only button takes its accessible name from title; a
+    // duplicate aria-label would only be announced twice.
+    assert.ok(play.title);
+    assert.equal(play.getAttribute('aria-label'), null);
 
         const timing = focusedRow.querySelector('.rlb-task-action--timing');
         assert.ok(timing);
         assert.equal(timing.tagName, 'SPAN');
+        // Non-interactive role="img" is named by aria-label, not by a tooltip.
         assert.equal(timing.getAttribute('role'), 'img');
         assert.equal(timing.title, 'Currently timing');
         assert.equal(timing.getAttribute('aria-label'), 'Currently timing');
@@ -399,8 +403,9 @@ test('Dashboard Running and By Task links preserve Roam page refs and tags witho
     const links = [...document.querySelectorAll('.rlb-task-link')];
     assert.ok(links.length >= 2, 'the running and By Task sections both expose the Task');
     for (const link of links) {
+        // The task link carries visible text, so its aria-label deliberately
+        // adds the "Open this block" affordance the text alone does not convey.
         assert.match(link.getAttribute('aria-label'), /^Open this block: .+/);
-        assert.equal(link.getAttribute('aria-label'), link.title);
         assert.notEqual(link.getAttribute('aria-label'), 'Open this block');
         assert.equal(link.classList.contains('bp3-icon-document-open'), false);
         assert.equal(link.classList.contains('rlb-task-link--icon'), false);
@@ -861,7 +866,11 @@ test('the Dashboard is list-first when idle and keeps rollup help accessible wit
     const byTask = document.querySelector('.rlb-by-task');
     const info = byTask.querySelector('.rlb-tree__info');
     assert.ok(info);
-    assert.equal(info.getAttribute('aria-label'), info.title);
+    // The rollup hint is a non-interactive role="img", which takes its name
+    // from aria-label rather than from a button tooltip.
+    assert.equal(info.getAttribute('role'), 'img');
+    assert.equal(info.tabIndex, -1);
+    assert.ok(info.getAttribute('aria-label'));
     assert.equal(info.getAttribute('aria-describedby'), 'roam-logbook-task-rollup-help');
     assert.ok(document.getElementById('roam-logbook-task-rollup-help'));
     assert.equal(document.querySelectorAll('[data-action="toggle-view"]').length, 0);

@@ -13,7 +13,7 @@ import * as pomodoro from './pomodoro.js';
 import { formatElapsed } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { staleHours } from './settings.js';
-import { openBlock, openBlockInRightSidebar } from './roam.js';
+import { openBlock, openBlockInRightSidebar, readTodayTodoSnapshot } from './roam.js';
 import { GRAPH_SYNC_RETRY_NOTICE, mutationResultNotice } from './action-result.js';
 import {
     buildSessionSurfaceModel,
@@ -26,6 +26,7 @@ import { createTopbarHost } from './topbar-host.js';
 import { afterNavigation, syncTopbarLayout } from './topbar-placement.js';
 import { createRefreshState, REFRESH_MESSAGES } from './refresh-state.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
+import { buildTodayTodoTree, currentTodayPath, flattenTodayRows } from './today-todos.js';
 
 const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
@@ -137,6 +138,12 @@ export function createTopbar({
     let refreshState = { state: 'idle', message: '' };
     let activeSignature = '';
     let themeRuntime = null;
+    let surfaceView = 'threads';
+    let todaySnapshot = null;
+    let todayStatus = 'idle';
+    let todayNotice = '';
+    let todayExpanded = new Set();
+    let todayRequestToken = 0;
     const layoutHosts = new Set();
     const searchHosts = new Set();
     const layoutHostDisplay = new Map();
@@ -152,6 +159,12 @@ export function createTopbar({
         cancelPendingOpenRefresh();
         confirmation?.reset();
         actionNotice = '';
+        surfaceView = 'threads';
+        todaySnapshot = null;
+        todayStatus = 'idle';
+        todayNotice = '';
+        todayExpanded = new Set();
+        todayRequestToken += 1;
     };
 
     const cancelPendingOpenRefresh = () => {
@@ -189,12 +202,31 @@ export function createTopbar({
         });
     };
 
+    const todayModel = () => {
+        if (!todaySnapshot) return { status: todayStatus, roots: [], nodes: [], count: 0 };
+        const tree = buildTodayTodoTree(todaySnapshot.roots, {
+            referenceStrings: todaySnapshot.referenceStrings,
+        });
+        return { ...tree, status: todayStatus, pageTitle: todaySnapshot.pageTitle };
+    };
+
+    const todayRows = model => {
+        if (!model?.nodes?.length) return [];
+        const currentUid = clock.getActiveWork(nowDate()).focused?.taskUid || null;
+        return flattenTodayRows(model, {
+            expanded: todayExpanded,
+            currentPath: currentTodayPath(model, currentUid),
+        });
+    };
+
     const surfaceNotices = () =>
-        actionNotice
-            ? [{ message: actionNotice, role: 'alert' }]
-            : [clock.getNotice()]
-                  .filter(Boolean)
-                  .map(message => ({ message, role: 'status' }));
+        [
+            ...(actionNotice ? [{ message: actionNotice, role: 'alert' }] : []),
+            ...(!actionNotice && clock.getNotice()
+                ? [{ message: clock.getNotice(), role: 'status' }]
+                : []),
+            ...(todayNotice ? [{ message: todayNotice, role: 'status' }] : []),
+        ];
 
     const renderSurfaces = () => {
         if (popover) renderPopover();
@@ -261,8 +293,39 @@ export function createTopbar({
         );
     };
 
-    const requestSessionRefresh = () =>
-        pendingOpenRefresh?.promise || refreshSessions();
+    const loadToday = async ({ force = false } = {}) => {
+        if (!popover) return { ok: false, cancelled: true };
+        if (!force && todaySnapshot) return { ok: true, cached: true, snapshot: todaySnapshot };
+        const token = ++todayRequestToken;
+        // Preserve a successful snapshot while it revalidates. The shared
+        // Refresh control already exposes loading state, so blanking Today here
+        // would create a needless flash and make the cache look unreliable.
+        if (!todaySnapshot) todayStatus = 'loading';
+        todayNotice = '';
+        renderSurfaces();
+        const result = await Promise.resolve().then(() => readTodayTodoSnapshot(nowDate()));
+        if (token !== todayRequestToken || !popover) return { ok: false, cancelled: true };
+        if (result.ok) {
+            todaySnapshot = result;
+            todayStatus = result.status;
+            todayNotice = '';
+        } else {
+            // A read failure must not turn the last known task pool into an
+            // empty state. Keep the snapshot and expose a quiet notice.
+            todayStatus = todaySnapshot?.status || 'error';
+            todayNotice = todaySnapshot
+                ? 'Today tasks could not be refreshed; showing the last saved view.'
+                : 'Today tasks could not be read. Refresh to try again.';
+        }
+        renderSurfaces();
+        return result;
+    };
+
+    const requestSessionRefresh = () => {
+        const current = pendingOpenRefresh?.promise || refreshSessions();
+        const today = loadToday({ force: true });
+        return Promise.all([current, today]).then(([result]) => result);
+    };
 
     const scheduleOpenRevalidation = () => {
         if (refreshRuntime.inFlight) return refreshRuntime.inFlight;
@@ -289,6 +352,7 @@ export function createTopbar({
                 });
                 return;
             }
+            void loadToday();
             void refreshSessions().then(pending.resolve);
         });
         return promise;
@@ -312,6 +376,7 @@ export function createTopbar({
 
     const surfaceOptions = model => {
         const scope = 'session-surface';
+        const today = todayModel();
         const discarding = model?.rows?.find(row =>
             confirmation?.isArmed(`discard:${row.entry.clockUid}`, scope)
         );
@@ -322,6 +387,23 @@ export function createTopbar({
             clockOutAllConfirm: confirmation?.isArmed('clock-out-all', scope),
             refreshState,
             onRefresh: requestSessionRefresh,
+            view: surfaceView,
+            todayModel: today,
+            todayRows: todayRows(today),
+            currentTaskUid: clock.getActiveWork(nowDate()).focused?.taskUid || null,
+            onSwitchView: view => {
+                surfaceView = view === 'today' ? 'today' : 'threads';
+                renderSurfaces();
+                if (surfaceView === 'today') void loadToday();
+            },
+            onToggleToday: uid => {
+                const next = new Set(todayExpanded);
+                if (next.has(uid)) next.delete(uid);
+                else next.add(uid);
+                todayExpanded = next;
+                renderSurfaces();
+            },
+            onStartToday: taskUid => void run(() => clock.clockIn(taskUid, { source: 'active-work-switch' })),
             onOpenTask: (taskUid, event) => {
                 if (event?.shiftKey) {
                     event.preventDefault();
@@ -381,6 +463,7 @@ export function createTopbar({
                 : refreshStatus.ok
                   ? 'No Timing Line is active. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
                   : 'Active Work state could not be confirmed. Retry after Roam finishes syncing.';
+        options.todayNotice = todayNotice;
         renderSessionSurface(popover, model, options);
         themeRuntime?.apply(popover);
     }

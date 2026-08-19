@@ -243,6 +243,129 @@ function taskTitle(string, { maxLength = Infinity } = {}) {
   return Number.isFinite(maxLength) && cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}\u2026` : cleaned;
 }
 
+// src/today-todos.js
+var ordinal = (day) => {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13)
+    return `${day}th`;
+  if (day % 10 === 1)
+    return `${day}st`;
+  if (day % 10 === 2)
+    return `${day}nd`;
+  if (day % 10 === 3)
+    return `${day}rd`;
+  return `${day}th`;
+};
+function dateToPageTitle(date = /* @__PURE__ */ new Date()) {
+  const value = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(value.getTime()))
+    return "";
+  return `${value.toLocaleString("en-US", { month: "long" })} ${ordinal(value.getDate())}, ${value.getFullYear()}`;
+}
+var isNode = (value) => value && typeof value === "object" && typeof value.uid === "string";
+var makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
+  uid,
+  string: typeof string === "string" ? string : "",
+  sourceUid,
+  status: "TODO",
+  orderPath: [...orderPath],
+  children: []
+});
+var countDescendants = (node) => node.children.reduce((total, child) => total + 1 + countDescendants(child), 0);
+var appendTo = (parent, node, roots) => {
+  if (parent)
+    parent.children.push(node);
+  else
+    roots.push(node);
+};
+function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
+  const outputRoots = [];
+  const visibleByUid = /* @__PURE__ */ new Map();
+  const parentByUid = /* @__PURE__ */ new Map();
+  const occurrences = /* @__PURE__ */ new Set();
+  const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent }) => {
+    let visible = visibleByUid.get(uid);
+    if (!visible) {
+      visible = makeVisibleNode({ uid, string, sourceUid, orderPath });
+      visibleByUid.set(uid, visible);
+      parentByUid.set(uid, parent?.uid || null);
+      appendTo(parent, visible, outputRoots);
+    }
+    return visible;
+  };
+  const walk = (node, nearestVisible, orderPath) => {
+    if (!isNode(node) || occurrences.has(node.uid))
+      return;
+    occurrences.add(node.uid);
+    const rawString = typeof node.string === "string" ? node.string : "";
+    const status = taskStatus(rawString);
+    const referenceUid = referencedBlockUid(rawString);
+    let nextParent = nearestVisible;
+    if (referenceUid) {
+      const referencedString = referenceStrings?.[referenceUid];
+      if (typeof referencedString === "string" && taskStatus(referencedString) === "TODO") {
+        nextParent = addVisible({
+          uid: referenceUid,
+          string: referencedString,
+          sourceUid: node.uid,
+          orderPath,
+          parent: nearestVisible
+        });
+      }
+    } else if (status === "TODO") {
+      nextParent = addVisible({
+        uid: node.uid,
+        string: rawString,
+        orderPath,
+        parent: nearestVisible
+      });
+    }
+    const children = Array.isArray(node.children) ? node.children : [];
+    children.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((child, index) => walk(child, nextParent, [...orderPath, index]));
+  };
+  roots.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((root, index) => walk(root, null, [index]));
+  const all = [...visibleByUid.values()];
+  for (const node of all) {
+    node.hiddenDescendantCount = countDescendants(node);
+    node.hasChildren = node.children.length > 0;
+  }
+  return {
+    roots: outputRoots,
+    nodes: all,
+    count: all.length,
+    parentByUid
+  };
+}
+function currentTodayPath(model, taskUid) {
+  if (!model || typeof taskUid !== "string" || !model.nodes?.some((node) => node.uid === taskUid)) {
+    return /* @__PURE__ */ new Set();
+  }
+  const path = /* @__PURE__ */ new Set();
+  const seen = /* @__PURE__ */ new Set();
+  let current = taskUid;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    path.add(current);
+    current = model.parentByUid?.get(current) || null;
+  }
+  return path;
+}
+var walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
+  for (const node of nodes || []) {
+    const forced = forcedPath?.has(node.uid);
+    const isExpanded = node.children.length > 0 && (forced || expanded?.has(node.uid));
+    rows.push({ node, depth, expanded: isExpanded, hiddenDescendantCount: node.hiddenDescendantCount });
+    if (isExpanded)
+      walkVisible(node.children, rows, expanded, forcedPath, depth + 1);
+  }
+  return rows;
+};
+function flattenTodayRows(model, { expanded = /* @__PURE__ */ new Set(), currentPath = /* @__PURE__ */ new Set() } = {}) {
+  if (!model)
+    return [];
+  return walkVisible(model.roots, [], expanded, currentPath);
+}
+
 // src/roam.js
 var GraphReadError = class extends Error {
   constructor(message, { cause, issue } = {}) {
@@ -575,6 +698,121 @@ function getChildren(uid) {
   } catch (error) {
     throw withGraphReadIssue(error, { source: "children", affectedUid: uid });
   }
+}
+var DAILY_PAGE_QUERY = `[:find ?page-uid
+  :in $ ?page-title
+  :where
+  [?page :node/title ?page-title]
+  [?page :block/uid ?page-uid]]`;
+var REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
+  :in $ [?uid ...]
+  :where
+  [?b :block/uid ?uid]
+  [?b :block/string ?string]]`;
+var DAILY_NOTE_READ_LIMITS = Object.freeze({
+  maxDepth: 24,
+  maxNodes: 500
+});
+var boundedReadError = (message) => new GraphReadError(message, {
+  issue: graphReadIssue({ source: "daily-note", message })
+});
+var normalizeBound = (value, fallback) => Number.isInteger(value) && value > 0 ? value : fallback;
+var readDailyPageUid = (pageTitle) => {
+  const result = queryResult(DAILY_PAGE_QUERY, pageTitle);
+  if (!result.ok)
+    throw result.error;
+  const rows = validateQueryRows(
+    result.rows,
+    "daily note page",
+    (row) => row.length >= 1 && typeof row[0] === "string" && row[0].length > 0
+  );
+  return rows[0]?.[0] || null;
+};
+var readReferencedBlockStrings = (uids) => {
+  if (uids.length === 0)
+    return {};
+  const rows = validateQueryRows(
+    queryOrThrow(REFERENCED_BLOCK_STRINGS_QUERY, uids),
+    "daily note reference",
+    (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
+  );
+  return Object.fromEntries(rows.map(([uid, string]) => [uid, string]));
+};
+function readDailyNoteTree(pageTitle, { maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth, maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes } = {}) {
+  if (typeof pageTitle !== "string" || pageTitle.trim() === "") {
+    return { ok: false, roots: null, pageUid: null, error: boundedReadError("Daily note title is required.") };
+  }
+  const depthLimit = normalizeBound(maxDepth, DAILY_NOTE_READ_LIMITS.maxDepth);
+  const nodeLimit = normalizeBound(maxNodes, DAILY_NOTE_READ_LIMITS.maxNodes);
+  try {
+    const pageUid = readDailyPageUid(pageTitle);
+    if (!pageUid)
+      return { ok: true, pageUid: null, roots: [], referenceStrings: {} };
+    let nodeCount = 0;
+    const referencedUids = /* @__PURE__ */ new Set();
+    const visit = (block, depth) => {
+      if (++nodeCount > nodeLimit) {
+        throw boundedReadError(
+          `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
+        );
+      }
+      const uid = block?.uid;
+      const string = block?.string;
+      if (typeof uid !== "string" || typeof string !== "string") {
+        throw boundedReadError("Daily note returned a malformed block.");
+      }
+      const node = { uid, string, order: block.order, children: [] };
+      const reference = referencedBlockUid(string);
+      if (reference)
+        referencedUids.add(reference);
+      const children = getChildren(uid);
+      if (depth >= depthLimit && children.length > 0) {
+        throw boundedReadError(
+          `Today's Daily Note exceeds the safe ${depthLimit}-level read limit.`
+        );
+      }
+      node.children = children.map((child) => visit(child, depth + 1));
+      return node;
+    };
+    const roots = getChildren(pageUid).map((child) => visit(child, 0));
+    let referenceStrings = {};
+    try {
+      referenceStrings = readReferencedBlockStrings([...referencedUids]);
+    } catch (error) {
+      throw withGraphReadIssue(error, {
+        source: "daily-note-reference",
+        affectedUids: [...referencedUids]
+      });
+    }
+    return { ok: true, pageUid, roots, referenceStrings };
+  } catch (error) {
+    const wrapped = error instanceof GraphReadError ? error : withGraphReadIssue(error, { source: "daily-note" });
+    return { ok: false, roots: null, pageUid: null, error: wrapped };
+  }
+}
+function readTodayTodoSnapshot(date = /* @__PURE__ */ new Date(), limits = {}) {
+  const pageTitle = dateToPageTitle(date);
+  const result = readDailyNoteTree(pageTitle, limits);
+  if (!result.ok) {
+    return {
+      ok: false,
+      status: "error",
+      pageTitle,
+      pageUid: result.pageUid || null,
+      roots: null,
+      referenceStrings: null,
+      error: result.error
+    };
+  }
+  return {
+    ok: true,
+    status: result.pageUid && result.roots.length > 0 ? "success" : "empty",
+    pageTitle,
+    pageUid: result.pageUid,
+    roots: result.roots,
+    referenceStrings: result.referenceStrings || {},
+    error: null
+  };
 }
 async function createBlock({ parentUid, order, string, uid, open }) {
   const create = resolve("block", "create", "createBlock");
@@ -2756,7 +2994,7 @@ function button(className, text, onClick, { title, ariaLabel } = {}) {
   node.type = "button";
   if (title)
     node.title = title;
-  if (ariaLabel && ariaLabel !== title)
+  if (ariaLabel)
     node.setAttribute("aria-label", ariaLabel);
   node.addEventListener("click", onClick);
   return node;
@@ -3105,14 +3343,16 @@ var taskLink = (row, { onClose = () => {
       onClose();
       void openBlock(row.taskUid);
     },
-    { title: accessibleName }
+    // The visible text is the task title alone, so the accessible name has
+    // to spell out the action; the tooltip repeats it for mouse users.
+    { title: accessibleName, ariaLabel: accessibleName }
   );
   link.appendChild(el("span", "rlb-task-link__text", title));
   return link;
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.44";
+var PLUGIN_VERSION = "0.9.0-beta.45";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -3344,7 +3584,7 @@ function runningSection({
 }
 
 // src/dashboard-task-tree.js
-var countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
+var countDescendants2 = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants2(child), 0);
 function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, statusMark: statusMark2, taskTimingAction }) {
   const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
   section.setAttribute("aria-labelledby", "roam-logbook-by-task-title");
@@ -3530,7 +3770,7 @@ function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, 
       }
       const actions = el("div", "rlb-muted rlb-tree__actions");
       if (node.collapsed) {
-        const hidden = countDescendants(node);
+        const hidden = countDescendants2(node);
         actions.appendChild(
           el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
         );
@@ -5330,6 +5570,38 @@ var SURFACE = String.raw`/* ---- popover ---- */
     margin-top: -2px;
 }
 
+.rlb-surface__view-switch {
+    display: flex;
+    gap: 2px;
+    margin: 0 2px 5px;
+    padding: 2px;
+    border-bottom: 1px solid var(--rlb-surface-border-light);
+}
+
+.rlb-surface__view-control {
+    min-width: 0;
+    flex: 1 1 0;
+    min-height: 26px;
+    padding: 2px 7px !important;
+    border-radius: 4px;
+    color: var(--rlb-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-surface__view-control.is-selected {
+    color: var(--rlb-surface-link);
+    background: var(--rlb-surface-focused);
+}
+
+.rlb-surface__view-control:hover,
+.rlb-surface__view-control:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: var(--rlb-surface-hover);
+}
+
 .rlb-surface__header .bp3-button {
     flex: 0 0 auto;
     color: #5c7080;
@@ -5836,6 +6108,133 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-run__actions .bp3-icon-trash:focus {
     color: #c23030;
     opacity: 1;
+}
+
+.rlb-today__tree {
+    display: grid;
+    min-width: 0;
+    padding: 0 2px 2px;
+}
+
+.rlb-today__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    min-width: 0;
+    min-height: 30px;
+    padding: 2px 4px 2px calc(4px + (var(--rlb-today-depth, 0) * 14px));
+    border-radius: 4px;
+}
+
+.rlb-today__row:hover,
+.rlb-today__row:focus-within {
+    background: var(--rlb-surface-hover);
+}
+
+.rlb-today__rail {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.rlb-today__toggle,
+.rlb-today__spacer {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px;
+    min-width: 24px !important;
+    height: 24px;
+    min-height: 24px !important;
+    padding: 0 !important;
+    color: var(--rlb-muted);
+}
+
+.rlb-today__toggle:hover,
+.rlb-today__toggle:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: var(--rlb-surface-hover);
+}
+
+.bp3-button.bp3-minimal.rlb-today__title {
+    min-width: 0;
+    overflow: hidden;
+    padding: 3px 4px !important;
+    color: var(--rlb-surface-link);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bp3-button.bp3-minimal.rlb-today__title:hover,
+.bp3-button.bp3-minimal.rlb-today__title:focus-visible {
+    color: var(--rlb-surface-link-hover);
+}
+
+.rlb-today__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 36px;
+    color: var(--rlb-muted);
+}
+
+.rlb-today__play {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-width: 28px !important;
+    height: 28px;
+    min-height: 28px !important;
+    padding: 0 !important;
+    color: var(--rlb-muted);
+}
+
+.rlb-today__play:hover,
+.rlb-today__play:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: var(--rlb-surface-hover);
+}
+
+.rlb-today__timing {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    color: var(--rlb-muted);
+}
+
+.rlb-today__timing::before {
+    margin: 0;
+}
+
+.rlb-today__hidden-count {
+    min-width: 20px;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+@media (max-width: 340px) {
+    .rlb-popover {
+        padding: 6px;
+    }
+
+    .rlb-today__row {
+        padding-right: 2px;
+    }
+
+    .bp3-button.bp3-minimal.rlb-today__title {
+        font-size: 12px;
+    }
 }
 
 .rlb-table .rlb-running__checkout {
@@ -6995,6 +7394,7 @@ var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
 var refreshLabel = "Refresh Active Work from graph";
 var dashboardLabel = "Open Roam Logbook Dashboard";
+var switchLabel = (view) => `Show ${view === "today" ? "Today tasks" : "Active Threads"}`;
 var appendMetaNodes = (meta, nodes) => {
   nodes.forEach((node, index) => {
     if (index > 0) {
@@ -7023,9 +7423,77 @@ var renderTitle = (row, onOpenTask) => {
     `bp3-button bp3-minimal rlb-run__title${recent ? " rlb-run__title--recent" : ""}`,
     title,
     (event) => onOpenTask?.(row.taskUid, event),
-    { title: fullTaskLabel(title) }
+    // The visible text is the task title alone; the accessible name has to
+    // add the action, so this is an override rather than a duplicate.
+    { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
   );
   return taskButton;
+};
+var renderTodayRow = (row, options) => {
+  const node = row.node;
+  const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
+  const rowNode = el("div", "rlb-today__row");
+  rowNode.dataset.taskUid = node.uid;
+  rowNode.style.setProperty("--rlb-today-depth", String(row.depth));
+  rowNode.setAttribute("role", "treeitem");
+  rowNode.setAttribute("aria-level", String(row.depth + 1));
+  if (node.children.length > 0) {
+    rowNode.setAttribute("aria-expanded", String(row.expanded));
+  }
+  const rail = el("div", "rlb-today__rail");
+  if (node.children.length > 0) {
+    const toggle = button(
+      `bp3-button bp3-minimal bp3-small bp3-icon-chevron-${row.expanded ? "down" : "right"} rlb-today__toggle`,
+      "",
+      (event) => {
+        event.stopPropagation();
+        options.onToggleToday?.(node.uid);
+      },
+      { title: row.expanded ? "Collapse sub-tasks" : `Expand ${node.hiddenDescendantCount} sub-tasks` }
+    );
+    toggle.setAttribute("aria-label", row.expanded ? `Collapse ${title}` : `Expand ${title}`);
+    toggle.dataset.action = "today-toggle";
+    rail.appendChild(toggle);
+  } else {
+    rail.appendChild(el("span", "rlb-today__spacer"));
+  }
+  const titleButton = button(
+    "bp3-button bp3-minimal rlb-today__title",
+    title,
+    (event) => options.onOpenTask?.(node.uid, event, { today: true }),
+    { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+  );
+  titleButton.dataset.action = "today-open";
+  rail.appendChild(titleButton);
+  rowNode.appendChild(rail);
+  const action = el("div", "rlb-today__action");
+  if (node.uid === options.currentTaskUid) {
+    const timing = el("span", "bp3-icon bp3-icon-time rlb-today__timing");
+    timing.setAttribute("role", "img");
+    timing.setAttribute("aria-label", "Currently timing");
+    timing.title = "Currently timing";
+    action.appendChild(timing);
+  } else {
+    const play = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play",
+      "",
+      (event) => {
+        event.stopPropagation();
+        options.onStartToday?.(node.uid, event);
+      },
+      { title: `Start timing ${title}` }
+    );
+    play.setAttribute("aria-label", `Start timing ${title}`);
+    play.dataset.action = "today-play";
+    action.appendChild(play);
+  }
+  if (!row.expanded && node.hiddenDescendantCount > 0) {
+    action.appendChild(
+      el("span", "rlb-today__hidden-count", `+${node.hiddenDescendantCount}`)
+    );
+  }
+  rowNode.appendChild(action);
+  return rowNode;
 };
 var renderRunningRow = (row, now, options) => {
   const entry = row.entry;
@@ -7249,11 +7717,53 @@ function renderSessionSurface(root, model, options = {}) {
   if (headerActions.childElementCount > 0)
     header.appendChild(headerActions);
   root.replaceChildren(header);
+  const activeView = options.view === "today" ? "today" : "threads";
+  if (options.onSwitchView) {
+    const switcher = el("nav", "rlb-surface__view-switch");
+    switcher.setAttribute("aria-label", "Logbook view");
+    const todayModel = options.todayModel || { count: 0 };
+    for (const [view, label, count] of [
+      ["threads", "Threads", model.activeCount ?? model.rows.length],
+      ["today", "Today", todayModel.count ?? 0]
+    ]) {
+      const selected = activeView === view;
+      const control = button(
+        `bp3-button bp3-minimal rlb-surface__view-control${selected ? " is-selected" : ""}`,
+        `${label} \xB7 ${count}`,
+        () => options.onSwitchView(view),
+        { title: switchLabel(view) }
+      );
+      control.dataset.action = "switch-view";
+      control.dataset.view = view;
+      control.setAttribute("aria-pressed", String(selected));
+      switcher.appendChild(control);
+    }
+    root.appendChild(switcher);
+  }
   const sessionList = el("div", "rlb-surface__list");
   sessionList.setAttribute("role", "group");
-  sessionList.setAttribute("aria-label", "Active Threads");
+  sessionList.setAttribute("aria-label", activeView === "today" ? "Today TODOs" : "Active Threads");
   root.appendChild(sessionList);
-  if (model.rows.length === 0) {
+  if (activeView === "today") {
+    const todayModel = options.todayModel;
+    const rows = options.todayRows || flattenTodayRows(todayModel);
+    if (!todayModel || todayModel.status === "loading") {
+      sessionList.appendChild(el("div", "rlb-popover__empty", "Loading today\u2026"));
+    } else if (todayModel.status === "error") {
+      sessionList.appendChild(
+        el("div", "rlb-popover__empty", "Today tasks could not be read.")
+      );
+    } else if (rows.length === 0) {
+      sessionList.appendChild(el("div", "rlb-popover__empty", "No unfinished TODOs today."));
+    } else {
+      const tree = el("div", "rlb-today__tree");
+      tree.setAttribute("role", "tree");
+      tree.setAttribute("aria-label", "Today unfinished TODOs");
+      for (const row of rows)
+        tree.appendChild(renderTodayRow(row, options));
+      sessionList.appendChild(tree);
+    }
+  } else if (model.rows.length === 0) {
     sessionList.appendChild(
       el("div", "rlb-popover__empty", options.emptyMessage || "No Timing Line is active.")
     );
@@ -7294,7 +7804,7 @@ function renderSessionSurface(root, model, options = {}) {
     node.setAttribute("aria-atomic", "true");
     root.appendChild(node);
   }
-  if (model.runningCount > 1 && options.onClockOutAll) {
+  if (activeView === "threads" && model.runningCount > 1 && options.onClockOutAll) {
     const footer = el("footer", "rlb-surface__footer");
     const confirming = Boolean(options.clockOutAllConfirm);
     footer.appendChild(
@@ -7972,6 +8482,12 @@ function createTopbar({
   let refreshState = { state: "idle", message: "" };
   let activeSignature = "";
   let themeRuntime = null;
+  let surfaceView = "threads";
+  let todaySnapshot = null;
+  let todayStatus = "idle";
+  let todayNotice = "";
+  let todayExpanded = /* @__PURE__ */ new Set();
+  let todayRequestToken = 0;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
   const layoutHostDisplay = /* @__PURE__ */ new Map();
@@ -7983,6 +8499,12 @@ function createTopbar({
     cancelPendingOpenRefresh();
     confirmation?.reset();
     actionNotice = "";
+    surfaceView = "threads";
+    todaySnapshot = null;
+    todayStatus = "idle";
+    todayNotice = "";
+    todayExpanded = /* @__PURE__ */ new Set();
+    todayRequestToken += 1;
   };
   const cancelPendingOpenRefresh = () => {
     const pending = pendingOpenRefresh;
@@ -8018,7 +8540,28 @@ function createTopbar({
       staleHours: staleHours()
     });
   };
-  const surfaceNotices = () => actionNotice ? [{ message: actionNotice, role: "alert" }] : [getNotice()].filter(Boolean).map((message) => ({ message, role: "status" }));
+  const todayModel = () => {
+    if (!todaySnapshot)
+      return { status: todayStatus, roots: [], nodes: [], count: 0 };
+    const tree = buildTodayTodoTree(todaySnapshot.roots, {
+      referenceStrings: todaySnapshot.referenceStrings
+    });
+    return { ...tree, status: todayStatus, pageTitle: todaySnapshot.pageTitle };
+  };
+  const todayRows = (model) => {
+    if (!model?.nodes?.length)
+      return [];
+    const currentUid = getActiveWork(nowDate()).focused?.taskUid || null;
+    return flattenTodayRows(model, {
+      expanded: todayExpanded,
+      currentPath: currentTodayPath(model, currentUid)
+    });
+  };
+  const surfaceNotices = () => [
+    ...actionNotice ? [{ message: actionNotice, role: "alert" }] : [],
+    ...!actionNotice && getNotice() ? [{ message: getNotice(), role: "status" }] : [],
+    ...todayNotice ? [{ message: todayNotice, role: "status" }] : []
+  ];
   const renderSurfaces = () => {
     if (popover)
       renderPopover();
@@ -8080,7 +8623,34 @@ function createTopbar({
       }
     );
   };
-  const requestSessionRefresh = () => pendingOpenRefresh?.promise || refreshSessions();
+  const loadToday = async ({ force = false } = {}) => {
+    if (!popover)
+      return { ok: false, cancelled: true };
+    if (!force && todaySnapshot)
+      return { ok: true, cached: true, snapshot: todaySnapshot };
+    const token = ++todayRequestToken;
+    todayStatus = "loading";
+    todayNotice = "";
+    renderSurfaces();
+    const result = await Promise.resolve().then(() => readTodayTodoSnapshot(nowDate()));
+    if (token !== todayRequestToken || !popover)
+      return { ok: false, cancelled: true };
+    if (result.ok) {
+      todaySnapshot = result;
+      todayStatus = result.status;
+      todayNotice = "";
+    } else {
+      todayStatus = todaySnapshot?.status || "error";
+      todayNotice = "Today tasks could not be refreshed; showing the last saved view.";
+    }
+    renderSurfaces();
+    return result;
+  };
+  const requestSessionRefresh = () => {
+    const current = pendingOpenRefresh?.promise || refreshSessions();
+    void loadToday({ force: true });
+    return current;
+  };
   const scheduleOpenRevalidation = () => {
     if (refreshRuntime.inFlight)
       return refreshRuntime.inFlight;
@@ -8108,6 +8678,7 @@ function createTopbar({
         });
         return;
       }
+      void loadToday();
       void refreshSessions().then(pending.resolve);
     });
     return promise;
@@ -8129,6 +8700,7 @@ function createTopbar({
   };
   const surfaceOptions = (model) => {
     const scope = "session-surface";
+    const today = todayModel();
     const discarding = model?.rows?.find(
       (row) => confirmation?.isArmed(`discard:${row.entry.clockUid}`, scope)
     );
@@ -8139,6 +8711,26 @@ function createTopbar({
       clockOutAllConfirm: confirmation?.isArmed("clock-out-all", scope),
       refreshState,
       onRefresh: requestSessionRefresh,
+      view: surfaceView,
+      todayModel: today,
+      todayRows: todayRows(today),
+      currentTaskUid: getActiveWork(nowDate()).focused?.taskUid || null,
+      onSwitchView: (view) => {
+        surfaceView = view === "today" ? "today" : "threads";
+        renderSurfaces();
+        if (surfaceView === "today")
+          void loadToday();
+      },
+      onToggleToday: (uid) => {
+        const next = new Set(todayExpanded);
+        if (next.has(uid))
+          next.delete(uid);
+        else
+          next.add(uid);
+        todayExpanded = next;
+        renderSurfaces();
+      },
+      onStartToday: (taskUid) => void run(() => clockIn(taskUid, { source: "active-work-switch" })),
       onOpenTask: (taskUid, event) => {
         if (event?.shiftKey) {
           event.preventDefault();
@@ -8193,6 +8785,7 @@ function createTopbar({
     const options = surfaceOptions(model);
     options.openLineWindowMinutes = model.openLineWindowMinutes;
     options.emptyMessage = refreshState.state === "loading" ? TOPBAR_REFRESH_MESSAGES.loading : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
+    options.todayNotice = todayNotice;
     renderSessionSurface(popover, model, options);
     themeRuntime?.apply(popover);
   }

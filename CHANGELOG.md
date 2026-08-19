@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.45 — 2026-08-19
+
+- Added a compact `Threads · N` / `Today · N` switch to the existing Active
+  Threads popover without changing the single Timing Line or its counts.
+- Added a bounded Today Daily Notes task pool for unfinished TODOs, preserving
+  Roam order and hierarchy through plain blocks, DONE-parent promotion, and
+  bare-reference task context. Parent rows collapse by default and the current
+  Timing Line branch expands automatically.
+- Today task titles support ordinary navigation and Shift+Click sidebar
+  navigation; idle rows expose icon-only Play through the existing clock-switch
+  path, while the current task has a non-interactive timing indicator.
+- Today data is loaded after the first Active Threads paint, cached for the open
+  popover, refreshed with the existing Refresh action, and never read by the
+  one-second ticker. Failed reads retain the last successful snapshot.
+
 ## 0.9.0-beta.44 — 2026-08-18
 
 - Fixed task-title Shift+Click after a Timing Line switch: an existing block

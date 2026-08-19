@@ -74,7 +74,9 @@ export const taskLink = (row, { onClose = () => {} } = {}) => {
             onClose();
             void openBlock(row.taskUid);
         },
-        { title: accessibleName }
+        // The visible text is the task title alone, so the accessible name has
+        // to spell out the action; the tooltip repeats it for mouse users.
+        { title: accessibleName, ariaLabel: accessibleName }
     );
     link.appendChild(el('span', 'rlb-task-link__text', title));
     return link;
