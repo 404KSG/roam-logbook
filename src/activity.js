@@ -108,8 +108,18 @@ export function getActivityDensity(rangeId, unit, bucketCount) {
 
 const sessionLabel = count => `${count} Session${count === 1 ? '' : 's'}`;
 
+/*
+ * A Session is counted once, in the bucket it starts in, so a long Session
+ * leaves later buckets holding minutes but no start. "0 Sessions" next to a
+ * real duration reads as a contradiction, so name the continuation instead.
+ */
+const bucketSessionLabel = bucket =>
+    bucket.sessionCount === 0 && bucket.minutes > 0
+        ? 'continued from an earlier Session'
+        : sessionLabel(bucket.sessionCount);
+
 const bucketAriaLabel = (bucket, dateText) =>
-    `${dateText} · ${bucket.fullDurationLabel || formatMinutesHuman(bucket.minutes)} · ${sessionLabel(bucket.sessionCount)}`;
+    `${dateText} · ${bucket.fullDurationLabel || formatMinutesHuman(bucket.minutes)} · ${bucketSessionLabel(bucket)}`;
 
 const createBucket = ({
     id,
@@ -254,13 +264,15 @@ const addTodayEntry = (buckets, entry, now) => {
     for (const [index, segment] of segments.entries()) {
         const bucket = segment.bucket;
         bucket.minutes += allocations[index];
-        bucket.sessionCount += 1;
+        const startsInBucket =
+            entry.start.getTime() >= bucket.start.getTime() && entry.start.getTime() < bucket.end.getTime();
+        if (startsInBucket) bucket.sessionCount += 1;
         if (entry.running) {
             bucket.runningClockUids.push(entry.clockUid);
             bucket.runningEntries.push(entry);
         } else {
             bucket.fixedMinutes += allocations[index];
-            bucket.fixedSessionCount += 1;
+            if (startsInBucket) bucket.fixedSessionCount += 1;
         }
         refreshBucketLabels(bucket);
     }
@@ -415,9 +427,7 @@ export function refreshActivityBucket(bucket, now) {
     );
     refreshBucketLabels(
         bucket,
-        bucket.unit === 'session'
-            ? `${bucket.fullDateLabel} at ${formatTime(bucket.start)}`
-            : bucket.fullDateLabel
+        bucket.fullDateLabel
     );
     return bucket;
 }

@@ -9,6 +9,9 @@ import globals from 'globals';
  */
 export default [
     {
+        ignores: ['extension.js'],
+    },
+    {
         files: ['src/**/*.js'],
         languageOptions: {
             ecmaVersion: 2022,
@@ -25,7 +28,7 @@ export default [
         },
     },
     {
-        files: ['test/**/*.js', 'build.js', 'eslint.config.js'],
+        files: ['test/**/*.js', 'build.js', 'eslint.config.js', 'scripts/**/*.mjs'],
         languageOptions: {
             ecmaVersion: 2022,
             sourceType: 'module',

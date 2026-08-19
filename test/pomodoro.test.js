@@ -7,7 +7,12 @@ installGraph();
 
 const pomodoro = await import('../src/pomodoro.js');
 const clock = await import('../src/clock.js');
-const { setExtensionAPI, SETTING_POMODORO_STATE } = await import('../src/settings.js');
+const {
+    setExtensionAPI,
+    SETTING_POMODORO_CYCLE,
+    SETTING_POMODORO_STATE,
+    SETTING_STATE_BACKUPS,
+} = await import('../src/settings.js');
 
 /** A settings double that round-trips values the way Roam's does. */
 function useSettings(seed = {}) {
@@ -192,11 +197,45 @@ test('corrupt stored state is retained rather than silently discarded', () => {
     assert.equal(corruptStore.get(SETTING_POMODORO_STATE), '{not json');
     assert.match(pomodoro.getNotice(), /unsupported or invalid version and was kept/);
 
-    useSettings({ [SETTING_POMODORO_STATE]: JSON.stringify({ c1: -5, c2: 'x', c3: 30 }) });
+    const mixed = JSON.stringify({ c1: -5, c2: 'x', c3: 30, c4: '30' });
+    const mixedStore = useSettings({ [SETTING_POMODORO_STATE]: mixed });
     pomodoro.load();
     assert.equal(pomodoro.targetMinutes('c1'), null, 'a negative length is not a target');
     assert.equal(pomodoro.targetMinutes('c2'), null);
     assert.equal(pomodoro.targetMinutes('c3'), 30);
+    assert.equal(pomodoro.targetMinutes('c4'), null, 'numeric strings are invalid persisted targets');
+    assert.equal(mixedStore.get(SETTING_POMODORO_STATE), mixed, 'invalid legacy data is not rewritten');
+});
+
+test('a backed-up unsupported cycle can be replaced by a valid envelope', () => {
+    const raw = JSON.stringify({ version: 99, data: { startedAt: 1, thresholdMinutes: 45 } });
+    const store = useSettings({ [SETTING_POMODORO_CYCLE]: raw });
+    pomodoro.load();
+
+    const backup = JSON.parse(store.get(SETTING_STATE_BACKUPS));
+    assert.equal(backup.data[SETTING_POMODORO_CYCLE].raw, raw);
+
+    const startedAt = Date.parse('2026-08-15T09:00:00Z');
+    const cycle = pomodoro.reconcileCycle([cycleEntry('recover-cycle', startedAt)], { now: startedAt });
+    assert.equal(cycle.startedAt, startedAt);
+    assert.equal(JSON.parse(store.get(SETTING_POMODORO_CYCLE)).version, 1);
+    assert.equal(JSON.parse(store.get(SETTING_POMODORO_CYCLE)).data.startedAt, startedAt);
+});
+
+test('persistence failures keep Pomodoro state in memory without escaping callbacks', () => {
+    setExtensionAPI({
+        settings: {
+            get: () => undefined,
+            set: () => { throw new Error('settings unavailable'); },
+        },
+    });
+
+    assert.doesNotThrow(() => pomodoro.start('memory-only', 30));
+    assert.equal(pomodoro.targetMinutes('memory-only'), 30);
+    assert.match(pomodoro.getNotice(), /could not be saved/i);
+
+    assert.doesNotThrow(() => pomodoro.reconcileCycle([cycleEntry('memory-cycle', Date.now())]));
+    assert.ok(pomodoro.getCycle());
 });
 
 test('targets are dropped once their clock stops running', () => {

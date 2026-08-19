@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 
 import {
     dateKey,
@@ -15,6 +16,17 @@ import {
     parseTimestamp,
     startOfDaysAgo,
 } from '../src/time.js';
+
+const runInTimezone = (timezone, source) => {
+    const moduleUrl = new URL('../src/time.js', import.meta.url).href;
+    const script = `import * as time from ${JSON.stringify(moduleUrl)};\n${source}`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+        env: { ...process.env, TZ: timezone },
+        encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+};
 
 test('formats an org timestamp with its day name', () => {
     assert.equal(formatTimestamp(new Date(2026, 7, 5, 15, 58)), '2026-08-05 Wed 15:58');
@@ -80,6 +92,34 @@ test('rejects junk and dates that do not exist', () => {
     assert.equal(parseTimestamp('2026-08-05 Wed 25:00'), null);
 });
 
+test('accepts a nonexistent spring-forward local time as the shifted instant', () => {
+    const result = runInTimezone(
+        'America/New_York',
+        `
+const shifted = time.parseTimestamp('2026-03-08 Sun 02:30');
+const invalidDay = time.parseTimestamp('2026-02-31 Tue 02:30');
+const springDay = time.startOfDaysAgo(new Date(2026, 2, 9, 12), 1);
+const fallDay = time.startOfDaysAgo(new Date(2026, 10, 2, 12), 1);
+console.log(JSON.stringify({
+    shifted: shifted && {
+        year: shifted.getFullYear(),
+        month: shifted.getMonth(),
+        day: shifted.getDate(),
+        hour: shifted.getHours(),
+        minute: shifted.getMinutes(),
+    },
+    invalidDay,
+    springDay: { key: time.dateKey(springDay), hour: springDay.getHours() },
+    fallDay: { key: time.dateKey(fallDay), hour: fallDay.getHours() },
+}));`
+    );
+
+    assert.deepEqual(result.shifted, { year: 2026, month: 2, day: 8, hour: 3, minute: 30 });
+    assert.equal(result.invalidDay, null);
+    assert.deepEqual(result.springDay, { key: '2026-03-08', hour: 0 });
+    assert.deepEqual(result.fallDay, { key: '2026-11-01', hour: 0 });
+});
+
 test('truncates durations to whole minutes', () => {
     const start = new Date(2026, 7, 5, 15, 58).getTime();
     assert.equal(durationMinutes(start, start + 60 * 60_000), 60);
@@ -120,6 +160,18 @@ test('formats robust compact relative times for Recent Active Work', () => {
     assert.equal(formatRelativeTime(new Date(2026, 7, 13, 9, 30), now), '2d ago');
     assert.equal(formatRelativeTime(new Date(2026, 7, 15, 9, 31), now), 'just now');
     assert.equal(formatRelativeTime('not a date', now), 'time unavailable');
+});
+
+test('keeps week/month and month/year boundaries from rounding early', () => {
+    const now = new Date(2026, 7, 15, 9, 30);
+    const ago = days => new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+    assert.equal(formatRelativeTime(ago(28), now), '4w ago');
+    assert.equal(formatRelativeTime(ago(29), now), '4w ago');
+    assert.equal(formatRelativeTime(ago(30), now), '1mo ago');
+    assert.equal(formatRelativeTime(ago(34), now), '1mo ago');
+    assert.equal(formatRelativeTime(ago(360), now), '11mo ago');
+    assert.equal(formatRelativeTime(ago(365), now), '1y ago');
 });
 
 test('date keys and day offsets use local midnight', () => {

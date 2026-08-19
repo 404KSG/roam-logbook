@@ -117,6 +117,7 @@ export function summariseSessionMetrics(entries, now) {
 
 /** Guard for a graph where references have been chained into a loop. */
 const MAX_WALK = 50;
+export const MAX_TASK_FOREST_NODES = 5000;
 
 /**
  * The closest ancestor that is itself a task.
@@ -155,8 +156,8 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     // Ancestors join the tree even with no time of their own — a project whose
     // work all happened in its sub-tasks still has to show up as the parent.
     const pending = [...nodes.keys()];
-    while (pending.length > 0) {
-        const uid = pending.shift();
+    for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
+        const uid = pending[pendingIndex];
         const parents = new Set();
 
         const structural = nearestTaskAncestor(uid, hierarchy);
@@ -192,6 +193,7 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
 
     // `path` rather than a global seen-set: a task reached down two branches is
     // counted in both (intended overlap), while a true cycle is cut off.
+    let expandedNodes = 0;
     const expand = (uid, path) => {
         const node = nodes.get(uid);
         const base = {
@@ -206,6 +208,10 @@ export function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
             occurrences: node.parents.size,
         };
         if (path.has(uid)) return { ...base, total: node.own, children: [], truncated: true };
+        if (expandedNodes >= MAX_TASK_FOREST_NODES) {
+            return { ...base, total: node.own, children: [], truncated: true };
+        }
+        expandedNodes += 1;
 
         const nextPath = new Set(path).add(uid);
         const children = node.children

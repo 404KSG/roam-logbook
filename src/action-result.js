@@ -31,6 +31,7 @@ export function mutationResultNotice(result) {
         const noun = result?.item || 'Session';
         const completedVerb = result?.completedVerb || 'updated';
         const failedCount = failed || pending;
+        if (failedCount <= 0) return result.notice || GRAPH_SYNC_RETRY_NOTICE;
         const completedText = `${completed} ${noun}${completed === 1 ? '' : 's'} ${completedVerb}`;
         const failedText = `${failedCount} could not be updated`;
         return completed > 0

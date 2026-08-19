@@ -3,9 +3,16 @@ import * as esbuild from 'esbuild';
 const isWatch = process.argv.includes('--watch');
 const argumentValue = name => {
     const inline = process.argv.find(argument => argument.startsWith(`${name}=`));
-    if (inline) return inline.slice(name.length + 1);
+    if (inline) {
+        const value = inline.slice(name.length + 1);
+        if (!value) throw new Error(`${name} requires a value`);
+        return value;
+    }
     const index = process.argv.indexOf(name);
-    return index >= 0 ? process.argv[index + 1] : null;
+    if (index < 0) return null;
+    const value = process.argv[index + 1];
+    if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+    return value;
 };
 
 const outfile = argumentValue('--outfile') || process.env.RLB_BUILD_OUTFILE || 'extension.js';

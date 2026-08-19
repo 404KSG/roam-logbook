@@ -15,6 +15,7 @@ import {
     readSetting,
     SETTING_POMODORO_CYCLE,
     SETTING_POMODORO_STATE,
+    hasStateBackup,
     preserveStateBackup,
     writeSetting,
 } from './settings.js';
@@ -31,13 +32,20 @@ let unsupportedCycleRaw = null;
 
 const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
 
+const persist = (key, value) => {
+    try {
+        return Boolean(writeSetting(key, value));
+    } catch {
+        return false;
+    }
+};
+
 const mapFromData = (data, { strict = false } = {}) => {
     if (!isRecord(data)) throw new Error('pomodoro data must be an object');
     const next = new Map();
     const invalid = [];
     for (const [clockUid, minutes] of Object.entries(data)) {
-        const value = Number(minutes);
-        if (Number.isFinite(value) && value >= 0) next.set(clockUid, value);
+        if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0) next.set(clockUid, minutes);
         else invalid.push(clockUid);
     }
     if (strict && invalid.length > 0) {
@@ -82,16 +90,12 @@ function writeCycle(next) {
         notice ||= 'Saved Pomodoro cycle uses an unsupported version and was kept.';
         return false;
     }
-    try {
-        writeSetting(SETTING_POMODORO_CYCLE, serializedCycle(next));
-        cycle = next ? { ...next } : null;
-        return true;
-    } catch (error) {
+    const saved = persist(SETTING_POMODORO_CYCLE, serializedCycle(next));
+    cycle = next ? { ...next } : null;
+    if (!saved) {
         notice ||= 'Pomodoro cycle could not be saved yet; the current cycle remains in memory.';
-        console.warn('[roam-logbook] could not persist Pomodoro cycle', error);
-        cycle = next ? { ...next } : null;
-        return false;
     }
+    return saved;
 }
 
 function loadCycle() {
@@ -106,6 +110,7 @@ function loadCycle() {
     } catch (error) {
         unsupportedCycleRaw = raw;
         const firstWarning = preserveStateBackup(SETTING_POMODORO_CYCLE, raw);
+        if (firstWarning || hasStateBackup(SETTING_POMODORO_CYCLE, raw)) unsupportedCycleRaw = null;
         if (!notice && firstWarning) {
             notice = 'Saved Pomodoro cycle uses an unsupported or invalid version and was kept.';
         }
@@ -118,9 +123,10 @@ function writeTargets(next) {
         notice = 'Saved Pomodoro state uses an unsupported version and was kept.';
         return false;
     }
-    writeSetting(SETTING_POMODORO_STATE, serialized(next));
     targets = next;
-    return true;
+    const saved = persist(SETTING_POMODORO_STATE, serialized(next));
+    if (!saved) notice ||= 'Pomodoro state could not be saved yet; the current state remains in memory.';
+    return saved;
 }
 
 /** Read persisted targets, accepting the original flat map as a legacy format. */

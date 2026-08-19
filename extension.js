@@ -38,6 +38,22 @@ function formatStarted(start, now = /* @__PURE__ */ new Date()) {
   };
 }
 var STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+var DST_PROBE_MONTHS = [0, 3, 6, 9];
+var localOffsetAt = (year, month) => {
+  const probe = /* @__PURE__ */ new Date(0);
+  probe.setFullYear(year, month, 1);
+  probe.setHours(12, 0, 0, 0);
+  return probe.getTimezoneOffset();
+};
+var localDaylightShiftSeconds = (year) => {
+  const offsets = DST_PROBE_MONTHS.map((month) => localOffsetAt(year, month));
+  const standardOffset = Math.max(...offsets);
+  const daylightOffset = Math.min(...offsets);
+  return {
+    daylightOffset,
+    seconds: Math.max(0, standardOffset - daylightOffset) * 60
+  };
+};
 function parseTimestamp(text) {
   if (typeof text !== "string")
     return null;
@@ -57,9 +73,17 @@ function parseTimestamp(text) {
   const date = /* @__PURE__ */ new Date(0);
   date.setFullYear(year, month - 1, day);
   date.setHours(hour, minute, second, 0);
-  const rolledOver = date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day || date.getHours() !== hour || date.getMinutes() !== minute || date.getSeconds() !== second;
+  const rolledOver = date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day;
   if (rolledOver)
     return null;
+  const requestedTime = hour * 3600 + minute * 60 + second;
+  const actualTime = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  if (actualTime !== requestedTime) {
+    const { daylightOffset, seconds: daylightShiftSeconds } = localDaylightShiftSeconds(year);
+    const shiftedByDaylightSaving = daylightShiftSeconds > 0 && date.getTimezoneOffset() === daylightOffset && actualTime - requestedTime === daylightShiftSeconds;
+    if (!shiftedByDaylightSaving)
+      return null;
+  }
   return date;
 }
 function durationMinutes(startMs, endMs) {
@@ -2098,6 +2122,7 @@ function summariseSessionMetrics(entries, now) {
   };
 }
 var MAX_WALK = 50;
+var MAX_TASK_FOREST_NODES = 5e3;
 function nearestTaskAncestor(uid, { parentOf, stringOf }) {
   let current = parentOf[uid];
   for (let steps = 0; current && steps < MAX_WALK; steps += 1) {
@@ -2113,8 +2138,8 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     nodes.set(row.taskUid, { ...row, own: row.minutes, children: [], parents: /* @__PURE__ */ new Set() });
   }
   const pending = [...nodes.keys()];
-  while (pending.length > 0) {
-    const uid = pending.shift();
+  for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
+    const uid = pending[pendingIndex];
     const parents = /* @__PURE__ */ new Set();
     const structural = nearestTaskAncestor(uid, hierarchy);
     if (structural)
@@ -2149,6 +2174,7 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
         siblings.push(uid);
     }
   }
+  let expandedNodes = 0;
   const expand = (uid, path) => {
     const node = nodes.get(uid);
     const base = {
@@ -2164,6 +2190,10 @@ function buildTaskForest(taskRows, hierarchy = EMPTY_HIERARCHY) {
     };
     if (path.has(uid))
       return { ...base, total: node.own, children: [], truncated: true };
+    if (expandedNodes >= MAX_TASK_FOREST_NODES) {
+      return { ...base, total: node.own, children: [], truncated: true };
+    }
+    expandedNodes += 1;
     const nextPath = new Set(path).add(uid);
     const children = node.children.map((childUid) => expand(childUid, nextPath)).sort((a, b) => b.total - a.total);
     return {
@@ -2412,7 +2442,8 @@ function getActivityDensity(rangeId, unit, bucketCount) {
   };
 }
 var sessionLabel = (count) => `${count} Session${count === 1 ? "" : "s"}`;
-var bucketAriaLabel = (bucket, dateText) => `${dateText} \xB7 ${bucket.fullDurationLabel || formatMinutesHuman(bucket.minutes)} \xB7 ${sessionLabel(bucket.sessionCount)}`;
+var bucketSessionLabel = (bucket) => bucket.sessionCount === 0 && bucket.minutes > 0 ? "continued from an earlier Session" : sessionLabel(bucket.sessionCount);
+var bucketAriaLabel = (bucket, dateText) => `${dateText} \xB7 ${bucket.fullDurationLabel || formatMinutesHuman(bucket.minutes)} \xB7 ${bucketSessionLabel(bucket)}`;
 var createBucket = ({
   id,
   start,
@@ -2544,13 +2575,16 @@ var addTodayEntry = (buckets, entry, now) => {
   for (const [index, segment] of segments.entries()) {
     const bucket = segment.bucket;
     bucket.minutes += allocations[index];
-    bucket.sessionCount += 1;
+    const startsInBucket = entry.start.getTime() >= bucket.start.getTime() && entry.start.getTime() < bucket.end.getTime();
+    if (startsInBucket)
+      bucket.sessionCount += 1;
     if (entry.running) {
       bucket.runningClockUids.push(entry.clockUid);
       bucket.runningEntries.push(entry);
     } else {
       bucket.fixedMinutes += allocations[index];
-      bucket.fixedSessionCount += 1;
+      if (startsInBucket)
+        bucket.fixedSessionCount += 1;
     }
     refreshBucketLabels(bucket);
   }
@@ -2681,7 +2715,7 @@ function refreshActivityBucket(bucket, now) {
   );
   refreshBucketLabels(
     bucket,
-    bucket.unit === "session" ? `${bucket.fullDateLabel} at ${formatTime(bucket.start)}` : bucket.fullDateLabel
+    bucket.fullDateLabel
   );
   return bucket;
 }
@@ -2924,7 +2958,25 @@ function readSetting(key) {
   return extensionAPI?.settings?.get(key) ?? null;
 }
 function writeSetting(key, value) {
-  extensionAPI?.settings?.set(key, value);
+  const setter = extensionAPI?.settings?.set;
+  if (typeof setter !== "function")
+    return false;
+  try {
+    setter.call(extensionAPI.settings, key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasStateBackup(key, raw) {
+  try {
+    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const stored = readSetting(SETTING_STATE_BACKUPS);
+    const parsed = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
+    return parsed?.version === STATE_FORMATS.stateBackups && parsed.data?.[key]?.rawSignature === rawSignature;
+  } catch {
+    return false;
+  }
 }
 function preserveStateBackup(key, raw) {
   try {
@@ -2939,14 +2991,14 @@ function preserveStateBackup(key, raw) {
     if (data[key]?.rawSignature === rawSignature)
       return false;
     data[key] = { rawSignature, raw };
-    writeSetting(
+    const saved = writeSetting(
       SETTING_STATE_BACKUPS,
       JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
     );
-    return true;
+    return saved;
   } catch (error) {
     console.warn("[roam-logbook] could not preserve invalid state backup", error);
-    return true;
+    return false;
   }
 }
 function normalizeChecked(event) {
@@ -4492,15 +4544,21 @@ var notice2 = "";
 var unsupportedRaw = null;
 var unsupportedCycleRaw = null;
 var isRecord = (value) => value && typeof value === "object" && !Array.isArray(value);
+var persist = (key, value) => {
+  try {
+    return Boolean(writeSetting(key, value));
+  } catch {
+    return false;
+  }
+};
 var mapFromData = (data, { strict = false } = {}) => {
   if (!isRecord(data))
     throw new Error("pomodoro data must be an object");
   const next = /* @__PURE__ */ new Map();
   const invalid = [];
   for (const [clockUid, minutes] of Object.entries(data)) {
-    const value = Number(minutes);
-    if (Number.isFinite(value) && value >= 0)
-      next.set(clockUid, value);
+    if (typeof minutes === "number" && Number.isFinite(minutes) && minutes >= 0)
+      next.set(clockUid, minutes);
     else
       invalid.push(clockUid);
   }
@@ -4540,16 +4598,12 @@ function writeCycle(next) {
     notice2 || (notice2 = "Saved Pomodoro cycle uses an unsupported version and was kept.");
     return false;
   }
-  try {
-    writeSetting(SETTING_POMODORO_CYCLE, serializedCycle(next));
-    cycle = next ? { ...next } : null;
-    return true;
-  } catch (error) {
+  const saved = persist(SETTING_POMODORO_CYCLE, serializedCycle(next));
+  cycle = next ? { ...next } : null;
+  if (!saved) {
     notice2 || (notice2 = "Pomodoro cycle could not be saved yet; the current cycle remains in memory.");
-    console.warn("[roam-logbook] could not persist Pomodoro cycle", error);
-    cycle = next ? { ...next } : null;
-    return false;
   }
+  return saved;
 }
 function loadCycle() {
   const raw = readSetting(SETTING_POMODORO_CYCLE);
@@ -4564,6 +4618,8 @@ function loadCycle() {
   } catch (error) {
     unsupportedCycleRaw = raw;
     const firstWarning = preserveStateBackup(SETTING_POMODORO_CYCLE, raw);
+    if (firstWarning || hasStateBackup(SETTING_POMODORO_CYCLE, raw))
+      unsupportedCycleRaw = null;
     if (!notice2 && firstWarning) {
       notice2 = "Saved Pomodoro cycle uses an unsupported or invalid version and was kept.";
     }
@@ -4576,9 +4632,11 @@ function writeTargets(next) {
     notice2 = "Saved Pomodoro state uses an unsupported version and was kept.";
     return false;
   }
-  writeSetting(SETTING_POMODORO_STATE, serialized(next));
   targets = next;
-  return true;
+  const saved = persist(SETTING_POMODORO_STATE, serialized(next));
+  if (!saved)
+    notice2 || (notice2 = "Pomodoro state could not be saved yet; the current state remains in memory.");
+  return saved;
 }
 function load() {
   targets = /* @__PURE__ */ new Map();
@@ -4754,6 +4812,8 @@ function mutationResultNotice(result) {
     const noun = result?.item || "Session";
     const completedVerb = result?.completedVerb || "updated";
     const failedCount = failed || pending;
+    if (failedCount <= 0)
+      return result.notice || GRAPH_SYNC_RETRY_NOTICE;
     const completedText = `${completed} ${noun}${completed === 1 ? "" : "s"} ${completedVerb}`;
     const failedText = `${failedCount} could not be updated`;
     return completed > 0 ? `${completedText}; ${failedText}. Retry after Roam finishes syncing.` : `${failedText[0].toUpperCase()}${failedText.slice(1)}. Retry after Roam finishes syncing.`;

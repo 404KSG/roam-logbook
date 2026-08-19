@@ -320,7 +320,10 @@ test('Today Activity splits a running Session across local hours without another
     assert.equal(document.querySelector('.rlb-activity__chart'), chart);
     assert.equal(hourNine.dataset.activityDuration, '30m');
     assert.equal(hourTen.dataset.activityDuration, '1m');
-    assert.match(hourTen.getAttribute('aria-label'), /1m.*1 Session/);
+    // The Session started in hour nine, so hour ten carries its minutes without
+    // being announced as a second Session.
+    assert.match(hourTen.getAttribute('aria-label'), /1m.*continued from an earlier Session/);
+    assert.match(hourNine.getAttribute('aria-label'), /30m.*1 Session/);
 
     dashboard.destroy();
 });

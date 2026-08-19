@@ -12,7 +12,7 @@
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "verify:workflow": "node scripts/verify-workflow.mjs",
     "lint": "eslint .",
-    "check": "npm run lint && npm run verify:workflow && npm test && npm run verify:bundle"
+    "check": "npm run lint && npm run verify:workflow && npm run verify:bundle && npm test"
   },
   "keywords": [
     "roam-research",

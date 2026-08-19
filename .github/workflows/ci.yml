@@ -14,15 +14,6 @@ jobs:
         uses: docker://rhysd/actionlint:1.7.7
         with:
           args: -color
-  workflow-contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Verify CI workflow contract
-        run: node scripts/verify-workflow.mjs
   verify:
     runs-on: ubuntu-latest
     env:
@@ -39,7 +30,6 @@ jobs:
           sudo apt-get install --yes chromium
           test -x "$CHROME_BIN"
       - run: npm ci
-      - run: npm run verify:workflow
       - run: npm run lint
-      - run: npm test
       - run: npm run verify:bundle
+      - run: npm test

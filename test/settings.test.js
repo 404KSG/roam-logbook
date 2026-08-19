@@ -16,6 +16,7 @@ import {
     pomodoroMinutes,
     staleHours,
     todoBlocksOnly,
+    writeSetting,
 } from '../src/settings.js';
 
 const withValues = values => {
@@ -116,4 +117,17 @@ test('default-on switch initialization never overwrites existing boolean or stri
         [SETTING_TODO_ONLY, 'false'],
         [SETTING_TIMING_LINE_SIDEBAR, true],
     ]);
+});
+
+test('writeSetting reports unavailable and failing settings persistence', () => {
+    setExtensionAPI(null);
+    assert.equal(writeSetting('missing', 'value'), false);
+
+    setExtensionAPI({ settings: { set: () => { throw new Error('read only'); } } });
+    assert.equal(writeSetting('read-only', 'value'), false);
+
+    const writes = [];
+    setExtensionAPI({ settings: { set: (key, value) => writes.push([key, value]) } });
+    assert.equal(writeSetting('saved', 'value'), true);
+    assert.deepEqual(writes, [['saved', 'value']]);
 });

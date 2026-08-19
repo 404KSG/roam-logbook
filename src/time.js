@@ -76,6 +76,25 @@ export function formatStarted(start, now = new Date()) {
 // locale still round-trip; the trailing `HH:MM` anchors the match.
 const STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\S+))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 
+const DST_PROBE_MONTHS = [0, 3, 6, 9];
+
+const localOffsetAt = (year, month) => {
+    const probe = new Date(0);
+    probe.setFullYear(year, month, 1);
+    probe.setHours(12, 0, 0, 0);
+    return probe.getTimezoneOffset();
+};
+
+const localDaylightShiftSeconds = year => {
+    const offsets = DST_PROBE_MONTHS.map(month => localOffsetAt(year, month));
+    const standardOffset = Math.max(...offsets);
+    const daylightOffset = Math.min(...offsets);
+    return {
+        daylightOffset,
+        seconds: Math.max(0, standardOffset - daylightOffset) * 60,
+    };
+};
+
 /**
  * Parse the inside of an org timestamp into a local `Date`.
  *
@@ -115,11 +134,19 @@ export function parseTimestamp(text) {
     const rolledOver =
         date.getFullYear() !== year ||
         date.getMonth() !== month - 1 ||
-        date.getDate() !== day ||
-        date.getHours() !== hour ||
-        date.getMinutes() !== minute ||
-        date.getSeconds() !== second;
+        date.getDate() !== day;
     if (rolledOver) return null;
+
+    const requestedTime = hour * 3600 + minute * 60 + second;
+    const actualTime = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+    if (actualTime !== requestedTime) {
+        const { daylightOffset, seconds: daylightShiftSeconds } = localDaylightShiftSeconds(year);
+        const shiftedByDaylightSaving =
+            daylightShiftSeconds > 0 &&
+            date.getTimezoneOffset() === daylightOffset &&
+            actualTime - requestedTime === daylightShiftSeconds;
+        if (!shiftedByDaylightSaving) return null;
+    }
     return date;
 }
 
@@ -194,10 +221,10 @@ export function formatRelativeTime(value, now = new Date()) {
     if (days < 7) return `${days}d ago`;
 
     const weeks = Math.floor(days / 7);
-    if (weeks < 5) return `${weeks}w ago`;
+    if (days < 30) return `${weeks}w ago`;
 
-    const months = Math.floor(days / 30);
-    if (months < 12) return `${Math.max(1, months)}mo ago`;
+    const months = Math.floor(days / 30.44);
+    if (days < 365) return `${Math.max(1, months)}mo ago`;
     return `${Math.max(1, Math.floor(days / 365))}y ago`;
 }
 

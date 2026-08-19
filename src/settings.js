@@ -102,7 +102,26 @@ export function readSetting(key) {
 }
 
 export function writeSetting(key, value) {
-    extensionAPI?.settings?.set(key, value);
+    const setter = extensionAPI?.settings?.set;
+    if (typeof setter !== 'function') return false;
+    try {
+        setter.call(extensionAPI.settings, key, value);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function hasStateBackup(key, raw) {
+    try {
+        const rawSignature = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        const stored = readSetting(SETTING_STATE_BACKUPS);
+        const parsed = stored ? (typeof stored === 'string' ? JSON.parse(stored) : stored) : null;
+        return parsed?.version === STATE_FORMATS.stateBackups &&
+            parsed.data?.[key]?.rawSignature === rawSignature;
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -124,16 +143,16 @@ export function preserveStateBackup(key, raw) {
                 : {};
         if (data[key]?.rawSignature === rawSignature) return false;
         data[key] = { rawSignature, raw };
-        writeSetting(
+        const saved = writeSetting(
             SETTING_STATE_BACKUPS,
             JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
         );
-        return true;
+        return saved;
     } catch (error) {
         // The original setting is still untouched, so a failed backup must not
         // turn a safe read-only recovery path into a startup crash.
         console.warn('[roam-logbook] could not preserve invalid state backup', error);
-        return true;
+        return false;
     }
 }
 

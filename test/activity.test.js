@@ -47,7 +47,8 @@ test('Activity Today uses exactly 24 local hour buckets and hides zero duration 
     assert.equal(activity.buckets[8].sessionCount, 1);
     assert.match(activity.buckets[8].ariaLabel, /Aug 15, 2026 at 08:00.*0m.*1 Session/);
     assert.equal(activity.buckets[9].sessionCount, 1);
-    assert.equal(activity.buckets[10].sessionCount, 1);
+    assert.equal(activity.buckets[10].sessionCount, 0);
+    assert.equal(activity.buckets[11].sessionCount, 0);
     assert.equal(activity.totalMinutes, 120);
 });
 
@@ -67,7 +68,7 @@ test('Activity Today refreshes a running Session into only the overlapping local
     assert.equal(activity.buckets[9].minutes, 30);
     assert.equal(activity.buckets[10].minutes, 1);
     assert.equal(activity.buckets[9].sessionCount, 1);
-    assert.equal(activity.buckets[10].sessionCount, 1);
+    assert.equal(activity.buckets[10].sessionCount, 0);
     assert.equal(activity.totalMinutes, 31);
 });
 

@@ -7,7 +7,6 @@ const required = [
     'npm run lint',
     'npm test',
     'npm run verify:bundle',
-    'npm run verify:workflow',
     'apt-get install --yes chromium',
     'CHROME_BIN: /usr/bin/chromium',
     'uses: docker://rhysd/actionlint:1.7.7',

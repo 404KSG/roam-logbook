@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTaskForest, flattenForest } from '../src/stats.js';
+import { buildTaskForest, flattenForest, MAX_TASK_FOREST_NODES } from '../src/stats.js';
 
 /** A task rollup row, the shape `summariseByTask` produces. */
 const row = (taskUid, title, minutes) => ({
@@ -151,6 +151,54 @@ test('a task under two parents appears in both and says so', () => {
     assert.equal(forest.length, 2);
     assert.deepEqual(forest.map(node => node.total), [120, 120]);
     assert.equal(forest[0].children[0].occurrences, 2);
+});
+
+test('a diamond reference graph expands the shared task once under each branch', () => {
+    const forest = buildTaskForest(
+        [row('diamond-a', 'A', 1), row('diamond-b', 'B', 2), row('diamond-c', 'C', 3), row('diamond-d', 'D', 4)],
+        hierarchy(
+            [
+                ['diamond-a', null, TODO('A')],
+                ['diamond-b', null, TODO('B')],
+                ['diamond-c', null, TODO('C')],
+                ['diamond-d', null, TODO('D')],
+                ['mirror-ab', 'diamond-a', '((diamond-b))'],
+                ['mirror-ac', 'diamond-a', '((diamond-c))'],
+                ['mirror-bd', 'diamond-b', '((diamond-d))'],
+                ['mirror-bd-duplicate', 'diamond-b', '((diamond-d))'],
+                ['mirror-cd', 'diamond-c', '((diamond-d))'],
+            ],
+            {
+                'diamond-b': ['mirror-ab'],
+                'diamond-c': ['mirror-ac'],
+                'diamond-d': ['mirror-bd', 'mirror-bd-duplicate', 'mirror-cd'],
+            }
+        )
+    );
+
+    const [root] = forest;
+    assert.equal(root.title, 'A');
+    assert.deepEqual(root.children.map(node => node.title), ['C', 'B']);
+    assert.deepEqual(root.children.map(node => node.children.map(child => child.title)), [['D'], ['D']]);
+    assert.deepEqual(root.children.map(node => node.children[0].occurrences), [2, 2]);
+});
+
+test('task forest expansion marks nodes beyond the global budget as truncated', () => {
+    const childCount = MAX_TASK_FOREST_NODES + 2;
+    const children = Array.from({ length: childCount }, (_, index) => `cap-child-${index}`);
+    const rows = [row('cap-root', 'root', 0), ...children.map((uid, index) => row(uid, `child ${index}`, 1))];
+    const blocks = [
+        ['cap-root', null, TODO('root')],
+        ...children.map((uid, index) => [uid, 'cap-root', TODO(`child ${index}`)]),
+    ];
+    const forest = buildTaskForest(rows, hierarchy(blocks));
+    const [root] = forest;
+    const normal = root.children.filter(node => !node.truncated).length;
+    const truncated = root.children.filter(node => node.truncated).length;
+
+    assert.equal(normal, MAX_TASK_FOREST_NODES - 1, 'the root consumes one expansion slot');
+    assert.equal(truncated, childCount - normal);
+    assert.ok(root.children.some(node => node.truncated));
 });
 
 test('a reference loop is cut instead of recursing forever', () => {
