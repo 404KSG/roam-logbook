@@ -29,18 +29,21 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     const clock = await import('../src/clock.js');
     const { createTopbar } = await import('../src/topbar.js');
     clock.reset();
-    const fixedNow = new Date('2026-08-19T10:00:00');
+    let fixedNow = new Date('2026-08-19T10:00:00');
     let tick;
+    const intervalDelays = [];
     const topbar = createTopbar({
         onOpenDashboard: () => {},
         now: () => fixedNow,
-        setIntervalFn: callback => {
+        setIntervalFn: (callback, delay) => {
             tick = callback;
+            intervalDelays.push(delay);
             return 1;
         },
         clearIntervalFn: () => {},
     });
     topbar.mount();
+    assert.deepEqual(intervalDelays, [1000], 'Today adds no polling interval beyond the existing ticker');
     t.after(() => {
         topbar.unmount();
         clock.reset();
@@ -57,7 +60,11 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     const popover = document.querySelector('body > .rlb-popover');
     assert.ok(popover);
     const todaySwitch = popover.querySelector('[data-view="today"]');
-    assert.equal(todaySwitch.textContent, 'Today · …');
+    assert.equal(todaySwitch.textContent.trim(), 'Today');
+    assert.equal(todaySwitch.getAttribute('aria-busy'), 'true');
+    assert.equal(todaySwitch.getAttribute('aria-label'), 'Show Today tasks, updating');
+    assert.ok(todaySwitch.querySelector('.rlb-surface__spinner'));
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
     const beforeTodayRead = graph.fastQueryCount();
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.ok(graph.fastQueryCount() >= beforeTodayRead, 'post-paint Today load may read the page');
@@ -66,6 +73,8 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelector('[data-view="today"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(popover.querySelector('[data-view="today"]').textContent, 'Today 2');
+    assert.equal(popover.querySelector('[data-view="today"]').getAttribute('aria-busy'), null);
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
     assert.equal(popover.querySelector('.rlb-today__hidden-count'), null);
 
@@ -98,10 +107,11 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     tick();
     assert.equal(graph.fastQueryCount(), afterTodayRead, 'one-second ticker uses cached Active Work only');
 
-    const refresh = popover.querySelector('[data-action="refresh"]');
-    refresh.click();
+    fixedNow = new Date('2026-08-19T10:00:30.001');
+    popover.querySelector('[data-view="threads"]').click();
+    popover.querySelector('[data-view="today"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
-    assert.ok(graph.fastQueryCount() > afterTodayRead, 'Refresh reloads the Today page');
+    assert.ok(graph.fastQueryCount() > afterTodayRead, 'stale Today entry reloads the page');
     const rowsBeforeFailure = [...popover.querySelectorAll('.rlb-today__row')].map(
         row => row.dataset.taskUid
     );
@@ -113,18 +123,144 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
         }
         return originalQuery(datalog, ...args);
     };
-    popover.querySelector('[data-action="refresh"]').click();
+    fixedNow = new Date('2026-08-19T10:01:00.002');
+    popover.querySelector('[data-view="threads"]').click();
+    popover.querySelector('[data-view="today"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.deepEqual(
         [...popover.querySelectorAll('.rlb-today__row')].map(row => row.dataset.taskUid),
         rowsBeforeFailure
     );
-    assert.match(popover.textContent, /last saved view/);
+    const retry = popover.querySelector('[data-action="retry"]');
+    assert.equal(retry.closest('.rlb-surface__inline-status').textContent, 'Couldn’t update · Retry');
+    assert.equal(retry.closest('.rlb-surface__inline-status').getAttribute('role'), 'alert');
     graph.api.data.q = originalQuery;
+
+    const readsBeforeRetry = graph.fastQueryCount();
+    retry.click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(graph.fastQueryCount() > readsBeforeRetry, 'Retry uses the existing refresh path');
+    assert.equal(popover.querySelector('[data-action="retry"]'), null);
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
 
     const readsBeforeCachedSwitch = graph.fastQueryCount();
     popover.querySelector('[data-view="threads"]').click();
     popover.querySelector('[data-view="today"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(graph.fastQueryCount(), readsBeforeCachedSwitch);
+    assert.deepEqual(intervalDelays, [1000], 'view switches and retries add no polling interval');
+});
+
+test('a failed first Today read shows compact Retry and recovers without a header refresh', async t => {
+    const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    const graph = installGraph([]);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?page-uid ?uid ?string ?order ?parent-uid')) {
+            throw new Error('Today unavailable');
+        }
+        return originalQuery(datalog, ...args);
+    };
+    const clock = await import('../src/clock.js');
+    const { createTopbar } = await import('../src/topbar.js');
+    clock.reset();
+    const topbar = createTopbar({
+        now: () => new Date('2026-08-19T10:00:00'),
+        setIntervalFn: () => 1,
+        clearIntervalFn: () => {},
+    });
+    topbar.mount();
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+        topbar.unmount();
+        clock.reset();
+        uninstallGraph();
+        dom.window.close();
+        delete globalThis.document;
+        delete globalThis.window;
+        delete globalThis.MutationObserver;
+        delete globalThis.HTMLElement;
+    });
+
+    document.querySelector('#roam-logbook-topbar button').click();
+    const popover = document.querySelector('body > .rlb-popover');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    popover.querySelector('[data-view="today"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    const status = popover.querySelector('.rlb-surface__inline-status');
+    assert.equal(status.textContent, 'Couldn’t read Today · Retry');
+    assert.equal(status.getAttribute('role'), 'alert');
+    assert.equal(popover.querySelector('[data-view="today"]').textContent, 'Today !');
+    assert.equal(
+        popover.querySelector('[data-view="today"]').getAttribute('aria-label'),
+        'Show Today tasks, update failed'
+    );
+    assert.equal(popover.querySelector('.rlb-popover__empty'), null);
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+
+    graph.api.data.q = originalQuery;
+    status.querySelector('[data-action="retry"]').click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
+    assert.match(popover.textContent, /No unfinished TODOs today/);
+});
+
+test('entering Today revalidates only when its successful snapshot is older than 30 seconds', async t => {
+    const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    const graph = installGraph([
+        {
+            uid: 'freshness-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Fresh task',
+        },
+    ]);
+    const clock = await import('../src/clock.js');
+    const { createTopbar } = await import('../src/topbar.js');
+    clock.reset();
+    let currentNow = new Date('2026-08-19T10:00:00.000');
+    const topbar = createTopbar({
+        now: () => currentNow,
+        setIntervalFn: () => 1,
+        clearIntervalFn: () => {},
+    });
+    topbar.mount();
+    t.after(() => {
+        topbar.unmount();
+        clock.reset();
+        uninstallGraph();
+        dom.window.close();
+        delete globalThis.document;
+        delete globalThis.window;
+        delete globalThis.MutationObserver;
+        delete globalThis.HTMLElement;
+    });
+
+    document.querySelector('#roam-logbook-topbar button').click();
+    const popover = document.querySelector('body > .rlb-popover');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(popover.querySelector('[data-view="today"]').textContent, 'Today 1');
+
+    currentNow = new Date('2026-08-19T10:00:30.000');
+    const atBoundary = graph.fastQueryCount();
+    popover.querySelector('[data-view="today"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(graph.fastQueryCount(), atBoundary, 'exactly 30 seconds remains fresh');
+
+    popover.querySelector('[data-view="threads"]').click();
+    currentNow = new Date('2026-08-19T10:00:30.001');
+    const pastBoundary = graph.fastQueryCount();
+    popover.querySelector('[data-view="today"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(graph.fastQueryCount() > pastBoundary, 'older than 30 seconds revalidates');
 });

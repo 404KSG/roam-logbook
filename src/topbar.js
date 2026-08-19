@@ -14,7 +14,7 @@ import { formatElapsed } from './time.js';
 import { findStaleClocks } from './stats.js';
 import { staleHours } from './settings.js';
 import { openBlock, openBlockInRightSidebar, readTodayTodoSnapshot } from './roam.js';
-import { GRAPH_SYNC_RETRY_NOTICE, mutationResultNotice } from './action-result.js';
+import { mutationResultNotice } from './action-result.js';
 import {
     buildSessionSurfaceModel,
     renderSessionSurface,
@@ -39,6 +39,7 @@ const TOPBAR_REFRESH_MESSAGES = {
     ...REFRESH_MESSAGES.activeWork,
     loading: 'Refreshing Active Work state from graph…',
 };
+export const TODAY_REVALIDATE_AFTER_MS = 30_000;
 
 export { sessionCount };
 export const activeCount = count => `${count} Thread${count === 1 ? '' : 's'}`;
@@ -140,10 +141,12 @@ export function createTopbar({
     let themeRuntime = null;
     let surfaceView = 'threads';
     let todaySnapshot = null;
+    let todaySnapshotAt = null;
     let todayStatus = 'idle';
     let todayNotice = '';
     let todayExpanded = new Set();
     let todayRequestToken = 0;
+    let todayInFlight = null;
     const layoutHosts = new Set();
     const searchHosts = new Set();
     const layoutHostDisplay = new Map();
@@ -161,10 +164,12 @@ export function createTopbar({
         actionNotice = '';
         surfaceView = 'threads';
         todaySnapshot = null;
+        todaySnapshotAt = null;
         todayStatus = 'idle';
         todayNotice = '';
         todayExpanded = new Set();
         todayRequestToken += 1;
+        todayInFlight = null;
     };
 
     const cancelPendingOpenRefresh = () => {
@@ -203,11 +208,28 @@ export function createTopbar({
     };
 
     const todayModel = () => {
-        if (!todaySnapshot) return { status: todayStatus, roots: [], nodes: [], count: 0 };
+        if (!todaySnapshot) {
+            return {
+                status: todayStatus,
+                loading: Boolean(todayInFlight),
+                hasSnapshot: false,
+                error: Boolean(todayNotice),
+                roots: [],
+                nodes: [],
+                count: 0,
+            };
+        }
         const tree = buildTodayTodoTree(todaySnapshot.roots, {
             referenceStrings: todaySnapshot.referenceStrings,
         });
-        return { ...tree, status: todayStatus, pageTitle: todaySnapshot.pageTitle };
+        return {
+            ...tree,
+            status: todayStatus,
+            loading: Boolean(todayInFlight),
+            hasSnapshot: true,
+            error: Boolean(todayNotice),
+            pageTitle: todaySnapshot.pageTitle,
+        };
     };
 
     const todayRows = model => {
@@ -222,10 +244,9 @@ export function createTopbar({
     const surfaceNotices = () =>
         [
             ...(actionNotice ? [{ message: actionNotice, role: 'alert' }] : []),
-            ...(!actionNotice && clock.getNotice()
+            ...(!actionNotice && refreshState.state !== 'error' && clock.getNotice()
                 ? [{ message: clock.getNotice(), role: 'status' }]
                 : []),
-            ...(todayNotice ? [{ message: todayNotice, role: 'status' }] : []),
         ];
 
     const renderSurfaces = () => {
@@ -255,6 +276,9 @@ export function createTopbar({
             renderRefreshState();
         },
         messages: TOPBAR_REFRESH_MESSAGES,
+        // Success has no visible affordance in the compact toolbar, so the
+        // topbar does not need a delayed success-to-idle reset timer.
+        successDuration: 0,
     });
 
     const refreshSessions = () => {
@@ -272,16 +296,12 @@ export function createTopbar({
             },
             {
                 isSuccess: result => result?.ok,
-                onFailure: result => {
-                    actionNotice =
-                        mutationResultNotice(result) ||
-                        clock.getNotice() ||
-                        GRAPH_SYNC_RETRY_NOTICE;
+                onFailure: () => {
+                    actionNotice = '';
                 },
                 onError: error => {
                     console.error('[roam-logbook] could not refresh Session surface', error);
-                    actionNotice =
-                        mutationResultNotice(error) || clock.getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+                    actionNotice = '';
                     return {
                         ok: false,
                         uncertain: true,
@@ -293,32 +313,45 @@ export function createTopbar({
         );
     };
 
-    const loadToday = async ({ force = false } = {}) => {
-        if (!popover) return { ok: false, cancelled: true };
-        if (!force && todaySnapshot) return { ok: true, cached: true, snapshot: todaySnapshot };
+    const loadToday = ({ force = false } = {}) => {
+        if (!popover) return Promise.resolve({ ok: false, cancelled: true });
+        if (todayInFlight) return todayInFlight;
+        if (!force && todaySnapshot) {
+            return Promise.resolve({ ok: true, cached: true, snapshot: todaySnapshot });
+        }
         const token = ++todayRequestToken;
-        // Preserve a successful snapshot while it revalidates. The shared
-        // Refresh control already exposes loading state, so blanking Today here
-        // would create a needless flash and make the cache look unreliable.
+        // Preserve a successful snapshot while it revalidates. Loading occupies
+        // the fixed Today status slot, so the toolbar and task tree stay stable.
         if (!todaySnapshot) todayStatus = 'loading';
         todayNotice = '';
+        const request = Promise.resolve()
+            .then(() => readTodayTodoSnapshot(nowDate()))
+            .then(result => {
+                if (token !== todayRequestToken || !popover) {
+                    return { ok: false, cancelled: true };
+                }
+                if (result.ok) {
+                    todaySnapshot = result;
+                    todaySnapshotAt = nowDate().getTime();
+                    todayStatus = result.status;
+                    todayNotice = '';
+                } else {
+                    // A read failure must not turn the last known task pool into
+                    // an empty state. Keep both its content and freshness time.
+                    todayStatus = todaySnapshot?.status || 'error';
+                    todayNotice = todaySnapshot
+                        ? 'Today tasks could not be refreshed; showing the last saved view.'
+                        : 'Today tasks could not be read. Refresh to try again.';
+                }
+                return result;
+            })
+            .finally(() => {
+                if (todayInFlight === request) todayInFlight = null;
+                if (token === todayRequestToken && popover) renderSurfaces();
+            });
+        todayInFlight = request;
         renderSurfaces();
-        const result = await Promise.resolve().then(() => readTodayTodoSnapshot(nowDate()));
-        if (token !== todayRequestToken || !popover) return { ok: false, cancelled: true };
-        if (result.ok) {
-            todaySnapshot = result;
-            todayStatus = result.status;
-            todayNotice = '';
-        } else {
-            // A read failure must not turn the last known task pool into an
-            // empty state. Keep the snapshot and expose a quiet notice.
-            todayStatus = todaySnapshot?.status || 'error';
-            todayNotice = todaySnapshot
-                ? 'Today tasks could not be refreshed; showing the last saved view.'
-                : 'Today tasks could not be read. Refresh to try again.';
-        }
-        renderSurfaces();
-        return result;
+        return request;
     };
 
     const requestSessionRefresh = () => {
@@ -395,7 +428,14 @@ export function createTopbar({
             onSwitchView: view => {
                 surfaceView = view === 'today' ? 'today' : 'threads';
                 renderSurfaces();
-                if (surfaceView === 'today') void loadToday();
+                if (surfaceView === 'today') {
+                    const snapshotAge = todaySnapshotAt === null
+                        ? Number.POSITIVE_INFINITY
+                        : nowDate().getTime() - todaySnapshotAt;
+                    if (!todaySnapshot || snapshotAge > TODAY_REVALIDATE_AFTER_MS) {
+                        void loadToday({ force: Boolean(todaySnapshot) });
+                    }
+                }
             },
             onToggleToday: uid => {
                 const next = new Set(todayExpanded);

@@ -42,7 +42,8 @@ test('empty shared surface uses the Active Threads heading and accessible group 
         {}
     );
 
-    assert.equal(root.querySelector('.rlb-popover__title')?.textContent, 'ACTIVE THREADS · 0');
+    assert.equal(root.querySelector('.rlb-popover__title')?.textContent, 'ACTIVE THREADS');
+    assert.equal(root.querySelector('.rlb-popover__title')?.classList.contains('rlb-visually-hidden'), true);
     assert.equal(root.querySelector('.rlb-surface__list')?.getAttribute('aria-label'), 'Active Threads');
     assert.match(root.textContent, /No Timing Line is active/);
 

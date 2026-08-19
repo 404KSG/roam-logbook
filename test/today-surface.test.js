@@ -16,6 +16,130 @@ const unmount = dom => {
     delete globalThis.document;
 };
 
+test('compact toolbar keeps Active Threads semantic, tabs exact, and Dashboard rightmost', () => {
+    const { dom, root } = mount();
+    const tree = buildTodayTodoTree([
+        {
+            uid: 'root-toolbar',
+            string: '{{[[TODO]]}} Project',
+            order: 0,
+            children: [{ uid: 'child-toolbar', string: '{{[[TODO]]}} Child', order: 0, children: [] }],
+        },
+    ]);
+    const model = { ...tree, status: 'success' };
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            titleId: 'toolbar-title',
+            view: 'today',
+            todayModel: model,
+            todayRows: flattenTodayRows(model),
+            onSwitchView: () => {},
+            onToggleAllToday: () => {},
+            onOpenDashboard: () => {},
+            onRefresh: () => {},
+        }
+    );
+
+    const header = root.querySelector('.rlb-surface__header');
+    const title = header.querySelector('#toolbar-title');
+    const tabs = [...header.querySelectorAll('[data-action="switch-view"]')];
+    const actions = [...header.querySelectorAll('.rlb-surface__actions > *')];
+
+    assert.equal(title.textContent, 'ACTIVE THREADS');
+    assert.equal(title.classList.contains('rlb-visually-hidden'), true);
+    assert.deepEqual(tabs.map(tab => tab.textContent), ['Threads 0', 'Today 2']);
+    assert.deepEqual(tabs.map(tab => tab.getAttribute('aria-pressed')), ['false', 'true']);
+    assert.equal(header.querySelector('.rlb-surface__view-switch')?.tagName, 'NAV');
+    assert.equal(root.querySelector('[data-action="refresh"]'), null);
+    assert.deepEqual(actions.map(action => action.dataset.action), [
+        'today-toggle-all',
+        'dashboard',
+    ]);
+    assert.equal(actions.at(-1)?.dataset.action, 'dashboard');
+
+    unmount(dom);
+});
+
+test('Today errors preserve rows and expose the existing refresh seam as compact Retry', () => {
+    const { dom, root } = mount();
+    const tree = buildTodayTodoTree([
+        { uid: 'retry-root', string: '{{[[TODO]]}} Preserved task', order: 0, children: [] },
+    ]);
+    let retries = 0;
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            view: 'today',
+            todayModel: { ...tree, status: 'success', hasSnapshot: true, error: true },
+            todayRows: flattenTodayRows(tree),
+            onSwitchView: () => {},
+            onRefresh: () => { retries += 1; },
+            onOpenTask: () => {},
+        }
+    );
+
+    const stale = root.querySelector('.rlb-surface__inline-status');
+    assert.equal(root.querySelectorAll('.rlb-today__row').length, 1);
+    assert.equal(stale.textContent, 'Couldn’t update · Retry');
+    assert.equal(stale.getAttribute('role'), 'alert');
+    assert.equal(stale.getAttribute('aria-live'), 'assertive');
+    stale.querySelector('[data-action="retry"]').click();
+    assert.equal(retries, 1);
+    assert.equal(root.querySelector('[data-action="refresh"]'), null);
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            view: 'today',
+            todayModel: { status: 'error', hasSnapshot: false, error: true, roots: [], nodes: [], count: 0 },
+            onSwitchView: () => {},
+            onRefresh: () => { retries += 1; },
+        }
+    );
+    const cold = root.querySelector('.rlb-surface__inline-status');
+    assert.equal(cold.textContent, 'Couldn’t read Today · Retry');
+    assert.equal(root.querySelector('[data-view="today"]').textContent, 'Today !');
+    assert.equal(
+        root.querySelector('[data-view="today"]').getAttribute('aria-label'),
+        'Show Today tasks, update failed'
+    );
+    assert.equal(root.querySelector('.rlb-popover__empty'), null);
+    cold.querySelector('[data-action="retry"]').click();
+    assert.equal(retries, 2);
+
+    unmount(dom);
+});
+
+test('Threads refresh errors are contextual and retry through the public refresh action', () => {
+    const { dom, root } = mount();
+    let retries = 0;
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            view: 'threads',
+            todayModel: { status: 'success', count: 0 },
+            refreshState: { state: 'error', message: 'Refresh failed' },
+            onSwitchView: () => {},
+            onRefresh: () => { retries += 1; },
+        }
+    );
+
+    const status = root.querySelector('.rlb-surface__inline-status');
+    assert.equal(status.textContent, 'Couldn’t update · Retry');
+    assert.equal(root.querySelector('[data-action="refresh"]'), null);
+    status.querySelector('[data-action="retry"]').click();
+    assert.equal(retries, 1);
+
+    unmount(dom);
+});
+
 test('Today view switches in place, collapses hierarchy, and exposes icon-only Play', () => {
     const { dom, root } = mount();
     const tree = buildTodayTodoTree([
@@ -43,8 +167,8 @@ test('Today view switches in place, collapses hierarchy, and exposes icon-only P
     );
 
     assert.equal(root.querySelector('[data-view="today"]')?.getAttribute('aria-pressed'), 'true');
-    assert.equal(root.querySelector('[data-view="threads"]')?.textContent, 'Threads · 0');
-    assert.equal(root.querySelector('[data-view="today"]')?.textContent, 'Today · 2');
+    assert.equal(root.querySelector('[data-view="threads"]')?.textContent, 'Threads 0');
+    assert.equal(root.querySelector('[data-view="today"]')?.textContent, 'Today 2');
     assert.equal(root.querySelectorAll('.rlb-today__row').length, 1);
     assert.equal(root.querySelector('.rlb-today__hidden-count'), null);
     assert.equal(root.querySelector('.rlb-today__toggle')?.title, 'Expand sub-tasks');

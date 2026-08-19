@@ -580,77 +580,105 @@ test('Session task title is the restrained link target without a leading open ic
     assert.match(geometry.tooltip, /^Open this block:/, JSON.stringify(geometry));
 });
 
-test('shared session header actions and bulk footer stay usable at 340px and 320px', async t => {
+test('beta.50 toolbar is one stable line across desktop, narrow, loading, error, and leaf-only states', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    for (const width of [340, 320]) {
-        const expression = `(() => {
-            const popover = document.querySelector('.rlb-popover');
-            const row = popover.querySelector('.rlb-run');
-            const title = row.querySelector('.rlb-run__title');
-            const body = row.querySelector('.rlb-run__body');
-            const actions = row.querySelector('.rlb-run__actions');
-            const meta = row.querySelector('.rlb-run__meta');
-            const rect = node => {
-                const value = node.getBoundingClientRect();
-                return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
-            };
-            const popRect = rect(popover);
-            const header = popover.querySelector('.rlb-surface__header');
-            const headerActions = popover.querySelector('.rlb-surface__actions');
-            const headerActionNodes = [...headerActions.children];
-            const dashboard = popover.querySelector('[data-action="dashboard"]');
-            const refreshCell = popover.querySelector('.rlb-surface__refresh-cell');
-            const refresh = refreshCell.querySelector('[data-action="refresh"]');
-            const close = popover.querySelector('[data-action="close"]');
-            const footer = popover.querySelector('.rlb-surface__footer');
-            const footerButtons = [...footer.querySelectorAll('button')];
-            const footerRects = footerButtons.map(rect);
-            const actionRects = headerActionNodes.map(rect);
-            const status = refreshCell.querySelector('.rlb-surface__refresh-status');
-            return {
-                popover: popRect,
-                title: rect(title), body: rect(body), actions: rect(actions), meta: rect(meta),
-                lines: row.querySelectorAll('.rlb-run__meta-line').length,
-                titleClips: title.scrollWidth > title.clientWidth,
-                rowHasDot: Boolean(row.querySelector('.rlb-dot')),
-                headerActionCount: headerActionNodes.length,
-                headerTitleBeforeActions: rect(header.querySelector('.rlb-popover__title')).right <= rect(headerActions).left + .5,
-                headerActionsInside: actionRects.every(item => item.left >= popRect.left && item.right <= popRect.right + .5 && item.top >= popRect.top && item.bottom <= popRect.bottom + .5),
-                iconGeometry: actionRects.map(item => ({ width: item.width, height: item.height })),
-                headerOrder: [dashboard.dataset.action, 'refresh-cell', close.dataset.action],
-                iconLabels: [dashboard, refresh, close].every(button => button.title && button.getAttribute('aria-label') && button.type === 'button'),
-                refreshLoading: refresh.classList.contains('rlb-surface__refresh--loading') && refresh.disabled && refresh.getAttribute('aria-busy') === 'true',
-                statusHidden: getComputedStyle(status).width === '1px' && getComputedStyle(status).height === '1px',
-                footerLabels: footerButtons.map(button => button.textContent),
-                footerInside: footerRects.every(item => item.left >= popRect.left && item.right <= popRect.right && item.top >= popRect.top && item.bottom <= popRect.bottom),
-                footerHeight: rect(footer).height,
-                overflow: popover.scrollWidth > popover.clientWidth + 1,
-            };
-        })()`;
-        const longTitle = 'A very long Session title that should ellipsize visually while remaining available to assistive technology';
-        const geometry = await withChromium(
-            htmlWithLateHost(`<div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 1</div><div class="rlb-surface__actions"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="loading"><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--loading" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph" aria-busy="true" disabled></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Refreshing</span></div><button type="button" class="bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button" data-action="close" title="Close Current Sessions" aria-label="Close Current Sessions"></button></div></header><div class="rlb-run rlb-run--inline-meta"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary">12:34 · target 30:00 · 2h 05m total</div><span class="rlb-run__meta-separator" aria-hidden="true">·</span><time class="rlb-run__meta-line rlb-run__started" title="Started [2026-08-14 Fri 21:30] · Page: Project Page" aria-label="Started [2026-08-14 Fri 21:30] · Page: Project Page">Aug 14 21:30</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" data-action="clock-out" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash" data-action="discard" title="Discard this CLOCK entry (cannot be undone)" aria-label="Discard this CLOCK entry (cannot be undone)"></button></div></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div>`),
-            expression
-        );
-        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
-        assert.ok(geometry.popover.width <= width + 0.5, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.lines, 2, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.titleClips, true, JSON.stringify({ width, geometry }));
-        assert.ok(geometry.meta.height <= 20, JSON.stringify({ width, geometry }));
-        assert.ok(geometry.title.right <= geometry.actions.left + 0.5, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.rowHasDot, false, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.headerActionCount, 3, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.headerTitleBeforeActions, true, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.headerActionsInside, true, JSON.stringify({ width, geometry }));
-        assert.deepEqual(geometry.headerOrder, ['dashboard', 'refresh-cell', 'close'], JSON.stringify({ width, geometry }));
-        assert.ok(geometry.iconGeometry.every(item => item.width >= 30 && item.width <= 32 && item.height >= 30 && item.height <= 32), JSON.stringify({ width, geometry }));
-        assert.equal(geometry.iconLabels, true, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.refreshLoading, true, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.statusHidden, true, JSON.stringify({ width, geometry }));
-        assert.deepEqual(geometry.footerLabels, ['Clock Out All'], JSON.stringify({ width, geometry }));
-        assert.equal(geometry.footerInside, true, JSON.stringify({ width, geometry }));
-        assert.ok(geometry.footerHeight >= 32, JSON.stringify({ width, geometry }));
-        assert.equal(geometry.overflow, false, JSON.stringify({ width, geometry }));
+    const toolbar = ({ width = 460, selected = 'threads', loading = false, expandable = false, error = false }) => `
+        <div class="rlb-popover" style="width:${width}px">
+            <header class="rlb-surface__header">
+                <div class="rlb-popover__title rlb-visually-hidden">ACTIVE THREADS</div>
+                <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control${selected === 'threads' ? ' is-selected' : ''}" data-action="switch-view" data-view="threads" aria-pressed="${selected === 'threads'}"><span class="rlb-surface__view-label">Threads</span> <span class="rlb-surface__view-count">12</span></button>
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control${selected === 'today' ? ' is-selected' : ''}" data-action="switch-view" data-view="today" aria-pressed="${selected === 'today'}"${loading ? ' aria-busy="true" aria-label="Show Today tasks, updating"' : ''}><span class="rlb-surface__view-label">Today</span> <span class="rlb-surface__view-count${loading ? ' rlb-surface__view-count--loading' : ''}">${loading ? '<span class="rlb-surface__spinner" aria-hidden="true"></span>' : '12'}</span></button>
+                </nav>
+                <div class="rlb-surface__actions">
+                    ${expandable ? '<button class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control" data-action="today-toggle-all" title="Expand all Today tasks" aria-label="Expand all Today tasks"></button>' : ''}
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button>
+                </div>
+            </header>
+            <div class="rlb-surface__list">${error ? '<div class="rlb-surface__inline-status" role="alert"><span>Couldn’t update</span><span> · </span><button class="bp3-button bp3-minimal bp3-small rlb-surface__retry">Retry</button></div>' : ''}</div>
+        </div>`;
+    const expression = `(() => {
+        const rect = node => { const value = node.getBoundingClientRect(); return { left:value.left, right:value.right, top:value.top, bottom:value.bottom, width:value.width, height:value.height }; };
+        const popover = document.querySelector('.rlb-popover');
+        const header = popover.querySelector('.rlb-surface__header');
+        const nav = popover.querySelector('.rlb-surface__view-switch');
+        const tabs = [...nav.querySelectorAll('.rlb-surface__view-control')];
+        const actions = popover.querySelector('.rlb-surface__actions');
+        const actionNodes = [...actions.children];
+        const headerRect = rect(header);
+        const navRect = rect(nav);
+        const actionRect = rect(actions);
+        const tabRects = tabs.map(rect);
+        const actionRects = actionNodes.map(rect);
+        const allControls = [...tabs, ...actionNodes];
+        const titleStyle = getComputedStyle(popover.querySelector('.rlb-popover__title'));
+        return {
+            popover: rect(popover),
+            header: headerRect,
+            nav: navRect,
+            actions: actionRect,
+            tabs: tabRects,
+            actionRects,
+            tabFlex: tabs.map(tab => getComputedStyle(tab).flex),
+            selectedColor: getComputedStyle(tabs.find(tab => tab.classList.contains('is-selected'))).color,
+            todayCountWidth: rect(tabs[1].querySelector('.rlb-surface__view-count')).width,
+            dashboardRight: rect(actionNodes.at(-1)).right,
+            actionOrder: actionNodes.map(node => node.dataset.action),
+            controlTargets: allControls.map(node => rect(node).height),
+            sameLine: allControls.every(node => {
+                const value = rect(node);
+                return value.top >= headerRect.top - .5 && value.bottom <= headerRect.bottom + .5;
+            }),
+            noOverlap: navRect.right <= actionRect.left + .5,
+            inside: [...tabRects, ...actionRects].every(value => value.left >= headerRect.left - .5 && value.right <= headerRect.right + .5),
+            noWrap: getComputedStyle(nav).flexWrap === 'nowrap' && nav.scrollHeight <= 32.5,
+            overflow: popover.scrollWidth > popover.clientWidth + .5 || header.scrollWidth > header.clientWidth + .5,
+            refreshCount: popover.querySelectorAll('[data-action="refresh"]').length,
+            spinnerCount: popover.querySelectorAll('.rlb-surface__spinner').length,
+            hiddenTitle: titleStyle.width === '1px' && titleStyle.height === '1px',
+        };
+    })()`;
+    const states = {
+        threads: { selected: 'threads' },
+        today: { selected: 'today', expandable: true },
+        loading: { selected: 'today', loading: true, expandable: true },
+        error: { selected: 'today', expandable: true, error: true },
+        leafOnly: { selected: 'today' },
+    };
+
+    for (const width of [460, 304, 324, 344]) {
+        const measured = {};
+        for (const [state, options] of Object.entries(states)) {
+            measured[state] = await withChromium(
+                htmlWithLateHost(toolbar({ ...options, width })),
+                expression,
+                { width: width + 40, height: 240 }
+            );
+            const context = JSON.stringify({ width, state, geometry: measured[state] });
+            assert.ok(Math.abs(measured[state].popover.width - width) <= .5, context);
+            assert.ok(Math.abs(measured[state].header.height - 32) <= .5, context);
+            assert.equal(measured[state].sameLine, true, context);
+            assert.equal(measured[state].noOverlap, true, context);
+            assert.equal(measured[state].inside, true, context);
+            assert.equal(measured[state].noWrap, true, context);
+            assert.equal(measured[state].overflow, false, context);
+            assert.equal(measured[state].refreshCount, 0, context);
+            assert.equal(measured[state].hiddenTitle, true, context);
+            assert.equal(measured[state].actionOrder.at(-1), 'dashboard', context);
+            assert.ok(measured[state].controlTargets.every(height => Math.abs(height - 32) <= .5), context);
+            assert.ok(measured[state].tabs.every(tab => tab.width < measured[state].header.width / 2), context);
+            assert.ok(measured[state].tabFlex.every(value => value === '0 0 auto'), context);
+        }
+        assert.deepEqual(measured.today.actionOrder, ['today-toggle-all', 'dashboard']);
+        assert.deepEqual(measured.loading.actionOrder, ['today-toggle-all', 'dashboard']);
+        assert.deepEqual(measured.leafOnly.actionOrder, ['dashboard']);
+        assert.equal(measured.loading.spinnerCount, 1);
+        assert.equal(measured.today.spinnerCount, 0);
+        assert.ok(Math.abs(measured.loading.header.width - measured.today.header.width) <= .5);
+        assert.ok(Math.abs(measured.loading.header.height - measured.today.header.height) <= .5);
+        assert.ok(Math.abs(measured.loading.tabs[1].width - measured.today.tabs[1].width) <= .5);
+        assert.ok(Math.abs(measured.loading.todayCountWidth - measured.today.todayCountWidth) <= .5);
+        assert.ok(Math.abs(measured.loading.dashboardRight - measured.today.dashboardRight) <= .5);
     }
 });
 
@@ -804,8 +832,31 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const longTitle = 'A long Focused task title that remains accessible while ellipsizing visually';
     const recentTitle = 'A recent task that can be focused again';
-    const markup = (theme, width) =>
-        `<div class="${theme}"><div class="rlb-popover" style="width:${width}px"><header class="rlb-surface__header"><div class="rlb-popover__title">ACTIVE THREADS · 2</div><div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button><div class="rlb-surface__refresh-cell" data-refresh-state="idle"><button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh" data-action="refresh" title="Refresh Active Work from graph" aria-label="Refresh Active Work from graph"></button><span class="rlb-surface__refresh-status rlb-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span></div></div></header><div class="rlb-surface__list" role="group" aria-label="Active Threads"><section class="rlb-surface__section rlb-surface__section--focused" aria-label="TIMING"><div class="rlb-surface__section-label">TIMING</div><div class="rlb-run rlb-run--inline-meta rlb-run--overrun" data-session-state="running"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div></div></section><section class="rlb-surface__section rlb-surface__section--open-lines rlb-surface__section--recent" aria-label="PARALLEL THREADS · 1, Leave after 45m without focus"><div class="rlb-surface__section-label"><span class="rlb-surface__section-label-text">PARALLEL THREADS · 1</span><span class="rlb-surface__section-context">Leave after 45m without focus</span></div><div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="30m total · leaves in 41m; Last active [2026-08-15 Sat 09:09]" aria-label="30m total; leaves in 41m; Last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · leaves in 41m</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div></section></div><footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer></div></div>`;
+    const markup = (theme, width) => `
+        <div class="${theme}"><div class="rlb-popover" style="width:${width}px">
+            <header class="rlb-surface__header">
+                <div class="rlb-popover__title rlb-visually-hidden">ACTIVE THREADS</div>
+                <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected" data-view="threads" aria-pressed="true"><span>Threads</span> <span class="rlb-surface__view-count">2</span></button>
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control" data-view="today" aria-pressed="false"><span>Today</span> <span class="rlb-surface__view-count">12</span></button>
+                </nav>
+                <div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button></div>
+            </header>
+            <div class="rlb-surface__list" role="group" aria-label="Active Threads">
+                <section class="rlb-surface__section rlb-surface__section--focused" aria-label="TIMING">
+                    <div class="rlb-surface__section-label">TIMING</div>
+                    <div class="rlb-run rlb-run--inline-meta rlb-run--overrun" data-session-state="running">
+                        <div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div>
+                        <div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div>
+                    </div>
+                </section>
+                <section class="rlb-surface__section rlb-surface__section--open-lines rlb-surface__section--recent" aria-label="PARALLEL THREADS · 1, Leave after 45m without focus">
+                    <div class="rlb-surface__section-label"><span class="rlb-surface__section-label-text">PARALLEL THREADS · 1</span><span class="rlb-surface__section-context">Leave after 45m without focus</span></div>
+                    <div class="rlb-run rlb-run--recent" data-session-state="recent"><div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title rlb-run__title--recent" title="Open this block: ${recentTitle}" aria-label="Open this block: ${recentTitle}">${recentTitle}</button><div class="rlb-run__meta"><time class="rlb-run__meta-line rlb-run__recent-meta" title="30m total · leaves in 41m; Last active [2026-08-15 Sat 09:09]" aria-label="30m total; leaves in 41m; Last active [2026-08-15 Sat 09:09]" datetime="2026-08-15T09:09">30m total · leaves in 41m</time></div></div><div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-play rlb-run__focus" data-action="focus-recent" title="Switch Focus to ${recentTitle}" aria-label="Switch Focus to ${recentTitle}"></button></div></div>
+                </section>
+            </div>
+            <footer class="rlb-surface__footer"><button class="bp3-button bp3-small bp3-intent-danger">Clock Out All</button></footer>
+        </div></div>`;
 
     const expression = `(() => {
             const rect = node => { const r = node.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
@@ -882,8 +933,6 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                 headerActionCount: headerActions.children.length,
                 headerTitleBeforeActions: rect(header.querySelector('.rlb-popover__title')).right <= rect(headerActions).left + .5,
                 headerActionsInside: headerActionRects.every(item => item.left >= rect(surface).left && item.right <= rect(surface).right + .5),
-                actionRailDeltas: headerActionRects.map((item, index) => Math.abs(item.left - focusedActionRects[index].left)),
-                actionRailRightDelta: Math.abs(headerActionRects.at(-1).right - focusedActionRects.at(-1).right),
                 actionWidths: [...headerActionRects, ...focusedActionRects].map(item => item.width),
                 headerTimingGap: rect(focusedSection).top - Math.max(...headerActionRects.map(item => item.bottom)),
                 footerHeights: footerRects.map(item => item.height),
@@ -922,7 +971,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.recentBackground, 'rgba(0, 0, 0, 0)', context);
             assert.equal(geometry.groupRole, 'group', context);
             assert.equal(geometry.groupLabel, 'Active Threads', context);
-            assert.equal(geometry.surfaceTitle, 'ACTIVE THREADS · 2', context);
+            assert.equal(geometry.surfaceTitle, 'ACTIVE THREADS', context);
             assert.equal(geometry.timingLabel, 'TIMING', context);
             assert.equal(geometry.openLinesLabel, 'PARALLEL THREADS · 1', context);
             assert.equal(geometry.openLinesContext, 'Leave after 45m without focus', context);
@@ -949,11 +998,9 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.recentMetaTitle, '30m total · leaves in 41m; Last active [2026-08-15 Sat 09:09]', context);
             assert.equal(geometry.recentMetaLabel, '30m total; leaves in 41m; Last active [2026-08-15 Sat 09:09]', context);
             assert.equal(geometry.recentMetaDateTime, '2026-08-15T09:09', context);
-            assert.equal(geometry.headerActionCount, 2, context);
+            assert.equal(geometry.headerActionCount, 1, context);
             assert.equal(geometry.headerTitleBeforeActions, true, context);
             assert.equal(geometry.headerActionsInside, true, context);
-            assert.ok(geometry.actionRailDeltas.every(delta => delta <= 0.5), context);
-            assert.ok(geometry.actionRailRightDelta <= 0.5, context);
             assert.ok(geometry.actionWidths.every(width => Math.abs(width - 32) <= 0.5), context);
             assert.ok(geometry.headerTimingGap >= 3, context);
             assert.ok(geometry.footerHeightDelta <= 1, context);
@@ -969,17 +1016,16 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
     const markup = `
         <div class="rlb-popover">
             <header class="rlb-surface__header">
-                <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                <div class="rlb-popover__title rlb-visually-hidden">ACTIVE THREADS</div>
+                <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control"><span>Threads</span> <span class="rlb-surface__view-count">2</span></button>
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected"><span>Today</span> <span class="rlb-surface__view-count">55</span></button>
+                </nav>
                 <div class="rlb-surface__actions">
-                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" aria-label="Dashboard"></button>
                     <button class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control" data-action="today-toggle-all" title="Expand all Today tasks" aria-label="Expand all Today tasks" aria-expanded="false" aria-controls="rlb-today-tree"></button>
-                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button" aria-label="Refresh"></button>
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" aria-label="Dashboard"></button>
                 </div>
             </header>
-            <nav class="rlb-surface__view-switch" aria-label="Logbook view">
-                <button class="bp3-button bp3-minimal rlb-surface__view-control">Threads · 2</button>
-                <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected">Today · 55</button>
-            </nav>
             <div class="rlb-surface__list" role="group" aria-label="Today TODOs">
                 <div class="rlb-today__tree" role="tree">
                     <div class="rlb-today__row" style="--rlb-today-depth:0" role="treeitem">
@@ -1090,7 +1136,11 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
     const markup = width => `
         <div class="rlb-popover" style="width:${width}px">
             <header class="rlb-surface__header">
-                <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                <div class="rlb-popover__title rlb-visually-hidden">ACTIVE THREADS</div>
+                <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control"><span>Threads</span> <span class="rlb-surface__view-count">2</span></button>
+                    <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected"><span>Today</span> <span class="rlb-surface__view-count">2</span></button>
+                </nav>
                 <div class="rlb-surface__actions">
                     <button
                         class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control"
@@ -1099,6 +1149,7 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
                         aria-label="Expand all Today tasks"
                         aria-expanded="false"
                         aria-controls="rlb-today-tree"></button>
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" aria-label="Dashboard"></button>
                 </div>
             </header>
             <div class="rlb-surface__list" role="group" aria-label="Today TODOs">
@@ -1238,9 +1289,13 @@ test('Active Threads popover reserves scrollbar space before Today starts overfl
         htmlWithLateHost(`
             <div class="rlb-popover" style="max-height:160px">
                 <header class="rlb-surface__header">
-                    <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                    <div class="rlb-popover__title rlb-visually-hidden">ACTIVE THREADS</div>
+                    <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                        <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected"><span>Threads</span> <span class="rlb-surface__view-count">2</span></button>
+                        <button class="bp3-button bp3-minimal rlb-surface__view-control"><span>Today</span> <span class="rlb-surface__view-count">2</span></button>
+                    </nav>
                     <div class="rlb-surface__actions">
-                        <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" aria-label="Dashboard"></button>
+                        <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" aria-label="Dashboard"></button>
                     </div>
                 </header>
                 <div class="rlb-surface__list" id="stable-list">

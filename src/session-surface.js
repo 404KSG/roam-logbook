@@ -28,7 +28,6 @@ const rowFigures = (entry, now) => {
 
 const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
-const refreshLabel = 'Refresh Active Work from graph';
 const dashboardLabel = 'Open Roam Logbook Dashboard';
 const expandTodayLabel = 'Expand all Today tasks';
 const collapseTodayLabel = 'Collapse all Today tasks';
@@ -298,8 +297,6 @@ export function buildSessionSurfaceModel({
     };
 }
 
-const surfaceTitle = count => `${SURFACE_TITLE} · ${count}`;
-
 const appendSection = (list, label, rows, renderRow, modifier = '', context = '') => {
     if (!rows.length) return;
     const section = el('section', `rlb-surface__section ${modifier}`.trim());
@@ -314,34 +311,25 @@ const appendSection = (list, label, rows, renderRow, modifier = '', context = ''
     list.appendChild(section);
 };
 
-const renderRefreshControl = options => {
-    const refreshState = options.refreshState || {};
-    const state = ['idle', 'loading', 'success', 'error'].includes(refreshState.state)
-        ? refreshState.state
-        : 'idle';
-    const refreshCell = el('div', 'rlb-surface__refresh-cell');
-    refreshCell.dataset.refreshState = state;
-    const refresh = button(
-        `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--${state}`,
-        '',
-        () => void options.onRefresh(),
-        { title: refreshLabel }
+const appendInlineRetry = (list, message, onRefresh) => {
+    const status = el('div', 'rlb-surface__inline-status');
+    status.setAttribute('role', 'alert');
+    status.setAttribute('aria-live', 'assertive');
+    status.setAttribute('aria-atomic', 'true');
+    status.append(
+        el('span', 'rlb-surface__inline-message', message),
+        el('span', 'rlb-surface__inline-separator', ' · ')
     );
-    refresh.dataset.action = 'refresh';
-    if (state === 'loading') {
-        refresh.disabled = true;
-        refresh.setAttribute('aria-busy', 'true');
-    }
-    const refreshStatus = el(
-        'span',
-        `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
-        refreshState.message || ''
+    status.querySelector('.rlb-surface__inline-separator').setAttribute('aria-hidden', 'true');
+    const retry = button(
+        'bp3-button bp3-minimal bp3-small rlb-surface__retry',
+        'Retry',
+        () => void onRefresh?.(),
+        { title: 'Retry update' }
     );
-    refreshStatus.setAttribute('role', 'status');
-    refreshStatus.setAttribute('aria-live', 'polite');
-    refreshStatus.setAttribute('aria-atomic', 'true');
-    refreshCell.append(refresh, refreshStatus);
-    return refreshCell;
+    retry.dataset.action = 'retry';
+    status.appendChild(retry);
+    list.appendChild(status);
 };
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
@@ -359,21 +347,63 @@ export function renderSessionSurface(root, model, options = {}) {
         visibleTodayExpandableRows.length === todayExpandableNodes.length &&
         visibleTodayExpandableRows.every(row => row.expanded);
     const todayToggleLabel = todayAllExpanded ? collapseTodayLabel : expandTodayLabel;
-    const title = el('div', 'rlb-popover__title', surfaceTitle(model.activeCount ?? model.rows.length));
+    const title = el('div', 'rlb-popover__title rlb-visually-hidden', SURFACE_TITLE);
     if (options.titleId) title.id = options.titleId;
 
     const header = el('header', 'rlb-surface__header');
     header.appendChild(title);
+    if (options.onSwitchView) {
+        const switcher = el('nav', 'rlb-surface__view-switch');
+        switcher.setAttribute('aria-label', 'Logbook view');
+        const todayModel = options.todayModel || { count: 0 };
+        const todayLoading = todayModel.loading === true || ['idle', 'loading'].includes(todayModel.status);
+        const todayColdError =
+            (todayModel.error === true || todayModel.status === 'error') &&
+            todayModel.hasSnapshot !== true;
+        for (const [view, label, count, loading, failed] of [
+            ['threads', 'Threads', model.activeCount ?? model.rows.length, false, false],
+            ['today', 'Today', todayModel.count ?? 0, todayLoading, todayColdError],
+        ]) {
+            const selected = activeView === view;
+            const control = button(
+                `bp3-button bp3-minimal rlb-surface__view-control${selected ? ' is-selected' : ''}`,
+                '',
+                () => options.onSwitchView(view),
+                { title: switchLabel(view) }
+            );
+            control.dataset.action = 'switch-view';
+            control.dataset.view = view;
+            control.setAttribute('aria-pressed', String(selected));
+            control.append(el('span', 'rlb-surface__view-label', label), document.createTextNode(' '));
+            const status = el(
+                'span',
+                `rlb-surface__view-count${loading ? ' rlb-surface__view-count--loading' : ''}${failed ? ' rlb-surface__view-count--error' : ''}`,
+                loading ? '' : failed ? '!' : String(count)
+            );
+            if (loading) {
+                const spinner = el('span', 'rlb-surface__spinner');
+                spinner.setAttribute('aria-hidden', 'true');
+                status.appendChild(spinner);
+                control.setAttribute('aria-busy', 'true');
+                control.setAttribute('aria-label', `${switchLabel(view)}, updating`);
+            } else if (failed) {
+                control.setAttribute('aria-label', `${switchLabel(view)}, update failed`);
+            }
+            control.appendChild(status);
+            switcher.appendChild(control);
+        }
+        header.appendChild(switcher);
+    }
     const headerActions = el('div', 'rlb-surface__actions');
-    if (options.onOpenDashboard) {
-        const dashboard = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard',
+    if (options.onClose) {
+        const close = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close',
             '',
-            () => options.onOpenDashboard(),
-            { title: dashboardLabel }
+            () => options.onClose(),
+            { title: 'Close Current Sessions' }
         );
-        dashboard.dataset.action = 'dashboard';
-        headerActions.appendChild(dashboard);
+        close.dataset.action = 'close';
+        headerActions.appendChild(close);
     }
     if (todayExpandableNodes.length > 0) {
         const toggleAll = button(
@@ -387,46 +417,18 @@ export function renderSessionSurface(root, model, options = {}) {
         toggleAll.setAttribute('aria-controls', 'rlb-today-tree');
         headerActions.appendChild(toggleAll);
     }
-    if (options.onRefresh) headerActions.appendChild(renderRefreshControl(options));
-    if (options.onClose) {
-        const close = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close',
+    if (options.onOpenDashboard) {
+        const dashboard = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard',
             '',
-            () => options.onClose(),
-            { title: 'Close Current Sessions' }
+            () => options.onOpenDashboard(),
+            { title: dashboardLabel }
         );
-        close.dataset.action = 'close';
-        headerActions.appendChild(close);
+        dashboard.dataset.action = 'dashboard';
+        headerActions.appendChild(dashboard);
     }
     if (headerActions.childElementCount > 0) header.appendChild(headerActions);
     root.replaceChildren(header);
-
-    if (options.onSwitchView) {
-        const switcher = el('nav', 'rlb-surface__view-switch');
-        switcher.setAttribute('aria-label', 'Logbook view');
-        const todayModel = options.todayModel || { count: 0 };
-        for (const [view, label, count] of [
-            ['threads', 'Threads', model.activeCount ?? model.rows.length],
-            [
-                'today',
-                'Today',
-                ['idle', 'loading'].includes(todayModel.status) ? '…' : (todayModel.count ?? 0),
-            ],
-        ]) {
-            const selected = activeView === view;
-            const control = button(
-                `bp3-button bp3-minimal rlb-surface__view-control${selected ? ' is-selected' : ''}`,
-                `${label} · ${count}`,
-                () => options.onSwitchView(view),
-                { title: switchLabel(view) }
-            );
-            control.dataset.action = 'switch-view';
-            control.dataset.view = view;
-            control.setAttribute('aria-pressed', String(selected));
-            switcher.appendChild(control);
-        }
-        root.appendChild(switcher);
-    }
 
     const sessionList = el('div', 'rlb-surface__list');
     sessionList.setAttribute('role', 'group');
@@ -436,12 +438,19 @@ export function renderSessionSurface(root, model, options = {}) {
     if (activeView === 'today') {
         const todayModel = options.todayModel;
         const rows = visibleTodayRows;
-        if (!todayModel || ['idle', 'loading'].includes(todayModel.status)) {
-            sessionList.appendChild(el('div', 'rlb-popover__empty', 'Loading today…'));
-        } else if (todayModel.status === 'error') {
-            sessionList.appendChild(
-                el('div', 'rlb-popover__empty', 'Today tasks could not be read.')
+        const todayFailed = todayModel?.error === true || todayModel?.status === 'error';
+        const hasTodaySnapshot = todayModel?.hasSnapshot === true;
+        if (todayFailed) {
+            appendInlineRetry(
+                sessionList,
+                hasTodaySnapshot ? 'Couldn’t update' : 'Couldn’t read Today',
+                options.onRefresh
             );
+        }
+        if (todayFailed && !hasTodaySnapshot) {
+            // The inline retry is the complete cold-read state.
+        } else if (!todayModel || ['idle', 'loading'].includes(todayModel.status)) {
+            sessionList.appendChild(el('div', 'rlb-popover__empty', 'Loading today…'));
         } else if (rows.length === 0) {
             sessionList.appendChild(el('div', 'rlb-popover__empty', 'No unfinished TODOs today.'));
         } else {
@@ -452,37 +461,42 @@ export function renderSessionSurface(root, model, options = {}) {
             for (const row of rows) tree.appendChild(renderTodayRow(row, options));
             sessionList.appendChild(tree);
         }
-    } else if (model.rows.length === 0) {
-        sessionList.appendChild(
-            el('div', 'rlb-popover__empty', options.emptyMessage || 'No Timing Line is active.')
-        );
     } else {
-        if (model.staleEntries?.length > 0) {
+        if (options.refreshState?.state === 'error') {
+            appendInlineRetry(sessionList, 'Couldn’t update', options.onRefresh);
+        }
+        if (model.rows.length === 0) {
             sessionList.appendChild(
-                el(
-                    'div',
-                    'rlb-popover__empty bp3-text-small',
-                    `${sessionCount(model.staleEntries.length)} ${
-                        model.staleEntries.length > 1 ? 'have' : 'has'
-                    } been open for over ${options.staleHours || 8}h — likely forgotten.`
-                )
+                el('div', 'rlb-popover__empty', options.emptyMessage || 'No Timing Line is active.')
+            );
+        } else {
+            if (model.staleEntries?.length > 0) {
+                sessionList.appendChild(
+                    el(
+                        'div',
+                        'rlb-popover__empty bp3-text-small',
+                        `${sessionCount(model.staleEntries.length)} ${
+                            model.staleEntries.length > 1 ? 'have' : 'has'
+                        } been open for over ${options.staleHours || 8}h — likely forgotten.`
+                    )
+                );
+            }
+            appendSection(
+                sessionList,
+                'TIMING',
+                model.focusedRows,
+                row => renderRunningRow(row, model.now, options),
+                'rlb-surface__section--focused'
+            );
+            appendSection(
+                sessionList,
+                `PARALLEL THREADS · ${model.recentRows.length}`,
+                model.recentRows,
+                row => renderRecentRow(row, model.now, options),
+                'rlb-surface__section--open-lines rlb-surface__section--recent',
+                `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
             );
         }
-        appendSection(
-            sessionList,
-            'TIMING',
-            model.focusedRows,
-            row => renderRunningRow(row, model.now, options),
-            'rlb-surface__section--focused'
-        );
-        appendSection(
-            sessionList,
-            `PARALLEL THREADS · ${model.recentRows.length}`,
-            model.recentRows,
-            row => renderRecentRow(row, model.now, options),
-            'rlb-surface__section--open-lines rlb-surface__section--recent',
-            `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
-        );
     }
 
     for (const notice of options.notices || []) {

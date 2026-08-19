@@ -3479,7 +3479,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.49";
+var PLUGIN_VERSION = "0.9.0-beta.50";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -4525,7 +4525,7 @@ function createRefreshState({
     clearSuccessTimer();
     current = { state, message };
     onRender(current);
-    if (clearAfter) {
+    if (clearAfter && Number.isFinite(successDuration) && successDuration > 0) {
       clearTimer = setTimeoutFn(() => {
         clearTimer = null;
         if (current.state !== "success")
@@ -5682,14 +5682,13 @@ var SURFACE = String.raw`/* ---- popover ---- */
     grid-template-columns: minmax(0, 1fr) max-content;
     align-items: center;
     column-gap: 6px;
+    box-sizing: border-box;
+    height: 32px;
+    min-height: 32px;
     min-width: 0;
-    padding: 0 var(--rlb-surface-action-inset) 4px 2px;
-}
-
-.rlb-surface__header .rlb-popover__title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    margin: 0 2px 5px;
+    padding: 0;
+    border-bottom: 1px solid var(--rlb-surface-border-light);
 }
 
 .rlb-surface__actions {
@@ -5701,39 +5700,88 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-surface__header > .rlb-surface__actions {
-    margin-top: -2px;
+    margin: 0;
 }
 
 .rlb-surface__view-switch {
     display: flex;
     gap: 2px;
-    margin: 0 2px 5px;
-    padding: 2px;
-    border-bottom: 1px solid var(--rlb-surface-border-light);
+    align-items: center;
+    align-self: stretch;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
 }
 
 .rlb-surface__view-control {
-    min-width: 0;
-    flex: 1 1 0;
-    min-height: 26px;
-    padding: 2px 7px !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0 !important;
+    height: 32px;
+    min-height: 32px !important;
+    max-height: 32px;
+    padding: 0 8px !important;
     border-radius: 4px;
     color: var(--rlb-muted);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1.2;
     white-space: nowrap;
 }
 
-.rlb-surface__view-control.is-selected {
-    color: var(--rlb-surface-link);
+.rlb-surface__header .rlb-surface__view-control.is-selected {
+    color: var(--rlb-text);
     background: var(--rlb-surface-focused);
+    box-shadow: inset 0 0 0 1px var(--rlb-surface-border-light);
 }
 
-.rlb-surface__view-control:hover,
-.rlb-surface__view-control:focus-visible {
-    color: var(--rlb-surface-link-hover);
+.rlb-surface__header .rlb-surface__view-control:hover,
+.rlb-surface__header .rlb-surface__view-control:focus-visible {
+    color: var(--rlb-text);
     background: var(--rlb-surface-hover);
+}
+
+.rlb-surface__view-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 2ch;
+    height: 14px;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    opacity: 0.82;
+}
+
+.rlb-surface__view-count--error {
+    font-weight: 700;
+}
+
+.rlb-surface__spinner {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: rlb-surface-spin 720ms linear infinite;
+}
+
+@keyframes rlb-surface-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rlb-surface__spinner {
+        animation: none;
+    }
 }
 
 .rlb-surface__header .bp3-button {
@@ -5771,29 +5819,43 @@ var SURFACE = String.raw`/* ---- popover ---- */
     background: var(--rlb-surface-hover);
 }
 
-.rlb-surface__refresh-cell {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 var(--rlb-surface-action-height);
-    width: var(--rlb-surface-action-height);
-    min-width: var(--rlb-surface-action-height);
-    max-width: var(--rlb-surface-action-height);
-    height: var(--rlb-surface-action-height);
-    min-height: var(--rlb-surface-action-height);
-    max-height: var(--rlb-surface-action-height);
-}
-
-.rlb-surface__refresh-cell .rlb-surface__refresh {
-    flex: 0 0 var(--rlb-surface-action-height);
-}
-
 .rlb-popover__empty {
     padding: 6px 6px 12px;
     color: var(--rlb-muted);
     overflow-wrap: anywhere;
     opacity: 1;
+}
+
+.rlb-surface__inline-status {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    min-height: 28px;
+    padding: 2px 6px 5px;
+    color: var(--rlb-muted);
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.rlb-surface__inline-message,
+.rlb-surface__inline-separator {
+    flex: 0 0 auto;
+}
+
+.bp3-button.bp3-minimal.rlb-surface__retry {
+    flex: 0 0 auto;
+    min-height: 28px;
+    margin: 0;
+    padding: 0 3px !important;
+    color: var(--rlb-text);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.bp3-button.bp3-minimal.rlb-surface__retry:hover,
+.bp3-button.bp3-minimal.rlb-surface__retry:focus-visible {
+    color: var(--rlb-text);
+    background: var(--rlb-surface-hover);
 }
 
 .rlb-surface__list {
@@ -5964,28 +6026,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-surface__footer .bp3-button:not(.bp3-minimal):hover,
 .rlb-surface__footer .bp3-button:not(.bp3-minimal):focus-visible {
     background: var(--rlb-surface-hover);
-}
-
-@keyframes rlb-surface-refresh-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-.rlb-surface__refresh--loading::before {
-    animation: rlb-surface-refresh-spin 900ms linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .rlb-surface__refresh--loading::before {
-        animation: none;
-    }
-}
-
-.rlb-surface__refresh:hover,
-.rlb-surface__refresh:focus-visible {
-    color: #3f596b;
-    background: rgba(167, 182, 194, 0.24);
 }
 
 .bp3-dark .rlb-surface__footer {
@@ -7546,7 +7586,6 @@ var rowFigures = (entry, now) => {
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
-var refreshLabel = "Refresh Active Work from graph";
 var dashboardLabel = "Open Roam Logbook Dashboard";
 var expandTodayLabel = "Expand all Today tasks";
 var collapseTodayLabel = "Collapse all Today tasks";
@@ -7793,7 +7832,6 @@ function buildSessionSurfaceModel({
     staleEntries: findStaleClocks(entries, currentNow, staleHours2)
   };
 }
-var surfaceTitle = (count) => `${SURFACE_TITLE} \xB7 ${count}`;
 var appendSection = (list, label, rows, renderRow, modifier = "", context = "") => {
   if (!rows.length)
     return;
@@ -7809,32 +7847,25 @@ var appendSection = (list, label, rows, renderRow, modifier = "", context = "") 
     section.appendChild(renderRow(row));
   list.appendChild(section);
 };
-var renderRefreshControl = (options) => {
-  const refreshState = options.refreshState || {};
-  const state = ["idle", "loading", "success", "error"].includes(refreshState.state) ? refreshState.state : "idle";
-  const refreshCell = el("div", "rlb-surface__refresh-cell");
-  refreshCell.dataset.refreshState = state;
-  const refresh2 = button(
-    `bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button rlb-surface__refresh rlb-surface__refresh--${state}`,
-    "",
-    () => void options.onRefresh(),
-    { title: refreshLabel }
+var appendInlineRetry = (list, message, onRefresh) => {
+  const status = el("div", "rlb-surface__inline-status");
+  status.setAttribute("role", "alert");
+  status.setAttribute("aria-live", "assertive");
+  status.setAttribute("aria-atomic", "true");
+  status.append(
+    el("span", "rlb-surface__inline-message", message),
+    el("span", "rlb-surface__inline-separator", " \xB7 ")
   );
-  refresh2.dataset.action = "refresh";
-  if (state === "loading") {
-    refresh2.disabled = true;
-    refresh2.setAttribute("aria-busy", "true");
-  }
-  const refreshStatus = el(
-    "span",
-    `rlb-surface__refresh-status rlb-surface__refresh-status--${state} rlb-visually-hidden`,
-    refreshState.message || ""
+  status.querySelector(".rlb-surface__inline-separator").setAttribute("aria-hidden", "true");
+  const retry = button(
+    "bp3-button bp3-minimal bp3-small rlb-surface__retry",
+    "Retry",
+    () => void onRefresh?.(),
+    { title: "Retry update" }
   );
-  refreshStatus.setAttribute("role", "status");
-  refreshStatus.setAttribute("aria-live", "polite");
-  refreshStatus.setAttribute("aria-atomic", "true");
-  refreshCell.append(refresh2, refreshStatus);
-  return refreshCell;
+  retry.dataset.action = "retry";
+  status.appendChild(retry);
+  list.appendChild(status);
 };
 function renderSessionSurface(root, model, options = {}) {
   const activeView = options.view === "today" ? "today" : "threads";
@@ -7843,21 +7874,61 @@ function renderSessionSurface(root, model, options = {}) {
   const visibleTodayExpandableRows = visibleTodayRows.filter((row) => row?.node?.children?.length > 0);
   const todayAllExpanded = todayExpandableNodes.length > 0 && visibleTodayExpandableRows.length === todayExpandableNodes.length && visibleTodayExpandableRows.every((row) => row.expanded);
   const todayToggleLabel = todayAllExpanded ? collapseTodayLabel : expandTodayLabel;
-  const title = el("div", "rlb-popover__title", surfaceTitle(model.activeCount ?? model.rows.length));
+  const title = el("div", "rlb-popover__title rlb-visually-hidden", SURFACE_TITLE);
   if (options.titleId)
     title.id = options.titleId;
   const header = el("header", "rlb-surface__header");
   header.appendChild(title);
+  if (options.onSwitchView) {
+    const switcher = el("nav", "rlb-surface__view-switch");
+    switcher.setAttribute("aria-label", "Logbook view");
+    const todayModel = options.todayModel || { count: 0 };
+    const todayLoading = todayModel.loading === true || ["idle", "loading"].includes(todayModel.status);
+    const todayColdError = (todayModel.error === true || todayModel.status === "error") && todayModel.hasSnapshot !== true;
+    for (const [view, label, count, loading, failed] of [
+      ["threads", "Threads", model.activeCount ?? model.rows.length, false, false],
+      ["today", "Today", todayModel.count ?? 0, todayLoading, todayColdError]
+    ]) {
+      const selected = activeView === view;
+      const control = button(
+        `bp3-button bp3-minimal rlb-surface__view-control${selected ? " is-selected" : ""}`,
+        "",
+        () => options.onSwitchView(view),
+        { title: switchLabel(view) }
+      );
+      control.dataset.action = "switch-view";
+      control.dataset.view = view;
+      control.setAttribute("aria-pressed", String(selected));
+      control.append(el("span", "rlb-surface__view-label", label), document.createTextNode(" "));
+      const status = el(
+        "span",
+        `rlb-surface__view-count${loading ? " rlb-surface__view-count--loading" : ""}${failed ? " rlb-surface__view-count--error" : ""}`,
+        loading ? "" : failed ? "!" : String(count)
+      );
+      if (loading) {
+        const spinner = el("span", "rlb-surface__spinner");
+        spinner.setAttribute("aria-hidden", "true");
+        status.appendChild(spinner);
+        control.setAttribute("aria-busy", "true");
+        control.setAttribute("aria-label", `${switchLabel(view)}, updating`);
+      } else if (failed) {
+        control.setAttribute("aria-label", `${switchLabel(view)}, update failed`);
+      }
+      control.appendChild(status);
+      switcher.appendChild(control);
+    }
+    header.appendChild(switcher);
+  }
   const headerActions = el("div", "rlb-surface__actions");
-  if (options.onOpenDashboard) {
-    const dashboard = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard",
+  if (options.onClose) {
+    const close = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close",
       "",
-      () => options.onOpenDashboard(),
-      { title: dashboardLabel }
+      () => options.onClose(),
+      { title: "Close Current Sessions" }
     );
-    dashboard.dataset.action = "dashboard";
-    headerActions.appendChild(dashboard);
+    close.dataset.action = "close";
+    headerActions.appendChild(close);
   }
   if (todayExpandableNodes.length > 0) {
     const toggleAll = button(
@@ -7871,47 +7942,19 @@ function renderSessionSurface(root, model, options = {}) {
     toggleAll.setAttribute("aria-controls", "rlb-today-tree");
     headerActions.appendChild(toggleAll);
   }
-  if (options.onRefresh)
-    headerActions.appendChild(renderRefreshControl(options));
-  if (options.onClose) {
-    const close = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-cross rlb-surface__icon-button rlb-surface__close",
+  if (options.onOpenDashboard) {
+    const dashboard = button(
+      "bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button rlb-surface__dashboard",
       "",
-      () => options.onClose(),
-      { title: "Close Current Sessions" }
+      () => options.onOpenDashboard(),
+      { title: dashboardLabel }
     );
-    close.dataset.action = "close";
-    headerActions.appendChild(close);
+    dashboard.dataset.action = "dashboard";
+    headerActions.appendChild(dashboard);
   }
   if (headerActions.childElementCount > 0)
     header.appendChild(headerActions);
   root.replaceChildren(header);
-  if (options.onSwitchView) {
-    const switcher = el("nav", "rlb-surface__view-switch");
-    switcher.setAttribute("aria-label", "Logbook view");
-    const todayModel = options.todayModel || { count: 0 };
-    for (const [view, label, count] of [
-      ["threads", "Threads", model.activeCount ?? model.rows.length],
-      [
-        "today",
-        "Today",
-        ["idle", "loading"].includes(todayModel.status) ? "\u2026" : todayModel.count ?? 0
-      ]
-    ]) {
-      const selected = activeView === view;
-      const control = button(
-        `bp3-button bp3-minimal rlb-surface__view-control${selected ? " is-selected" : ""}`,
-        `${label} \xB7 ${count}`,
-        () => options.onSwitchView(view),
-        { title: switchLabel(view) }
-      );
-      control.dataset.action = "switch-view";
-      control.dataset.view = view;
-      control.setAttribute("aria-pressed", String(selected));
-      switcher.appendChild(control);
-    }
-    root.appendChild(switcher);
-  }
   const sessionList = el("div", "rlb-surface__list");
   sessionList.setAttribute("role", "group");
   sessionList.setAttribute("aria-label", activeView === "today" ? "Today TODOs" : "Active Threads");
@@ -7919,12 +7962,18 @@ function renderSessionSurface(root, model, options = {}) {
   if (activeView === "today") {
     const todayModel = options.todayModel;
     const rows = visibleTodayRows;
-    if (!todayModel || ["idle", "loading"].includes(todayModel.status)) {
-      sessionList.appendChild(el("div", "rlb-popover__empty", "Loading today\u2026"));
-    } else if (todayModel.status === "error") {
-      sessionList.appendChild(
-        el("div", "rlb-popover__empty", "Today tasks could not be read.")
+    const todayFailed = todayModel?.error === true || todayModel?.status === "error";
+    const hasTodaySnapshot = todayModel?.hasSnapshot === true;
+    if (todayFailed) {
+      appendInlineRetry(
+        sessionList,
+        hasTodaySnapshot ? "Couldn\u2019t update" : "Couldn\u2019t read Today",
+        options.onRefresh
       );
+    }
+    if (todayFailed && !hasTodaySnapshot) {
+    } else if (!todayModel || ["idle", "loading"].includes(todayModel.status)) {
+      sessionList.appendChild(el("div", "rlb-popover__empty", "Loading today\u2026"));
     } else if (rows.length === 0) {
       sessionList.appendChild(el("div", "rlb-popover__empty", "No unfinished TODOs today."));
     } else {
@@ -7936,35 +7985,40 @@ function renderSessionSurface(root, model, options = {}) {
         tree.appendChild(renderTodayRow(row, options));
       sessionList.appendChild(tree);
     }
-  } else if (model.rows.length === 0) {
-    sessionList.appendChild(
-      el("div", "rlb-popover__empty", options.emptyMessage || "No Timing Line is active.")
-    );
   } else {
-    if (model.staleEntries?.length > 0) {
+    if (options.refreshState?.state === "error") {
+      appendInlineRetry(sessionList, "Couldn\u2019t update", options.onRefresh);
+    }
+    if (model.rows.length === 0) {
       sessionList.appendChild(
-        el(
-          "div",
-          "rlb-popover__empty bp3-text-small",
-          `${sessionCount(model.staleEntries.length)} ${model.staleEntries.length > 1 ? "have" : "has"} been open for over ${options.staleHours || 8}h \u2014 likely forgotten.`
-        )
+        el("div", "rlb-popover__empty", options.emptyMessage || "No Timing Line is active.")
+      );
+    } else {
+      if (model.staleEntries?.length > 0) {
+        sessionList.appendChild(
+          el(
+            "div",
+            "rlb-popover__empty bp3-text-small",
+            `${sessionCount(model.staleEntries.length)} ${model.staleEntries.length > 1 ? "have" : "has"} been open for over ${options.staleHours || 8}h \u2014 likely forgotten.`
+          )
+        );
+      }
+      appendSection(
+        sessionList,
+        "TIMING",
+        model.focusedRows,
+        (row) => renderRunningRow(row, model.now, options),
+        "rlb-surface__section--focused"
+      );
+      appendSection(
+        sessionList,
+        `PARALLEL THREADS \xB7 ${model.recentRows.length}`,
+        model.recentRows,
+        (row) => renderRecentRow(row, model.now, options),
+        "rlb-surface__section--open-lines rlb-surface__section--recent",
+        `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
       );
     }
-    appendSection(
-      sessionList,
-      "TIMING",
-      model.focusedRows,
-      (row) => renderRunningRow(row, model.now, options),
-      "rlb-surface__section--focused"
-    );
-    appendSection(
-      sessionList,
-      `PARALLEL THREADS \xB7 ${model.recentRows.length}`,
-      model.recentRows,
-      (row) => renderRecentRow(row, model.now, options),
-      "rlb-surface__section--open-lines rlb-surface__section--recent",
-      `Leave after ${model.openLineWindowMinutes ?? ACTIVE_WORK_WINDOW_MINUTES}m without focus`
-    );
   }
   for (const notice3 of options.notices || []) {
     const message = typeof notice3 === "string" ? notice3 : notice3?.message;
@@ -8574,6 +8628,7 @@ var TOPBAR_REFRESH_MESSAGES = {
   ...REFRESH_MESSAGES.activeWork,
   loading: "Refreshing Active Work state from graph\u2026"
 };
+var TODAY_REVALIDATE_AFTER_MS = 3e4;
 var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
@@ -8657,10 +8712,12 @@ function createTopbar({
   let themeRuntime = null;
   let surfaceView = "threads";
   let todaySnapshot = null;
+  let todaySnapshotAt = null;
   let todayStatus = "idle";
   let todayNotice = "";
   let todayExpanded = /* @__PURE__ */ new Set();
   let todayRequestToken = 0;
+  let todayInFlight = null;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
   const layoutHostDisplay = /* @__PURE__ */ new Map();
@@ -8674,10 +8731,12 @@ function createTopbar({
     actionNotice = "";
     surfaceView = "threads";
     todaySnapshot = null;
+    todaySnapshotAt = null;
     todayStatus = "idle";
     todayNotice = "";
     todayExpanded = /* @__PURE__ */ new Set();
     todayRequestToken += 1;
+    todayInFlight = null;
   };
   const cancelPendingOpenRefresh = () => {
     const pending = pendingOpenRefresh;
@@ -8714,12 +8773,28 @@ function createTopbar({
     });
   };
   const todayModel = () => {
-    if (!todaySnapshot)
-      return { status: todayStatus, roots: [], nodes: [], count: 0 };
+    if (!todaySnapshot) {
+      return {
+        status: todayStatus,
+        loading: Boolean(todayInFlight),
+        hasSnapshot: false,
+        error: Boolean(todayNotice),
+        roots: [],
+        nodes: [],
+        count: 0
+      };
+    }
     const tree = buildTodayTodoTree(todaySnapshot.roots, {
       referenceStrings: todaySnapshot.referenceStrings
     });
-    return { ...tree, status: todayStatus, pageTitle: todaySnapshot.pageTitle };
+    return {
+      ...tree,
+      status: todayStatus,
+      loading: Boolean(todayInFlight),
+      hasSnapshot: true,
+      error: Boolean(todayNotice),
+      pageTitle: todaySnapshot.pageTitle
+    };
   };
   const todayRows = (model) => {
     if (!model?.nodes?.length)
@@ -8732,8 +8807,7 @@ function createTopbar({
   };
   const surfaceNotices = () => [
     ...actionNotice ? [{ message: actionNotice, role: "alert" }] : [],
-    ...!actionNotice && getNotice() ? [{ message: getNotice(), role: "status" }] : [],
-    ...todayNotice ? [{ message: todayNotice, role: "status" }] : []
+    ...!actionNotice && refreshState.state !== "error" && getNotice() ? [{ message: getNotice(), role: "status" }] : []
   ];
   const renderSurfaces = () => {
     if (popover)
@@ -8762,7 +8836,10 @@ function createTopbar({
       refreshState = state;
       renderRefreshState();
     },
-    messages: TOPBAR_REFRESH_MESSAGES
+    messages: TOPBAR_REFRESH_MESSAGES,
+    // Success has no visible affordance in the compact toolbar, so the
+    // topbar does not need a delayed success-to-idle reset timer.
+    successDuration: 0
   });
   const refreshSessions = () => {
     actionNotice = "";
@@ -8780,12 +8857,12 @@ function createTopbar({
       },
       {
         isSuccess: (result) => result?.ok,
-        onFailure: (result) => {
-          actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+        onFailure: () => {
+          actionNotice = "";
         },
         onError: (error) => {
           console.error("[roam-logbook] could not refresh Session surface", error);
-          actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+          actionNotice = "";
           return {
             ok: false,
             uncertain: true,
@@ -8796,29 +8873,41 @@ function createTopbar({
       }
     );
   };
-  const loadToday = async ({ force = false } = {}) => {
+  const loadToday = ({ force = false } = {}) => {
     if (!popover)
-      return { ok: false, cancelled: true };
-    if (!force && todaySnapshot)
-      return { ok: true, cached: true, snapshot: todaySnapshot };
+      return Promise.resolve({ ok: false, cancelled: true });
+    if (todayInFlight)
+      return todayInFlight;
+    if (!force && todaySnapshot) {
+      return Promise.resolve({ ok: true, cached: true, snapshot: todaySnapshot });
+    }
     const token = ++todayRequestToken;
     if (!todaySnapshot)
       todayStatus = "loading";
     todayNotice = "";
+    const request = Promise.resolve().then(() => readTodayTodoSnapshot(nowDate())).then((result) => {
+      if (token !== todayRequestToken || !popover) {
+        return { ok: false, cancelled: true };
+      }
+      if (result.ok) {
+        todaySnapshot = result;
+        todaySnapshotAt = nowDate().getTime();
+        todayStatus = result.status;
+        todayNotice = "";
+      } else {
+        todayStatus = todaySnapshot?.status || "error";
+        todayNotice = todaySnapshot ? "Today tasks could not be refreshed; showing the last saved view." : "Today tasks could not be read. Refresh to try again.";
+      }
+      return result;
+    }).finally(() => {
+      if (todayInFlight === request)
+        todayInFlight = null;
+      if (token === todayRequestToken && popover)
+        renderSurfaces();
+    });
+    todayInFlight = request;
     renderSurfaces();
-    const result = await Promise.resolve().then(() => readTodayTodoSnapshot(nowDate()));
-    if (token !== todayRequestToken || !popover)
-      return { ok: false, cancelled: true };
-    if (result.ok) {
-      todaySnapshot = result;
-      todayStatus = result.status;
-      todayNotice = "";
-    } else {
-      todayStatus = todaySnapshot?.status || "error";
-      todayNotice = todaySnapshot ? "Today tasks could not be refreshed; showing the last saved view." : "Today tasks could not be read. Refresh to try again.";
-    }
-    renderSurfaces();
-    return result;
+    return request;
   };
   const requestSessionRefresh = () => {
     const current = pendingOpenRefresh?.promise || refreshSessions();
@@ -8893,8 +8982,12 @@ function createTopbar({
       onSwitchView: (view) => {
         surfaceView = view === "today" ? "today" : "threads";
         renderSurfaces();
-        if (surfaceView === "today")
-          void loadToday();
+        if (surfaceView === "today") {
+          const snapshotAge = todaySnapshotAt === null ? Number.POSITIVE_INFINITY : nowDate().getTime() - todaySnapshotAt;
+          if (!todaySnapshot || snapshotAge > TODAY_REVALIDATE_AFTER_MS) {
+            void loadToday({ force: Boolean(todaySnapshot) });
+          }
+        }
       },
       onToggleToday: (uid) => {
         const next = new Set(todayExpanded);

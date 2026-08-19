@@ -206,11 +206,14 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
     assert.match(css, /\.rlb-surface__actions\s*\{[^}]*display: flex[^}]*gap: 2px/s);
     assert.match(css, /\.rlb-surface__icon-button\s*\{[^}]*width: var\(--rlb-surface-action-height\)[^}]*height: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-surface__header\s*\{[^}]*height: 32px[^}]*border-bottom: 1px solid var\(--rlb-surface-border-light\)/s);
+    assert.match(css, /\.rlb-surface__view-control\s*\{[^}]*flex: 0 0 auto[^}]*height: 32px/s);
+    assert.match(css, /\.rlb-surface__header \.rlb-surface__view-control\.is-selected\s*\{[^}]*color: var\(--rlb-text\)[^}]*background: var\(--rlb-surface-focused\)/s);
+    assert.match(css, /\.rlb-surface__view-count\s*\{[^}]*min-width: 2ch[^}]*font-variant-numeric: tabular-nums/s);
+    assert.match(css, /\.rlb-surface__spinner\s*\{[^}]*width: 10px[^}]*animation: rlb-surface-spin/s);
     assert.match(css, /\.rlb-surface__footer\s*\{[^}]*display: flex[^}]*border-top: 1px solid var\(--rlb-surface-border\)/s);
     assert.doesNotMatch(css, /rlb-popover__footer|footer--empty|footer--single-running/);
-    assert.match(css, /\.rlb-surface__refresh-cell\s*\{[^}]*display: inline-flex[^}]*width: var\(--rlb-surface-action-height\)/s);
-    assert.match(css, /\.rlb-surface__refresh--loading::before[^}]*animation: rlb-surface-refresh-spin/s);
-    assert.doesNotMatch(css, /\.rlb-surface__refresh-status[^}]*position: absolute/s);
+    assert.doesNotMatch(css, /rlb-surface__refresh(?:-cell|--loading|-status)/);
     const focusedSectionRule = css.match(/\.rlb-surface__section--focused\s*{([^}]*)}/)?.[1] ?? '';
     assert.match(focusedSectionRule, /border:\s*1px solid var\(--rlb-surface-border\)/);
     assert.match(focusedSectionRule, /border-radius:\s*6px/);
@@ -401,7 +404,8 @@ test('the shared overrun state takes priority over stale metadata', () => {
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+    assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 1');
     assert.match(popover.textContent, /1 Session has been open for over 8h/);
     assert.doesNotMatch(popover.textContent, /clock has been open/i);
     click(topbarWidget().querySelector('button'));
@@ -479,16 +483,11 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
         assert.equal(popover.querySelectorAll('.rlb-run').length, 3);
-        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 3');
+        assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+        assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 3');
         const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
-        assert.deepEqual(headerActions.map(node => node.dataset.action || 'refresh-cell'), [
-            'dashboard',
-            'refresh-cell',
-        ]);
-        const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-        assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
-        assert.equal(headerRefresh.title, 'Refresh Active Work from graph');
-        assert.equal(headerRefresh.getAttribute('aria-label'), null);
+        assert.deepEqual(headerActions.map(node => node.dataset.action), ['dashboard']);
+        assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
         assert.equal(popover.querySelector('.rlb-surface__footer'), null);
         click(topbarWidget().querySelector('button'));
     } finally {
@@ -517,7 +516,8 @@ test('the popover lists the running clock', () => {
 
     assert.ok(popover, 'clicking the widget should open the popover');
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+    assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 1');
     const taskTitle = popover.querySelector('.rlb-run__title');
     assert.ok(taskTitle);
     assert.equal(taskTitle.tagName, 'BUTTON');
@@ -534,14 +534,8 @@ test('the popover lists the running clock', () => {
     assert.match(discard.title, /Discard this CLOCK entry/);
     assert.equal(discard.getAttribute('aria-label'), null);
     const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
-    assert.deepEqual(headerActions.map(action => action.dataset.action || 'refresh-cell'), [
-        'dashboard',
-        'refresh-cell',
-    ]);
-    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-    assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(refresh.title, 'Refresh Active Work from graph');
-    assert.equal(refresh.getAttribute('aria-label'), null);
+    assert.deepEqual(headerActions.map(action => action.dataset.action), ['dashboard']);
+    assert.equal(popover.querySelector('.rlb-surface__header [data-action="refresh"]'), null);
     assert.equal(popover.querySelector('.rlb-surface__footer'), null);
 
     click(topbarWidget().querySelector('button'));

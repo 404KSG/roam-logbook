@@ -35,7 +35,7 @@ export function createRefreshState({
         clearSuccessTimer();
         current = { state, message };
         onRender(current);
-        if (clearAfter) {
+        if (clearAfter && Number.isFinite(successDuration) && successDuration > 0) {
             clearTimer = setTimeoutFn(() => {
                 clearTimer = null;
                 if (current.state !== 'success') return;

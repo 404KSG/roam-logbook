@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.49**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.50**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.49 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.50 keeps the single-page Activity panel and cached Today task-pool view while refining the popover into one compact Linear-style toolbar; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -69,7 +69,7 @@ There is always exactly one real running `CLOCK`: the Focused Task. Switching ta
 0:28 · 2 Threads
 ```
 
-Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Thread count for the popover. The popover is titled **ACTIVE THREADS · N** and presents the Timing Line as a compact neutral Linear-style card with a uniform hairline border, while Parallel Threads form a quiet flat list. Timing elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Parallel Threads show their total and the context **Leave after 45m without focus**. Active Work preserves visible Roam references such as `[[Roam Logbook]]` and `#[[Deep Work]]`; task titles use the graph's page-reference colour without an underline. Clicking a Parallel Thread title opens its block; its independent Focus action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Timing Line has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Refresh is an icon-only action with an icon-only loading state and hidden live status feedback. Current-work task titles remain single native keyboard-accessible buttons rather than nested page-reference links.
+Task names, banked totals, the shared Pomodoro cycle, and actions stay in the tooltip and shared current-session surface. Click the icon, time, or Thread count for the popover. One compact toolbar contains auto-width **Threads N** and **Today N** tabs plus right-aligned contextual actions; Active Threads remains the accessible dialog context instead of duplicated visible copy. Dashboard is always the rightmost header action, and the Today bulk toggle appears immediately before it only for an expandable Today tree. The Timing Line is a compact neutral Linear-style card with a uniform hairline border, while Parallel Threads form a quiet flat list. Timing elapsed time is the strongest metadata; Pomodoro overrun changes only that elapsed text to red. Parallel Threads show their total and the context **Leave after 45m without focus**. Active Work preserves visible Roam references such as `[[Roam Logbook]]` and `#[[Deep Work]]`; task titles use the graph's page-reference colour without an underline. Clicking a Parallel Thread title opens its block; its independent Focus action starts a new Session. **Shift+Click on the topbar trigger is intentionally inert**, while Shift+Clicking a task title or Dashboard task entry opens that block through Roam's native right-sidebar block-window API. Every Timing Line has an explicit icon-only **Check Out** action; the low-level Discard action stays secondary. Dashboard and Clock Out All remain available where applicable. Background refresh shows only a stable Today-slot spinner; failures keep cached data and expose compact inline Retry, with no permanent header Refresh. Current-work task titles remain single native keyboard-accessible buttons rather than nested page-reference links.
 
 **DONE completion** — changing a watched Task to `DONE` closes its confirmed
 running Focused CLOCK and the confirmed running CLOCKs of its descendants. A
@@ -140,12 +140,14 @@ The Top Bar and TODO-only Clock In rule are now core behavior rather than option
 
 ### Today task pool
 
-The Active Threads popover has two views: **Threads · N** keeps the current
-Timing Line and 45-minute return set, while **Today · N** is a separate task
+The Active Threads popover has two views: **Threads N** keeps the current
+Timing Line and 45-minute return set, while **Today N** is a separate task
 pool containing unfinished TODOs from today's Roam Daily Notes page. Today
 does not add Sessions, timing, dashboard totals, or Pomodoro state. It loads
-after the Threads view paints, remains cached while the popover is open, and
-Refresh reloads both views.
+after the Threads view paints and remains cached while the popover is open.
+Entering Today revalidates only when its successful snapshot is older than 30
+seconds. A compact inline Retry reloads both views after an error; there is no
+permanent header Refresh.
 
 Today preserves Daily Notes order and task hierarchy through plain intermediary
 blocks. DONE rows are hidden; unfinished children under a DONE parent are

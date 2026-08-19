@@ -206,13 +206,13 @@ test('ordinary click paints cached Sessions and loading before post-paint graph 
 
     click(document.querySelector('#roam-logbook-topbar button'));
     const popover = document.querySelector('body > .rlb-popover');
-    const refresh = popover.querySelector('[data-action="refresh"]');
+    const today = popover.querySelector('[data-view="today"]');
 
     assert.ok(popover, 'Popover exists on the click stack');
     assert.match(popover.textContent, /Cached Session/);
-    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
-    assert.equal(refresh.getAttribute('aria-busy'), 'true');
-    assert.equal(refresh.textContent, '');
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+    assert.equal(today.getAttribute('aria-busy'), 'true');
+    assert.ok(today.querySelector('.rlb-surface__spinner'));
     assert.equal(graphReads, 0, 'graph read waits for the post-paint scheduler');
     assert.equal(scheduler.size, 1);
 
@@ -220,10 +220,10 @@ test('ordinary click paints cached Sessions and loading before post-paint graph 
     await settle();
 
     assert.equal(graphReads, 1);
-    assert.equal(
-        popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
-        'success'
-    );
+    assert.equal(popover.querySelector('[data-view="today"]').getAttribute('aria-busy'), null);
+    assert.equal(popover.querySelector('.rlb-surface__spinner'), null);
+    assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null, 'success is silent');
 });
 
 test('post-paint scheduler waits for animation frame and a following task and can cancel either phase', () => {
@@ -449,52 +449,58 @@ test('unmount cancels a pending open-time revalidation callback', async t => {
     assert.equal(document.querySelector('body > .rlb-popover'), null);
 });
 
-test('manual Refresh during pending and in-flight open revalidation reuses one graph read', async t => {
+test('Retry after failed open revalidation reuses one in-flight graph read', async t => {
     const scheduler = createManualPostPaintScheduler();
     mountControlledTopbar(t, { blocks: cachedSessionBlocks(), scheduler });
     let graphReads = 0;
     const originalQuery = graph.api.data.q;
-    graph.api.data.q = (...args) => {
-        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
-        return originalQuery(...args);
-    };
     t.after(() => {
         graph.api.data.q = originalQuery;
     });
 
+    graph.api.data.q = () => {
+        throw new Error('retry setup failure');
+    };
     click(topbarButton());
     const popover = document.querySelector('body > .rlb-popover');
-    click(popover.querySelector('[data-action="refresh"]'));
-    assert.equal(graphReads, 0);
-
     scheduler.flush();
-    click(popover.querySelector('[data-action="refresh"]'));
+    await settle();
+    const retry = popover.querySelector('[data-action="retry"]');
+    assert.ok(retry);
+
+    graph.api.data.q = (...args) => {
+        if (String(args[0]).includes(':in $ [?drawer-string ...]')) graphReads += 1;
+        return originalQuery(...args);
+    };
+    click(retry);
+    click(retry);
     await settle();
 
     assert.equal(graphReads, 1);
-    assert.equal(
-        popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
-        'success'
-    );
+    assert.equal(popover.querySelector('[data-action="retry"]'), null);
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+    assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
 });
 
-test('Active Work header keeps Dashboard and Refresh together with no empty footer', () => {
+test('Active Work toolbar keeps Dashboard rightmost and omits header Refresh', () => {
     const root = document.createElement('div');
     renderSessionSurface(
         root,
         { rows: [], focusedRows: [], recentRows: [], runningCount: 0, staleEntries: [], now: Date.now() },
-        { onOpenDashboard: () => {}, onRefresh: () => {}, refreshState: { state: 'loading' } }
+        {
+            onOpenDashboard: () => {},
+            onRefresh: () => {},
+            onSwitchView: () => {},
+            todayModel: { status: 'loading', loading: true, count: 0 },
+            refreshState: { state: 'loading' },
+        }
     );
 
     const header = root.querySelector('.rlb-surface__header');
     const actions = [...header.querySelectorAll('.rlb-surface__actions > *')];
     const dashboard = header.querySelector('[data-action="dashboard"]');
-    const refresh = header.querySelector('[data-action="refresh"]');
 
-    assert.deepEqual(actions.map(action => action.dataset.action || 'refresh-cell'), [
-        'dashboard',
-        'refresh-cell',
-    ]);
+    assert.deepEqual(actions.map(action => action.dataset.action), ['dashboard']);
     assert.ok(dashboard.classList.contains('bp3-icon-dashboard'));
     assert.equal(dashboard.classList.contains('bp3-icon-home'), false);
     assert.equal(dashboard.title, 'Open Roam Logbook Dashboard');
@@ -503,20 +509,13 @@ test('Active Work header keeps Dashboard and Refresh together with no empty foot
     assert.ok(dashboard.title);
     assert.equal(dashboard.getAttribute('aria-label'), null);
     assert.equal(dashboard.type, 'button');
-    assert.ok(refresh.classList.contains('bp3-icon-refresh'));
-    assert.equal(refresh.title, 'Refresh Active Work from graph');
-    // An icon-only button takes its accessible name from title; a
-    // duplicate aria-label would only be announced twice.
-    assert.ok(refresh.title);
-    assert.equal(refresh.getAttribute('aria-label'), null);
-    assert.equal(refresh.disabled, true);
-    assert.equal(refresh.getAttribute('aria-busy'), 'true');
-    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
-    assert.equal(root.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'), true);
+    assert.equal(header.querySelector('[data-action="refresh"]'), null);
+    assert.equal(header.querySelector('[data-view="today"]').getAttribute('aria-busy'), 'true');
+    assert.ok(header.querySelector('.rlb-surface__spinner'));
     assert.equal(root.querySelector('.rlb-surface__footer'), null);
 });
 
-test('shared Active Work header orders Dashboard, Refresh, and Close actions', () => {
+test('shared Active Work header keeps Dashboard rightmost when Close is present', () => {
     const root = document.createElement('div');
     renderSessionSurface(
         root,
@@ -525,11 +524,7 @@ test('shared Active Work header orders Dashboard, Refresh, and Close actions', (
     );
 
     const actions = [...root.querySelectorAll('.rlb-surface__actions > *')];
-    assert.deepEqual(actions.map(action => action.dataset.action || 'refresh-cell'), [
-        'dashboard',
-        'refresh-cell',
-        'close',
-    ]);
+    assert.deepEqual(actions.map(action => action.dataset.action), ['close', 'dashboard']);
     assert.equal(root.querySelector('.rlb-surface__footer'), null);
     for (const action of root.querySelectorAll('.rlb-surface__actions button')) {
         assert.equal(action.type, 'button');
@@ -568,9 +563,9 @@ test('single Focused Task has no bulk footer while retaining header actions', as
     const popover = openPopover();
     assert.deepEqual(
         [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')].map(
-            action => action.dataset.action || 'refresh-cell'
+            action => action.dataset.action
         ),
-        ['dashboard', 'refresh-cell']
+        ['dashboard']
     );
     assert.equal(popover.querySelector('.rlb-surface__footer'), null);
     assert.ok(popover.querySelector('[data-action="clock-out"]'), 'individual Check Out remains available');
@@ -625,28 +620,33 @@ test('multi-Active Work keeps header icons distinct from the Clock Out All foote
     ]);
     assert.deepEqual(
         [...root.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')].map(
-            action => action.dataset.action || 'refresh-cell'
+            action => action.dataset.action
         ),
-        ['dashboard', 'refresh-cell']
+        ['dashboard']
     );
-    assert.equal(
-        root.querySelector('[data-action="refresh"]')?.title,
-        'Refresh Active Work from graph'
-    );
+    assert.equal(root.querySelector('[data-action="refresh"]'), null);
 });
 
-test('Refresh loading state is disabled in the header without changing live status semantics', () => {
+test('loading uses only the stable Today status slot and keeps Dashboard rightmost', () => {
     const root = document.createElement('div');
     renderSessionSurface(
         root,
         { rows: [], focusedRows: [], recentRows: [], runningCount: 2, staleEntries: [], now: Date.now() },
-        { onRefresh: () => {}, refreshState: { state: 'loading' } }
+        {
+            onRefresh: () => {},
+            onSwitchView: () => {},
+            onOpenDashboard: () => {},
+            todayModel: { status: 'loading', loading: true, count: 0 },
+            refreshState: { state: 'loading' },
+        }
     );
 
-    const refresh = root.querySelector('[data-action="refresh"]');
-    assert.ok(refresh?.disabled);
-    assert.equal(refresh?.getAttribute('aria-busy'), 'true');
-    assert.equal(root.querySelector('.rlb-surface__refresh-cell')?.dataset.refreshState, 'loading');
+    const today = root.querySelector('[data-view="today"]');
+    assert.equal(root.querySelector('[data-action="refresh"]'), null);
+    assert.equal(today.getAttribute('aria-busy'), 'true');
+    assert.equal(today.getAttribute('aria-label'), 'Show Today tasks, updating');
+    assert.ok(today.querySelector('.rlb-surface__spinner'));
+    assert.equal(root.querySelector('.rlb-surface__actions > :last-child').dataset.action, 'dashboard');
     assert.equal(root.querySelector('.rlb-surface__footer'), null);
 });
 
@@ -878,7 +878,7 @@ test('topbar keeps one shared Work Cycle across task switches and ignores Roam s
     assert.equal(pomodoro.getCycle(), null);
 });
 
-test('Active Work header keeps Refresh copy hidden while preserving accessible state feedback', async t => {
+test('Active Work open revalidation uses the Today spinner and keeps success silent', async t => {
     t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-15T09:00:00') });
     settingsStore.set('allowMultipleClocks', true);
     graph.store.set('popover-task-02', {
@@ -891,72 +891,36 @@ test('Active Work header keeps Refresh copy hidden while preserving accessible s
     await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
 
     const popover = openPopover();
-    const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
+    const today = popover.querySelector('[data-view="today"]');
     const checkout = popover.querySelector('[data-action="clock-out"]');
 
-    assert.ok(refresh, 'Refresh belongs in the surface header');
-    assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
-    assert.equal(refresh.title, 'Refresh Active Work from graph');
-    assert.equal(refresh.getAttribute('aria-label'), null);
-    assert.ok(refresh.classList.contains('bp3-icon-refresh'));
-    assert.equal(refresh.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
-    const live = popover.querySelector('.rlb-surface__refresh-status');
-    assert.equal(live.getAttribute('role'), 'status');
-    assert.equal(live.getAttribute('aria-live'), 'polite');
-    assert.equal(live.getAttribute('aria-atomic'), 'true');
-    assert.ok(live.classList.contains('rlb-visually-hidden'));
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+    assert.equal(today.getAttribute('aria-busy'), 'true');
+    assert.equal(today.getAttribute('aria-label'), 'Show Today tasks, updating');
+    assert.ok(today.querySelector('.rlb-surface__spinner'));
     assert.equal(popover.querySelector('.rlb-surface__footer'), null);
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
     assert.equal(checkout.title, 'Check Out');
     assert.equal(checkout.getAttribute('aria-label'), null);
 
-    click(refresh);
-    const loading = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-    assert.equal(loading.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'loading');
-    assert.equal(loading.disabled, true);
-    assert.equal(loading.getAttribute('aria-busy'), 'true');
-    assert.ok(
-        loading
-            .closest('.rlb-surface__refresh-cell')
-            .querySelector('.rlb-surface__refresh-status')
-            .classList.contains('rlb-visually-hidden')
-    );
-    assert.match(
-        loading.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
-        /refreshing/i
-    );
     t.mock.timers.tick(0);
     t.mock.timers.tick(0);
     await settle();
     assert.equal(popover.parentElement, document.body);
-    assert.equal(popover.querySelectorAll('[data-action="refresh"]').length, 1);
-    const success = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-    assert.equal(success.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'success');
-    assert.equal(success.getAttribute('aria-busy'), null);
-    assert.ok(
-        success
-            .closest('.rlb-surface__refresh-cell')
-            .querySelector('.rlb-surface__refresh-status')
-            .classList.contains('rlb-visually-hidden')
-    );
-    assert.match(
-        success.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
-        /Updated just now/
-    );
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+    assert.equal(popover.querySelector('[data-view="today"]').getAttribute('aria-busy'), null);
+    assert.equal(popover.querySelector('.rlb-surface__spinner'), null);
+    assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
+    assert.equal(popover.querySelector('.rlb-popover__notice'), null);
 
     t.mock.timers.tick(2_000);
     await settle();
-    const idle = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
-    assert.equal(idle.closest('.rlb-surface__refresh-cell').dataset.refreshState, 'idle');
-    assert.equal(
-        idle.closest('.rlb-surface__refresh-cell').querySelector('.rlb-surface__refresh-status').textContent,
-        ''
-    );
-
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+    assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
 });
 
-test('Refresh reconciles an external graph CLOCK into Recent Active Work without closing the popover', async t => {
+test('open-time revalidation reconciles an external graph CLOCK without closing the popover', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const popover = openPopover();
@@ -981,16 +945,16 @@ test('Refresh reconciles an external graph CLOCK into Recent Active Work without
         order: 12,
     });
 
-    click(popover.querySelector('[data-action="refresh"]'));
     await settlePostPaint();
 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelectorAll('.rlb-run').length, 2);
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 2');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+    assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 2');
     assert.match(popover.textContent, /External graph task/);
 });
 
-test('fast Refresh clicks coalesce into one graph read', async t => {
+test('open-time revalidation performs one graph read and exposes no success control', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const popover = openPopover();
@@ -1007,25 +971,18 @@ test('fast Refresh clicks coalesce into one graph read', async t => {
     notifications = 0;
 
     try {
-        const refresh = popover.querySelector('[data-action="refresh"]');
-        click(refresh);
-        const loading = popover.querySelector('[data-action="refresh"]');
-        click(loading);
-        assert.equal(loading.disabled, true);
         await settlePostPaint();
         assert.equal(reads, 1);
-        assert.equal(notifications, 1, 'explicit Refresh announces the confirmed reconciliation');
-        assert.match(
-            popover.querySelector('.rlb-surface__refresh-status').textContent,
-            /Updated just now/
-        );
+        assert.equal(notifications, 1, 'open revalidation announces confirmed reconciliation to subscribers');
+        assert.equal(popover.querySelector('[data-action="refresh"]'), null);
+        assert.equal(popover.querySelector('.rlb-surface__inline-status'), null);
     } finally {
         graph.api.data.q = originalQuery;
         unsubscribe();
     }
 });
 
-test('failed Refresh preserves the previous snapshot and announces a retryable error', async t => {
+test('failed open revalidation preserves the previous snapshot and exposes accessible Retry', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const popover = openPopover();
@@ -1036,7 +993,6 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
     };
 
     try {
-        click(popover.querySelector('[data-action="refresh"]'));
         await settlePostPaint();
     } finally {
         graph.api.data.q = originalQuery;
@@ -1044,24 +1000,18 @@ test('failed Refresh preserves the previous snapshot and announces a retryable e
 
     assert.equal(popover.querySelectorAll('.rlb-run').length, 1);
     assert.equal(popover.querySelector('.rlb-run').dataset.clockUid, beforeUid);
-    assert.equal(
-        popover.querySelector('.rlb-surface__refresh-cell').dataset.refreshState,
-        'error'
-    );
-    assert.equal(
-        popover.querySelector('.rlb-surface__refresh-status').classList.contains('rlb-visually-hidden'),
-        true
-    );
-    assert.match(popover.querySelector('.rlb-surface__refresh-status').textContent, /last valid snapshot/i);
-    assert.match(popover.querySelector('.rlb-popover__notice').textContent, /Retry after Roam finishes syncing/i);
-    assert.equal(popover.querySelector('.rlb-popover__notice').getAttribute('role'), 'alert');
-    assert.equal(popover.querySelector('.rlb-popover__notice').getAttribute('aria-live'), 'assertive');
+    const status = popover.querySelector('.rlb-surface__inline-status');
+    assert.equal(status.textContent, 'Couldn’t update · Retry');
+    assert.equal(status.getAttribute('role'), 'alert');
+    assert.equal(status.getAttribute('aria-live'), 'assertive');
+    assert.equal(status.querySelector('[data-action="retry"]').type, 'button');
+    assert.equal(popover.querySelector('[data-action="refresh"]'), null);
 });
 
-test('Refresh does not mutate CLOCK data or the shared Pomodoro cycle', async t => {
+test('open revalidation does not mutate CLOCK data or the shared Pomodoro cycle', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    const popover = openPopover();
+    openPopover();
     const cycleBefore = pomodoro.getCycle();
     const clockStringsBefore = [...graph.store.values()]
         .filter(block => /^CLOCK:{1,2} \[/.test(String(block.string)))
@@ -1080,8 +1030,7 @@ test('Refresh does not mutate CLOCK data or the shared Pomodoro cycle', async t 
     }
 
     try {
-        click(popover.querySelector('[data-action="refresh"]'));
-        await settle();
+        await settlePostPaint();
     } finally {
         for (const name of Object.keys(writes)) graph.api.data.block[name] = originals[name];
     }
@@ -1126,7 +1075,8 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
         parallelLabel.querySelector('.rlb-surface__section-context').textContent,
         'Leave after 45m without focus'
     );
-    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 2');
+    assert.equal(surface.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+    assert.equal(surface.querySelector('[data-view="threads"]').textContent, 'Threads 2');
     assert.equal(
         list.querySelector('.rlb-surface__section--open-lines').getAttribute('aria-label'),
         'PARALLEL THREADS · 1, Leave after 45m without focus'
@@ -1596,7 +1546,8 @@ test('topbar shows a running Session for a confirmed open CLOCK', async () => {
     const popover = openPopover();
     assert.doesNotMatch(popover.textContent, /No Session is running/);
     await settlePostPaint();
-    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS · 1');
+    assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
+    assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 1');
     assert.ok(popover.querySelector('.rlb-run'));
     assert.doesNotMatch(popover.textContent, /No Session is running/);
 });
@@ -1650,7 +1601,7 @@ test('popover is a labelled dialog and returns focus to its trigger on every clo
     assert.ok(popover.getAttribute('aria-labelledby'));
     assert.equal(
         document.getElementById(popover.getAttribute('aria-labelledby')).textContent,
-        'ACTIVE THREADS · 1'
+        'ACTIVE THREADS'
     );
     assert.equal(document.activeElement, popover.querySelector('button'));
 

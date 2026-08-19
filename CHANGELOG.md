@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.50 — 2026-08-19
+
+- Replaced the visible Active Threads title plus full-width view switch with one
+  32px Linear-style toolbar containing auto-width `Threads N` and `Today N`
+  tabs. Selected tabs now use a restrained neutral surface and strong neutral
+  text; counts are quieter and task links retain Roam blue.
+- Removed the permanent header Refresh action. Cache-first opening still starts
+  post-paint background revalidation; loading occupies a fixed Today status
+  slot, success is silent, and failures preserve the last successful data with
+  an accessible inline `Couldn’t update · Retry` action. A failed first Today
+  read has its own compact Retry state.
+- Added a strict 30-second Today freshness boundary, in-flight read coalescing,
+  and no Today polling, body observer, setting, or reset timer. Dashboard is
+  always the rightmost header action, with Today Expand/Collapse immediately
+  before it only when relevant.
+- Added DOM, accessibility, freshness, retry, query-count, lifecycle, and real
+  Chromium geometry coverage for 460px and 304/324/344px shells, including
+  count-to-spinner invariance and leaf-only/error states.
+
 ## 0.9.0-beta.49 — 2026-08-19
 
 - Replaced the Today tree's separate Expand all and Collapse all buttons with
