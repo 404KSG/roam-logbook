@@ -103,7 +103,8 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     min-width: 0;
 }
 
-.rlb-root .rlb-tree__layout {
+/* Self-contained specificity, for the same reason as the task-link rules. */
+.rlb-tree__layout.rlb-tree__layout {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) max-content;
     align-items: start;
@@ -121,7 +122,7 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     min-width: 0;
 }
 
-.rlb-root .rlb-tree__content {
+.rlb-tree__content.rlb-tree__content {
     display: flex;
     align-items: baseline;
     flex: 1 1 auto;
@@ -349,7 +350,11 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     width: 88px;
 }
 
-.rlb-root .rlb-task-table .rlb-task-link {
+/* Specificity here has to beat Blueprint's own .bp3-button.bp3-minimal rules
+   (three classes) without depending on a .rlb-root ancestor: the By Task table
+   is rendered standalone in layout tests and could be reparented in the dialog.
+   Repeating .rlb-task-table is a self-contained way to outrank them. */
+.rlb-task-table.rlb-task-table .rlb-task-link {
     display: flex;
     flex: 1 1 auto;
     width: 100%;
@@ -363,7 +368,7 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     text-overflow: initial;
 }
 
-.rlb-root .rlb-task-table .rlb-task-link > .rlb-task-link__text {
+.rlb-task-table.rlb-task-table .rlb-task-link > .rlb-task-link__text {
     display: block;
     flex: 1 1 auto;
     width: auto;

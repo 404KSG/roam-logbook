@@ -2883,6 +2883,200 @@ function syncActivityView(section, activity, now) {
   }
 }
 
+// src/focus-trap.js
+var FOCUSABLE_SELECTOR = 'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])';
+function createFocusTrap(getRoot, { documentRef = document } = {}) {
+  let active = false;
+  const onKeyDown = (event) => {
+    if (!active || event.key !== "Tab")
+      return;
+    const root = getRoot?.();
+    if (!root)
+      return;
+    const focusables = [...root.querySelectorAll(FOCUSABLE_SELECTOR)].filter(
+      (node) => !node.disabled && node.getAttribute("aria-hidden") !== "true"
+    );
+    event.preventDefault();
+    event.stopPropagation();
+    if (focusables.length === 0) {
+      root.tabIndex = -1;
+      root.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    const index = focusables.indexOf(documentRef.activeElement);
+    if (event.shiftKey) {
+      if (index <= 0)
+        last.focus();
+      else
+        focusables[index - 1].focus();
+    } else if (index < 0 || index === focusables.length - 1) {
+      first.focus();
+    } else {
+      focusables[index + 1].focus();
+    }
+  };
+  return {
+    activate() {
+      if (active)
+        return;
+      active = true;
+      documentRef.addEventListener("keydown", onKeyDown, true);
+    },
+    deactivate() {
+      if (!active)
+        return;
+      active = false;
+      documentRef.removeEventListener("keydown", onKeyDown, true);
+    }
+  };
+}
+
+// src/dashboard-issues.js
+var issueRow = (issue) => ({
+  title: issue.title || issue.parentUid || issue.affectedUid || "Unresolved graph data",
+  rawClock: issue.rawClock || (issue.source ? `(graph ${issue.source} read)` : "(hierarchy query)"),
+  issues: [issue]
+});
+var dataIssuesSection = (issues) => {
+  const details = el("details", "rlb-data-issues rlb-dashboard__inline-status");
+  const issueGroups = issues.map((entry) => (entry.issues || [entry.issue]).filter(Boolean));
+  const graphReadCount = issueGroups.filter(
+    (group) => group.some((issue) => issue.kind === "graph-read")
+  ).length;
+  const timingCount = issueGroups.length - graphReadCount;
+  const summaryParts = [];
+  if (timingCount > 0) {
+    summaryParts.push(
+      `${timingCount} timing record${timingCount === 1 ? "" : "s"} ${timingCount === 1 ? "needs" : "need"} review`
+    );
+  }
+  if (graphReadCount > 0) {
+    summaryParts.push(
+      `${graphReadCount} graph read issue${graphReadCount === 1 ? "" : "s"} ${graphReadCount === 1 ? "needs" : "need"} review`
+    );
+  }
+  details.appendChild(el("summary", "rlb-data-issues__summary", summaryParts.join(" \xB7 ")));
+  const list = el("div", "rlb-data-issues__list");
+  for (const entry of issues) {
+    const entryIssues = (entry.issues || [entry.issue]).filter(Boolean);
+    const issueText = entryIssues.map((issue) => `${issue.source ? `${issue.source}: ` : ""}${issue.message}`).join(" ");
+    const raw = entry.rawClock || "(CLOCK text unavailable)";
+    const label = `Task: ${entry.title} \xB7 CLOCK: ${raw} \xB7 Issue: ${issueText}`;
+    const item = el("div", "rlb-data-issues__item", label);
+    item.title = label;
+    item.setAttribute("aria-label", label);
+    list.appendChild(item);
+  }
+  details.appendChild(list);
+  return details;
+};
+
+// src/task-display.js
+var TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
+var stripRoamMacros = (string) => {
+  let cleaned = "";
+  let depth = 0;
+  for (let index = 0; index < string.length; index += 1) {
+    const pair = string.slice(index, index + 2);
+    if (pair === "{{") {
+      depth += 1;
+      index += 1;
+      continue;
+    }
+    if (pair === "}}" && depth > 0) {
+      depth -= 1;
+      index += 1;
+      continue;
+    }
+    if (depth === 0)
+      cleaned += string[index];
+  }
+  return cleaned;
+};
+function formatDisplayTitle({ taskString, title, taskUid } = {}) {
+  const fallback = String(title || taskUid || "(untitled)").trim() || "(untitled)";
+  if (typeof taskString !== "string" || taskString.trim() === "")
+    return fallback;
+  const cleaned = stripRoamMacros(taskString.replace(TASK_MARKER_RE, "")).replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
+  return cleaned || fallback;
+}
+
+// src/dashboard-table.js
+var headerRow = (columns, { sortBy = null, direction = "desc", onSort = null } = {}) => {
+  const thead = el("thead");
+  const row = el("tr");
+  for (const column of columns) {
+    const config = typeof column === "object" ? column : { label: column };
+    const classes = [
+      config.numeric ? "rlb-table__num" : "",
+      config.visuallyHidden ? "rlb-visually-hidden" : ""
+    ].filter(Boolean).join(" ");
+    const header = el("th", classes);
+    header.setAttribute("scope", "col");
+    if (config.sortKey)
+      header.dataset.sortKey = config.sortKey;
+    if (config.sortKey && onSort) {
+      const active = config.sortKey === sortBy;
+      if (active) {
+        header.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+      }
+      const sortButton = button(
+        "bp3-button bp3-minimal bp3-small rlb-task-sort-button",
+        "",
+        () => onSort(config.sortKey),
+        { title: config.title || `Sort by ${config.label}` }
+      );
+      sortButton.setAttribute("aria-pressed", String(active));
+      sortButton.appendChild(el("span", "rlb-task-sort-label", config.label));
+      if (active) {
+        const arrow = el("span", "rlb-task-sort-arrow", direction === "asc" ? "\u2191" : "\u2193");
+        arrow.setAttribute("aria-hidden", "true");
+        sortButton.appendChild(arrow);
+      }
+      header.appendChild(sortButton);
+    } else {
+      header.textContent = config.label;
+    }
+    row.appendChild(header);
+  }
+  thead.appendChild(row);
+  return thead;
+};
+var statusMark = (status) => {
+  if (!status)
+    return null;
+  const done = status === "DONE";
+  const mark = el("span", `rlb-status rlb-status--${done ? "done" : "todo"}`);
+  mark.title = done ? "DONE" : "TODO";
+  mark.setAttribute("role", "img");
+  mark.setAttribute("aria-label", done ? "Done" : "To do");
+  return mark;
+};
+var taskLink = (row, { onClose = () => {
+} } = {}) => {
+  const title = formatDisplayTitle(row);
+  const accessibleName = `Open this block: ${title}`;
+  const link = button(
+    "bp3-button bp3-minimal bp3-small rlb-task-link",
+    "",
+    (event) => {
+      event.stopPropagation();
+      if (event.shiftKey) {
+        event.preventDefault();
+        void openBlockInRightSidebar(row.taskUid);
+        return;
+      }
+      onClose();
+      void openBlock(row.taskUid);
+    },
+    { title: accessibleName }
+  );
+  link.appendChild(el("span", "rlb-task-link__text", title));
+  return link;
+};
+
 // src/version.js
 var PLUGIN_VERSION = "0.9.0-beta.44";
 var STATE_FORMATS = Object.freeze({
@@ -3014,34 +3208,322 @@ function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
   return String(rounded > 0 ? rounded : 45);
 }
 
-// src/task-display.js
-var TASK_MARKER_RE = /\{\{\[\[(?:TODO|DONE)\]\]\}\}|\{\{(?:TODO|DONE)\}\}/gi;
-var stripRoamMacros = (string) => {
-  let cleaned = "";
-  let depth = 0;
-  for (let index = 0; index < string.length; index += 1) {
-    const pair = string.slice(index, index + 2);
-    if (pair === "{{") {
-      depth += 1;
-      index += 1;
-      continue;
-    }
-    if (pair === "}}" && depth > 0) {
-      depth -= 1;
-      index += 1;
-      continue;
-    }
-    if (depth === 0)
-      cleaned += string[index];
+// src/dashboard-running.js
+function runningSection({
+  running: running2,
+  now,
+  isDiscarding = () => false,
+  onDiscard,
+  onClockOut,
+  headerRow: headerRow2,
+  statusMark: statusMark2,
+  taskLink: taskLink2
+}) {
+  const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
+  const section = el("section", "rlb-dashboard-section rlb-running rlb-dashboard-panel");
+  section.setAttribute("aria-labelledby", "roam-logbook-running-title");
+  const heading = el("div", "rlb-panel__header");
+  heading.appendChild(el("h3", "rlb-section__title", "Timing"));
+  heading.lastElementChild.id = "roam-logbook-running-title";
+  if (stale.size > 0) {
+    heading.appendChild(
+      el("span", "bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice", `${stale.size} stale`)
+    );
   }
-  return cleaned;
-};
-function formatDisplayTitle({ taskString, title, taskUid } = {}) {
-  const fallback = String(title || taskUid || "(untitled)").trim() || "(untitled)";
-  if (typeof taskString !== "string" || taskString.trim() === "")
-    return fallback;
-  const cleaned = stripRoamMacros(taskString.replace(TASK_MARKER_RE, "")).replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(\([a-zA-Z0-9_-]{6,}\)\)/g, "").replace(/\^\^|\*\*|__|~~/g, "").replace(/\s+/g, " ").trim();
-  return cleaned || fallback;
+  section.appendChild(heading);
+  const table = el("table", "rlb-table");
+  table.appendChild(
+    headerRow2([
+      "Task",
+      "Started",
+      { label: "Elapsed", numeric: true },
+      { label: "Actions", visuallyHidden: true }
+    ])
+  );
+  const tbody = el("tbody");
+  for (const entry of running2) {
+    const row = el("tr");
+    const task = el("td", "rlb-cell");
+    const mark = statusMark2(entry.status);
+    if (mark)
+      task.appendChild(mark);
+    task.appendChild(taskLink2(entry));
+    if (stale.has(entry.clockUid)) {
+      task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
+    }
+    const actions = el("td", "rlb-table__num");
+    const discarding = isDiscarding(entry.clockUid);
+    const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
+    const discard = button(
+      `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
+      "",
+      (event) => {
+        event.stopPropagation();
+        onDiscard(entry);
+      },
+      { title: discardTitle }
+    );
+    discard.dataset.action = "discard";
+    actions.append(
+      button(
+        "bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout",
+        "",
+        (event) => {
+          event.stopPropagation();
+          void onClockOut(entry);
+        },
+        { title: "Check Out" }
+      ),
+      discard
+    );
+    actions.firstElementChild.dataset.action = "clock-out";
+    const started = formatStarted(entry.start, now);
+    const startedTime = el("time", "rlb-started", "");
+    startedTime.title = started.raw;
+    startedTime.setAttribute("aria-label", started.raw);
+    if (started.datetime)
+      startedTime.dateTime = started.datetime;
+    if (started.valid) {
+      startedTime.append(
+        el("span", "rlb-started__date", started.dateLabel),
+        el("span", "rlb-started__time", started.timeLabel)
+      );
+    } else {
+      startedTime.textContent = started.raw;
+    }
+    const startedCell = el("td", "rlb-muted rlb-started-cell");
+    startedCell.appendChild(startedTime);
+    const elapsed = el(
+      "td",
+      "rlb-table__num rlb-running-elapsed",
+      formatElapsed(now.getTime() - entry.start.getTime())
+    );
+    elapsed.dataset.runningElapsed = "true";
+    elapsed.dataset.clockUid = entry.clockUid;
+    elapsed.dataset.startMs = String(entry.start.getTime());
+    row.append(task, startedCell, elapsed, actions);
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+// src/dashboard-task-tree.js
+var countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
+function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, statusMark: statusMark2, taskTimingAction }) {
+  const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
+  section.setAttribute("aria-labelledby", "roam-logbook-by-task-title");
+  const heading = el("div", "rlb-section__heading rlb-panel__header");
+  const title = el("h3", "rlb-section__title", "By task");
+  title.id = "roam-logbook-by-task-title";
+  heading.appendChild(title);
+  const taskCount = el("span", "rlb-task-count");
+  heading.appendChild(taskCount);
+  const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
+  const info = button(
+    "bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info",
+    "",
+    null,
+    { title: rollupHelp }
+  );
+  info.setAttribute("role", "img");
+  info.setAttribute("tabindex", "-1");
+  info.setAttribute("aria-describedby", "roam-logbook-task-rollup-help");
+  heading.appendChild(info);
+  const help = el("span", "rlb-visually-hidden", rollupHelp);
+  help.id = "roam-logbook-task-rollup-help";
+  section.appendChild(help);
+  const filterGroup = el("div", "rlb-task-filters");
+  filterGroup.setAttribute("role", "group");
+  filterGroup.setAttribute("aria-label", "Filter tasks by status");
+  for (const [value, label] of [
+    ["ALL", "All"],
+    ["TODO", "TODO"],
+    ["DONE", "DONE"]
+  ]) {
+    const filterButton = button(
+      "bp3-button bp3-minimal bp3-small rlb-task-filter",
+      label,
+      () => {
+        taskView.filter = value;
+        paintTaskTable();
+      },
+      { title: `Show ${label === "All" ? "all tasks" : `${label} tasks`}` }
+    );
+    filterButton.dataset.filter = value;
+    filterButton.setAttribute("aria-pressed", String(taskView.filter === value));
+    filterGroup.appendChild(filterButton);
+  }
+  heading.appendChild(filterGroup);
+  let visibleParentUids = [];
+  const toggleAll = button(
+    "bp3-button bp3-minimal bp3-small rlb-tree__collapse-all",
+    "",
+    () => {
+      const viewCollapsed = collapsedByFilter[taskView.filter];
+      const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
+      if (anyExpanded) {
+        for (const uid of visibleParentUids)
+          viewCollapsed.add(uid);
+      } else {
+        for (const uid of visibleParentUids)
+          viewCollapsed.delete(uid);
+      }
+      paintTaskTable();
+    }
+  );
+  heading.appendChild(toggleAll);
+  section.appendChild(heading);
+  const tableHost = el("div", "rlb-task-table-host");
+  section.appendChild(tableHost);
+  function paintTaskTable() {
+    const transformed = transformTaskForest(tree, {
+      filter: taskView.filter,
+      sortBy: taskView.sortBy,
+      direction: taskView.direction
+    });
+    const viewCollapsed = collapsedByFilter[taskView.filter];
+    const completeViewRows = flattenForest(transformed.forest);
+    visibleParentUids = [
+      ...new Set(completeViewRows.filter((node) => node.hasChildren).map((node) => node.taskUid))
+    ];
+    const rows = flattenForest(transformed.forest, {
+      isCollapsed: (node) => viewCollapsed.has(node.taskUid)
+    });
+    const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
+    taskCount.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
+    for (const filterButton of filterGroup.querySelectorAll("[data-filter]")) {
+      filterButton.setAttribute(
+        "aria-pressed",
+        String(filterButton.dataset.filter === taskView.filter)
+      );
+    }
+    toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
+    toggleAll.hidden = visibleParentUids.length === 0;
+    if (transformed.forest.length === 0) {
+      const emptyMessage = taskView.filter === "TODO" ? "No TODO Tasks in the selected range." : taskView.filter === "DONE" ? "No DONE Tasks in the selected range." : "No tasks in the selected range.";
+      tableHost.replaceChildren(el("div", "rlb-task-empty", emptyMessage));
+      return;
+    }
+    const table = el("table", "rlb-table rlb-task-table");
+    const columns = el("colgroup");
+    for (const className of [
+      "rlb-task-table__task",
+      "rlb-task-table__sessions",
+      "rlb-task-table__own",
+      "rlb-task-table__total"
+    ]) {
+      columns.appendChild(el("col", className));
+    }
+    table.appendChild(columns);
+    table.appendChild(
+      headerRow(
+        [
+          "Task",
+          {
+            label: "Sessions",
+            numeric: true,
+            sortKey: "sessions",
+            title: "Sort by Sessions"
+          },
+          {
+            label: "Own",
+            numeric: true,
+            sortKey: "own",
+            title: "Time recorded directly on this Task"
+          },
+          {
+            label: "Total",
+            numeric: true,
+            sortKey: "total",
+            title: "Own time plus all sub-tasks"
+          }
+        ],
+        {
+          sortBy: taskView.sortBy,
+          direction: taskView.direction,
+          onSort: (sortBy) => {
+            if (taskView.sortBy === sortBy) {
+              taskView.direction = taskView.direction === "desc" ? "asc" : "desc";
+            } else {
+              taskView.sortBy = sortBy;
+              taskView.direction = "desc";
+            }
+            paintTaskTable();
+          }
+        }
+      )
+    );
+    const tbody = el("tbody");
+    for (const node of rows) {
+      const row = el("tr");
+      const name = el("td", "rlb-tree__cell");
+      const layout = el("div", "rlb-tree__layout");
+      const leading = el("div", "rlb-tree__leading");
+      const content = el("div", "rlb-tree__content");
+      name.style.paddingLeft = `${8 + node.depth * 20}px`;
+      row.setAttribute("aria-level", String(node.depth + 1));
+      if (node.hasChildren) {
+        const caret = button(
+          `bp3-button bp3-minimal bp3-small rlb-tree__toggle bp3-icon-chevron-${node.collapsed ? "right" : "down"}`,
+          "",
+          () => {
+            if (viewCollapsed.has(node.taskUid))
+              viewCollapsed.delete(node.taskUid);
+            else
+              viewCollapsed.add(node.taskUid);
+            paintTaskTable();
+          },
+          { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
+        );
+        caret.setAttribute("aria-expanded", String(!node.collapsed));
+        caret.setAttribute("aria-label", node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks");
+        leading.appendChild(caret);
+      } else {
+        leading.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
+      }
+      const mark = statusMark2(node.status);
+      if (mark)
+        leading.appendChild(mark);
+      if (node.status === "DONE")
+        row.classList.add("rlb-row--done");
+      if (node.context)
+        row.classList.add("rlb-row--context");
+      content.appendChild(taskLink2(node));
+      if (node.occurrences > 1) {
+        const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
+        badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
+        content.appendChild(badge);
+      }
+      if (node.truncated) {
+        content.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
+      }
+      const actions = el("div", "rlb-muted rlb-tree__actions");
+      if (node.collapsed) {
+        const hidden = countDescendants(node);
+        actions.appendChild(
+          el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
+        );
+      }
+      const timingAction = taskTimingAction(node);
+      if (timingAction)
+        actions.appendChild(timingAction);
+      layout.append(leading, content, actions);
+      name.appendChild(layout);
+      row.append(
+        name,
+        el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
+        el("td", "rlb-table__num rlb-muted", node.own > 0 ? formatMinutesHuman(node.own) : ""),
+        el("td", "rlb-table__num rlb-tree__total", formatMinutesHuman(node.total))
+      );
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    tableHost.replaceChildren(table);
+  }
+  paintTaskTable();
+  return section;
 }
 
 // src/theme.js
@@ -3541,12 +4023,7 @@ function applyRoamThemePalette(root, palette) {
   applyPalette(root, palette);
 }
 
-// src/dashboard.js
-var ROOT_ID = "roam-logbook-dashboard";
-var DASHBOARD_TITLE = "Roam Logbook";
-var REFRESH_LOADING_MESSAGE = "Refreshing Dashboard from graph\u2026";
-var REFRESH_SUCCESS_MESSAGE = "Dashboard updated just now";
-var REFRESH_ERROR_MESSAGE = "Dashboard refresh failed; last valid snapshot kept. Retry.";
+// src/scroll-lock.js
 var documentScrollLocks = /* @__PURE__ */ new WeakMap();
 var restoreInlineStyle = (node, value) => {
   if (!node)
@@ -3556,7 +4033,7 @@ var restoreInlineStyle = (node, value) => {
   else
     node.setAttribute("style", value);
 };
-var releaseDocumentScrollLock = (documentRef, state) => {
+var releaseDocumentScrollLock = (documentRef, windowRef, state) => {
   const current = documentScrollLocks.get(documentRef);
   if (current !== state)
     return;
@@ -3566,13 +4043,15 @@ var releaseDocumentScrollLock = (documentRef, state) => {
   restoreInlineStyle(current.html, current.htmlStyle);
   restoreInlineStyle(current.body, current.bodyStyle);
   try {
-    window.scrollTo(current.scrollX, current.scrollY);
+    windowRef.scrollTo(current.scrollX, current.scrollY);
   } catch {
   }
   documentScrollLocks.delete(documentRef);
 };
-var acquireDocumentScrollLock = () => {
-  const documentRef = document;
+function acquireDocumentScrollLock({
+  documentRef = document,
+  windowRef = documentRef.defaultView || window
+} = {}) {
   const html = documentRef.documentElement;
   const body = documentRef.body;
   if (!html || !body)
@@ -3580,10 +4059,10 @@ var acquireDocumentScrollLock = () => {
     };
   let state = documentScrollLocks.get(documentRef);
   if (!state) {
-    const scrollX = Number(window.scrollX) || 0;
-    const scrollY = Number(window.scrollY) || 0;
-    const scrollbarWidth = Math.max(0, (Number(window.innerWidth) || 0) - html.clientWidth);
-    const computedPadding = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+    const scrollX = Number(windowRef.scrollX) || 0;
+    const scrollY = Number(windowRef.scrollY) || 0;
+    const scrollbarWidth = Math.max(0, (Number(windowRef.innerWidth) || 0) - html.clientWidth);
+    const computedPadding = Number.parseFloat(windowRef.getComputedStyle(body).paddingRight) || 0;
     state = {
       count: 0,
       html,
@@ -3613,13 +4092,109 @@ var acquireDocumentScrollLock = () => {
     if (released)
       return;
     released = true;
-    releaseDocumentScrollLock(documentRef, state);
+    releaseDocumentScrollLock(documentRef, windowRef, state);
   };
+}
+
+// src/refresh-state.js
+var REFRESH_MESSAGES = {
+  activeWork: {
+    loading: "Refreshing Active Work from graph\u2026",
+    success: "Updated just now",
+    error: "Refresh failed; last valid snapshot kept. Retry."
+  },
+  dashboard: {
+    loading: "Refreshing Dashboard from graph\u2026",
+    success: "Dashboard updated just now",
+    error: "Dashboard refresh failed; last valid snapshot kept. Retry."
+  }
 };
+function createRefreshState({
+  onRender = () => {
+  },
+  messages = REFRESH_MESSAGES.activeWork,
+  successDuration = 1800,
+  setTimeoutFn = (callback, delay) => setTimeout(callback, delay),
+  clearTimeoutFn = (timer) => clearTimeout(timer)
+} = {}) {
+  let current = { state: "idle", message: "" };
+  let inFlight = null;
+  let clearTimer = null;
+  const clearSuccessTimer = () => {
+    if (clearTimer !== null)
+      clearTimeoutFn(clearTimer);
+    clearTimer = null;
+  };
+  const set = (state, message, { clearAfter = false } = {}) => {
+    clearSuccessTimer();
+    current = { state, message };
+    onRender(current);
+    if (clearAfter) {
+      clearTimer = setTimeoutFn(() => {
+        clearTimer = null;
+        if (current.state !== "success")
+          return;
+        current = { state: "idle", message: "" };
+        onRender(current);
+      }, successDuration);
+    }
+  };
+  const run = (operation, { onSuccess, onFailure, onError, isSuccess = (result) => result?.ok } = {}) => {
+    if (inFlight)
+      return inFlight;
+    set("loading", messages.loading);
+    const request = Promise.resolve().then(operation).then(
+      (result) => {
+        if (isSuccess(result)) {
+          onSuccess?.(result);
+          set("success", messages.success, { clearAfter: true });
+        } else {
+          onFailure?.(result);
+          set("error", messages.error);
+        }
+        return result;
+      },
+      (error) => {
+        const result = onError?.(error) ?? { ok: false, error };
+        set("error", messages.error);
+        return result;
+      }
+    );
+    inFlight = request.finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
+  const reset3 = () => {
+    clearSuccessTimer();
+    current = { state: "idle", message: "" };
+    onRender(current);
+  };
+  return {
+    get state() {
+      return current;
+    },
+    get inFlight() {
+      return inFlight;
+    },
+    set,
+    run,
+    reset: reset3,
+    dispose() {
+      clearSuccessTimer();
+      inFlight = null;
+    }
+  };
+}
+
+// src/dashboard.js
+var ROOT_ID = "roam-logbook-dashboard";
+var DASHBOARD_TITLE = "Roam Logbook";
 function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
-  clearIntervalFn = (ticker) => clearInterval(ticker)
+  clearIntervalFn = (ticker) => clearInterval(ticker),
+  confirmation = createConfirmationController()
 } = {}) {
   let root = null;
   let summaryNode = null;
@@ -3628,12 +4203,9 @@ function createDashboard({
   let rangeId = "week";
   let returnFocusTo = null;
   let liveTicker = null;
-  let discardConfirmUid = null;
-  let discardConfirmTimer = null;
-  let refreshInFlight = null;
   let refreshButton = null;
   let refreshStatusNode = null;
-  let refreshState = { state: "idle", message: "" };
+  let refreshAlertNode = null;
   let lastSnapshot = null;
   let lastModel = null;
   let lastTransientIssues = [];
@@ -3641,6 +4213,7 @@ function createDashboard({
   let focusInFlight = null;
   let themeRuntime = null;
   let releaseScrollLock = null;
+  const focusTrap = createFocusTrap(() => root?.querySelector(".rlb-dialog"));
   const collapsed = /* @__PURE__ */ new Set();
   const taskView = {
     filter: "ALL",
@@ -3657,38 +4230,27 @@ function createDashboard({
       clearIntervalFn(liveTicker);
     liveTicker = null;
   };
-  const syncRefreshUi = () => {
+  const syncRefreshUi = (state) => {
+    const current = state || refreshRuntime.state;
     if (refreshButton) {
-      refreshButton.dataset.refreshState = refreshState.state;
-      refreshButton.disabled = refreshState.state === "loading";
-      if (refreshState.state === "loading")
+      refreshButton.dataset.refreshState = current.state;
+      refreshButton.disabled = current.state === "loading";
+      if (current.state === "loading")
         refreshButton.setAttribute("aria-busy", "true");
       else
         refreshButton.removeAttribute("aria-busy");
     }
-    if (refreshStatusNode) {
-      refreshStatusNode.textContent = refreshState.message;
-      refreshStatusNode.setAttribute(
-        "role",
-        refreshState.state === "error" ? "alert" : "status"
-      );
-      refreshStatusNode.setAttribute(
-        "aria-live",
-        refreshState.state === "error" ? "assertive" : "polite"
-      );
-      refreshStatusNode.setAttribute("aria-atomic", "true");
+    if (refreshStatusNode && refreshAlertNode) {
+      const isError = current.state === "error";
+      refreshStatusNode.textContent = isError ? "" : current.message;
+      refreshAlertNode.textContent = isError ? current.message : "";
     }
   };
-  const setRefreshState = (state, message) => {
-    refreshState = { state, message };
-    syncRefreshUi();
-  };
-  const resetDiscardConfirmation = () => {
-    discardConfirmUid = null;
-    if (discardConfirmTimer)
-      clearTimeout(discardConfirmTimer);
-    discardConfirmTimer = null;
-  };
+  const refreshRuntime = createRefreshState({
+    onRender: syncRefreshUi,
+    messages: REFRESH_MESSAGES.dashboard
+  });
+  const resetDiscardConfirmation = () => confirmation?.reset();
   const updateLiveMetricNodes = (now) => {
     if (!lastModel)
       return;
@@ -3734,7 +4296,7 @@ function createDashboard({
     }
     liveTicker = setIntervalFn(updateRunningElapsed, 1e3);
   };
-  const paint = (now) => {
+  const paintDashboard = (now) => {
     if (!bodyNode || !lastModel)
       return;
     clearLiveTicker();
@@ -3743,7 +4305,7 @@ function createDashboard({
     const transientIssues = lastTransientIssues;
     const refreshNotice = lastRefreshNotice;
     summaryNode.replaceChildren();
-    summaryNode.appendChild(overviewBar(model, now));
+    summaryNode.appendChild(overviewBar(model));
     bodyNode.replaceChildren();
     activityNode = null;
     if (refreshNotice) {
@@ -3758,8 +4320,20 @@ function createDashboard({
       ...(hierarchy.issues || []).map(issueRow),
       ...transientIssues.map(issueRow)
     ];
-    if (model.running.length > 0)
-      bodyNode.appendChild(runningSection(model.running, now));
+    if (model.running.length > 0) {
+      bodyNode.appendChild(
+        runningSection({
+          running: model.running,
+          now,
+          isDiscarding: (uid) => confirmation?.isArmed(`discard:${uid}`, "dashboard"),
+          onDiscard: handleDiscard,
+          onClockOut: (entry) => act(() => clockOut(entry.clockUid)),
+          headerRow,
+          statusMark,
+          taskLink: renderTaskLink
+        })
+      );
+    }
     if (model.entries.length === 0) {
       bodyNode.appendChild(el("div", "rlb-empty", "No clock entries in this range yet."));
       if (issues.length > 0)
@@ -3770,7 +4344,15 @@ function createDashboard({
     activityNode = renderActivity(model.activity);
     if (activityNode)
       bodyNode.appendChild(activityNode);
-    bodyNode.appendChild(tasksSection(model.tree));
+    bodyNode.appendChild(
+      tasksSection(model.tree, {
+        taskView,
+        collapsedByFilter,
+        taskLink: renderTaskLink,
+        statusMark,
+        taskTimingAction
+      })
+    );
     if (issues.length > 0)
       bodyNode.appendChild(dataIssuesSection(issues));
     startLiveTicker();
@@ -3829,78 +4411,19 @@ function createDashboard({
     lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
     lastTransientIssues = transientIssues;
     lastRefreshNotice = refreshNotice;
-    paint(now);
+    paintDashboard(now);
     return { ok: true, refreshFailed };
   };
-  const refreshDashboard = () => {
-    if (refreshInFlight)
-      return refreshInFlight;
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
-    const request = Promise.resolve().then(() => render()).then(
-      (result) => {
-        if (result?.ok && !result.refreshFailed) {
-          setRefreshState("success", REFRESH_SUCCESS_MESSAGE);
-        } else {
-          setRefreshState("error", REFRESH_ERROR_MESSAGE);
-        }
-        return result;
-      },
-      (error) => {
-        console.error("[roam-logbook] could not refresh Dashboard", error);
-        setRefreshState("error", REFRESH_ERROR_MESSAGE);
-        return { ok: false, error };
-      }
-    );
-    refreshInFlight = request.finally(() => {
-      refreshInFlight = null;
-    });
-    return refreshInFlight;
-  };
-  const issueRow = (issue) => ({
-    title: issue.title || issue.parentUid || issue.affectedUid || "Unresolved graph data",
-    rawClock: issue.rawClock || (issue.source ? `(graph ${issue.source} read)` : "(hierarchy query)"),
-    issues: [issue]
+  const refreshDashboard = () => refreshRuntime.run(() => render(), {
+    isSuccess: (result) => result?.ok && !result.refreshFailed,
+    onError: (error) => {
+      console.error("[roam-logbook] could not refresh Dashboard", error);
+      return { ok: false, error };
+    }
   });
-  const dataIssuesSection = (issues) => {
-    const details = el("details", "rlb-data-issues rlb-dashboard__inline-status");
-    const issueGroups = issues.map((entry) => (entry.issues || [entry.issue]).filter(Boolean));
-    const graphReadCount = issueGroups.filter(
-      (group) => group.some((issue) => issue.kind === "graph-read")
-    ).length;
-    const timingCount = issueGroups.length - graphReadCount;
-    const summaryParts = [];
-    if (timingCount > 0) {
-      summaryParts.push(
-        `${timingCount} timing record${timingCount === 1 ? "" : "s"} ${timingCount === 1 ? "needs" : "need"} review`
-      );
-    }
-    if (graphReadCount > 0) {
-      summaryParts.push(
-        `${graphReadCount} graph read issue${graphReadCount === 1 ? "" : "s"} ${graphReadCount === 1 ? "needs" : "need"} review`
-      );
-    }
-    const summary = el(
-      "summary",
-      "rlb-data-issues__summary",
-      summaryParts.join(" \xB7 ")
-    );
-    details.appendChild(summary);
-    const list = el("div", "rlb-data-issues__list");
-    for (const entry of issues) {
-      const entryIssues = (entry.issues || [entry.issue]).filter(Boolean);
-      const issueText = entryIssues.map((issue) => `${issue.source ? `${issue.source}: ` : ""}${issue.message}`).join(" ");
-      const raw = entry.rawClock || "(CLOCK text unavailable)";
-      const label = `Task: ${entry.title} \xB7 CLOCK: ${raw} \xB7 Issue: ${issueText}`;
-      const item = el("div", "rlb-data-issues__item", label);
-      item.title = label;
-      item.setAttribute("aria-label", label);
-      list.appendChild(item);
-    }
-    details.appendChild(list);
-    return details;
-  };
-  const overviewBar = (model, now) => {
+  const overviewBar = (model) => {
     const wrapper = el("dl", "rlb-overview rlb-overview--compact");
+    wrapper.setAttribute("role", "group");
     wrapper.setAttribute("aria-label", `${DASHBOARD_TITLE} overview`);
     const rangeLabel = getRange(model.rangeId).label;
     const metrics = [
@@ -3910,403 +4433,19 @@ function createDashboard({
       ["Tasks tracked", String(model.tasks.length), rangeLabel, "tasks"]
     ];
     for (const [label, value, context, key] of metrics) {
-      const item = el("div", "rlb-overview__item rlb-overview__panel");
-      const heading = el("div", "rlb-overview__heading");
+      const item = el("div", "rlb-overview__item rlb-overview__panel rlb-overview__heading");
       const valueNode = el("dd", "rlb-overview__value");
       const number = el("span", "rlb-overview__number", value);
       number.dataset.liveMetric = key;
       valueNode.append(number);
       if (context)
         valueNode.append(el("span", "rlb-overview__context", context));
-      heading.append(el("dt", "rlb-overview__label", label), valueNode);
-      item.appendChild(heading);
+      item.append(el("dt", "rlb-overview__label", label), valueNode);
       wrapper.appendChild(item);
     }
     return wrapper;
   };
-  const runningSection = (running2, now) => {
-    const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
-    const section = el("section", "rlb-dashboard-section rlb-running");
-    section.classList.add("rlb-dashboard-panel");
-    const heading = el("div", "rlb-panel__header");
-    heading.appendChild(el("h3", "rlb-section__title", "Timing"));
-    if (stale.size > 0) {
-      heading.appendChild(
-        el("span", "bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice", `${stale.size} stale`)
-      );
-    }
-    section.appendChild(heading);
-    const table = el("table", "rlb-table");
-    table.appendChild(
-      headerRow([
-        "Task",
-        "Started",
-        { label: "Elapsed", numeric: true },
-        { label: "Actions", visuallyHidden: true }
-      ])
-    );
-    const tbody = el("tbody");
-    for (const entry of running2) {
-      const row = el("tr");
-      const task = el("td", "rlb-cell");
-      const mark = statusMark(entry.status);
-      if (mark)
-        task.appendChild(mark);
-      task.appendChild(taskLink(entry));
-      if (stale.has(entry.clockUid)) {
-        task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
-      }
-      const actions = el("td", "rlb-table__num");
-      const discarding = discardConfirmUid === entry.clockUid;
-      const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
-      const discard = button(
-        `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
-        "",
-        (event) => {
-          event.stopPropagation();
-          if (!discarding) {
-            discardConfirmUid = entry.clockUid;
-            if (discardConfirmTimer)
-              clearTimeout(discardConfirmTimer);
-            discardConfirmTimer = setTimeout(() => {
-              resetDiscardConfirmation();
-              render({ readGraph: false });
-            }, 5e3);
-            render({ readGraph: false });
-            return;
-          }
-          resetDiscardConfirmation();
-          void act(() => discardClock(entry.clockUid));
-        },
-        { title: discardTitle }
-      );
-      discard.dataset.action = "discard";
-      actions.append(
-        button(
-          "bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout",
-          "",
-          (event) => {
-            event.stopPropagation();
-            void act(() => clockOut(entry.clockUid));
-          },
-          { title: "Check Out" }
-        ),
-        discard
-      );
-      actions.firstElementChild.dataset.action = "clock-out";
-      const started = formatStarted(entry.start, now);
-      const startedTime = el("time", "rlb-started", "");
-      startedTime.title = started.raw;
-      startedTime.setAttribute("aria-label", started.raw);
-      if (started.datetime)
-        startedTime.dateTime = started.datetime;
-      if (started.valid) {
-        startedTime.append(
-          el("span", "rlb-started__date", started.dateLabel),
-          el("span", "rlb-started__time", started.timeLabel)
-        );
-      } else {
-        startedTime.textContent = started.raw;
-      }
-      const startedCell = el("td", "rlb-muted rlb-started-cell");
-      startedCell.appendChild(startedTime);
-      const elapsed = el(
-        "td",
-        "rlb-table__num rlb-running-elapsed",
-        formatElapsed(now.getTime() - entry.start.getTime())
-      );
-      elapsed.dataset.runningElapsed = "true";
-      elapsed.dataset.clockUid = entry.clockUid;
-      elapsed.dataset.startMs = String(entry.start.getTime());
-      row.append(task, startedCell, elapsed, actions);
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    section.appendChild(table);
-    return section;
-  };
-  const tasksSection = (tree) => {
-    const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
-    const heading = el("div", "rlb-section__heading rlb-panel__header");
-    heading.appendChild(el("h3", "rlb-section__title", "By task"));
-    const taskCount = el("span", "rlb-task-count");
-    heading.appendChild(taskCount);
-    const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
-    const info = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info",
-      "",
-      () => {
-      },
-      { title: rollupHelp }
-    );
-    info.setAttribute("aria-describedby", "roam-logbook-task-rollup-help");
-    heading.appendChild(info);
-    const help = el("span", "rlb-visually-hidden", rollupHelp);
-    help.id = "roam-logbook-task-rollup-help";
-    section.appendChild(help);
-    const filterGroup = el("div", "rlb-task-filters");
-    filterGroup.setAttribute("role", "group");
-    filterGroup.setAttribute("aria-label", "Filter tasks by status");
-    for (const [value, label] of [
-      ["ALL", "All"],
-      ["TODO", "TODO"],
-      ["DONE", "DONE"]
-    ]) {
-      const filterButton = button(
-        "bp3-button bp3-minimal bp3-small rlb-task-filter",
-        label,
-        () => {
-          taskView.filter = value;
-          paint2();
-        },
-        { title: `Show ${label === "All" ? "all tasks" : `${label} tasks`}` }
-      );
-      filterButton.dataset.filter = value;
-      filterButton.setAttribute("aria-pressed", String(taskView.filter === value));
-      filterGroup.appendChild(filterButton);
-    }
-    heading.appendChild(filterGroup);
-    let visibleParentUids = [];
-    const toggleAll = button("bp3-button bp3-minimal bp3-small rlb-tree__collapse-all", "", () => {
-      const viewCollapsed = collapsedByFilter[taskView.filter];
-      const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
-      if (anyExpanded) {
-        for (const uid of visibleParentUids)
-          viewCollapsed.add(uid);
-      } else {
-        for (const uid of visibleParentUids)
-          viewCollapsed.delete(uid);
-      }
-      paint2();
-    });
-    heading.appendChild(toggleAll);
-    section.appendChild(heading);
-    const tableHost = el("div", "rlb-task-table-host");
-    section.appendChild(tableHost);
-    function paint2() {
-      const transformed = transformTaskForest(tree, {
-        filter: taskView.filter,
-        sortBy: taskView.sortBy,
-        direction: taskView.direction
-      });
-      const viewCollapsed = collapsedByFilter[taskView.filter];
-      const completeViewRows = flattenForest(transformed.forest);
-      visibleParentUids = [
-        ...new Set(
-          completeViewRows.filter((node) => node.hasChildren).map((node) => node.taskUid)
-        )
-      ];
-      const rows = flattenForest(transformed.forest, {
-        isCollapsed: (node) => viewCollapsed.has(node.taskUid)
-      });
-      const anyExpanded = visibleParentUids.some((uid) => !viewCollapsed.has(uid));
-      taskCount.textContent = `${transformed.matchCount} of ${transformed.totalCount} Tasks`;
-      for (const filterButton of filterGroup.querySelectorAll("[data-filter]")) {
-        filterButton.setAttribute(
-          "aria-pressed",
-          String(filterButton.dataset.filter === taskView.filter)
-        );
-      }
-      toggleAll.textContent = anyExpanded ? "Collapse all" : "Expand all";
-      toggleAll.hidden = visibleParentUids.length === 0;
-      if (transformed.forest.length === 0) {
-        const emptyMessage = taskView.filter === "TODO" ? "No TODO Tasks in the selected range." : taskView.filter === "DONE" ? "No DONE Tasks in the selected range." : "No tasks in the selected range.";
-        tableHost.replaceChildren(el("div", "rlb-task-empty", emptyMessage));
-        return;
-      }
-      const table = el("table", "rlb-table rlb-task-table");
-      const columns = el("colgroup");
-      for (const className of [
-        "rlb-task-table__task",
-        "rlb-task-table__sessions",
-        "rlb-task-table__own",
-        "rlb-task-table__total"
-      ]) {
-        columns.appendChild(el("col", className));
-      }
-      table.appendChild(columns);
-      table.appendChild(
-        headerRow([
-          "Task",
-          {
-            label: "Sessions",
-            numeric: true,
-            sortKey: "sessions",
-            title: "Sort by Sessions"
-          },
-          {
-            label: "Own",
-            numeric: true,
-            sortKey: "own",
-            title: "Time recorded directly on this Task"
-          },
-          {
-            label: "Total",
-            numeric: true,
-            sortKey: "total",
-            title: "Own time plus all sub-tasks"
-          }
-        ], {
-          sortBy: taskView.sortBy,
-          direction: taskView.direction,
-          onSort: (sortBy) => {
-            if (taskView.sortBy === sortBy) {
-              taskView.direction = taskView.direction === "desc" ? "asc" : "desc";
-            } else {
-              taskView.sortBy = sortBy;
-              taskView.direction = "desc";
-            }
-            paint2();
-          }
-        })
-      );
-      const tbody = el("tbody");
-      for (const node of rows) {
-        const row = el("tr");
-        const name = el("td", "rlb-tree__cell");
-        const layout = el("div", "rlb-tree__layout");
-        const leading = el("div", "rlb-tree__leading");
-        const content = el("div", "rlb-tree__content");
-        name.style.paddingLeft = `${8 + node.depth * 20}px`;
-        if (node.hasChildren) {
-          const caret = button(
-            `bp3-button bp3-minimal bp3-small rlb-tree__toggle bp3-icon-chevron-${node.collapsed ? "right" : "down"}`,
-            "",
-            () => {
-              if (viewCollapsed.has(node.taskUid))
-                viewCollapsed.delete(node.taskUid);
-              else
-                viewCollapsed.add(node.taskUid);
-              paint2();
-            },
-            { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
-          );
-          caret.setAttribute("aria-expanded", String(!node.collapsed));
-          leading.appendChild(caret);
-        } else {
-          leading.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
-        }
-        const mark = statusMark(node.status);
-        if (mark)
-          leading.appendChild(mark);
-        if (node.status === "DONE")
-          row.classList.add("rlb-row--done");
-        if (node.context)
-          row.classList.add("rlb-row--context");
-        content.appendChild(taskLink(node));
-        if (node.occurrences > 1) {
-          const badge = el("span", "bp3-tag bp3-minimal rlb-tree__badge", `\xD7${node.occurrences}`);
-          badge.title = `Also rolls up under ${node.occurrences - 1} other task(s)`;
-          content.appendChild(badge);
-        }
-        if (node.truncated) {
-          content.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "loop"));
-        }
-        const actions = el("div", "rlb-muted rlb-tree__actions");
-        if (node.collapsed) {
-          const hidden = countDescendants(node);
-          actions.appendChild(
-            el(
-              "span",
-              "rlb-muted rlb-tree__hidden",
-              `+${hidden} sub-task${hidden > 1 ? "s" : ""}`
-            )
-          );
-        }
-        const timingAction = taskTimingAction(node);
-        if (timingAction)
-          actions.appendChild(timingAction);
-        layout.append(leading, content, actions);
-        name.appendChild(layout);
-        row.append(
-          name,
-          el("td", "rlb-table__num rlb-muted", node.sessions ? String(node.sessions) : ""),
-          el("td", "rlb-table__num rlb-muted", node.own > 0 ? formatMinutesHuman(node.own) : ""),
-          el("td", "rlb-table__num rlb-tree__total", formatMinutesHuman(node.total))
-        );
-        tbody.appendChild(row);
-      }
-      table.appendChild(tbody);
-      tableHost.replaceChildren(table);
-    }
-    paint2();
-    return section;
-  };
-  const countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
-  const headerRow = (columns, { sortBy = null, direction = "desc", onSort = null } = {}) => {
-    const thead = el("thead");
-    const row = el("tr");
-    for (const column of columns) {
-      const config = typeof column === "object" ? column : { label: column };
-      const numeric = config.numeric;
-      const visuallyHidden = config.visuallyHidden;
-      const classes = [numeric ? "rlb-table__num" : "", visuallyHidden ? "rlb-visually-hidden" : ""].filter(Boolean).join(" ");
-      const header = el("th", classes);
-      header.setAttribute("scope", "col");
-      if (config.sortKey)
-        header.dataset.sortKey = config.sortKey;
-      if (config.sortKey && onSort) {
-        const active = config.sortKey === sortBy;
-        if (active) {
-          header.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
-        }
-        const sortButton = button(
-          "bp3-button bp3-minimal bp3-small rlb-task-sort-button",
-          "",
-          () => onSort(config.sortKey),
-          { title: config.title || `Sort by ${config.label}` }
-        );
-        sortButton.setAttribute("aria-pressed", String(active));
-        sortButton.appendChild(el("span", "rlb-task-sort-label", config.label));
-        if (active) {
-          const arrow = el(
-            "span",
-            "rlb-task-sort-arrow",
-            direction === "asc" ? "\u2191" : "\u2193"
-          );
-          arrow.setAttribute("aria-hidden", "true");
-          sortButton.appendChild(arrow);
-        }
-        header.appendChild(sortButton);
-      } else {
-        header.textContent = config.label;
-      }
-      row.appendChild(header);
-    }
-    thead.appendChild(row);
-    return thead;
-  };
-  const statusMark = (status) => {
-    if (!status)
-      return null;
-    const done = status === "DONE";
-    const mark = el("span", `rlb-status rlb-status--${done ? "done" : "todo"}`);
-    mark.title = done ? "DONE" : "TODO";
-    mark.setAttribute("role", "img");
-    mark.setAttribute("aria-label", done ? "Done" : "To do");
-    return mark;
-  };
-  const taskLink = (row) => {
-    const title = formatDisplayTitle(row);
-    const accessibleName = `Open this block: ${title}`;
-    const link = button(
-      "bp3-button bp3-minimal bp3-small rlb-task-link",
-      "",
-      (event) => {
-        event.stopPropagation();
-        if (event.shiftKey) {
-          event.preventDefault();
-          void openBlockInRightSidebar(row.taskUid);
-          return;
-        }
-        close();
-        void openBlock(row.taskUid);
-      },
-      { title: accessibleName }
-    );
-    link.appendChild(el("span", "rlb-task-link__text", title));
-    return link;
-  };
+  const renderTaskLink = (row) => taskLink(row, { onClose: () => close() });
   const act = async (action) => {
     try {
       await action();
@@ -4314,6 +4453,14 @@ function createDashboard({
       console.error("[roam-logbook]", error);
     }
     render();
+  };
+  const handleDiscard = (entry) => {
+    const key = `discard:${entry.clockUid}`;
+    if (!confirmation?.arm(key, "dashboard")) {
+      render({ readGraph: false });
+      return;
+    }
+    void act(() => discardClock(entry.clockUid));
   };
   const startTaskTiming = (taskUid) => {
     if (!taskUid || focusInFlight)
@@ -4355,44 +4502,12 @@ function createDashboard({
     play.dataset.taskUid = node.taskUid;
     return play;
   };
-  const dialogFocusables = (dialog) => [...dialog.querySelectorAll('button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])')].filter(
-    (node) => !node.disabled && node.getAttribute("aria-hidden") !== "true"
-  );
   const onKeyDown = (event) => {
-    if (!root?.classList.contains("rlb-root--open"))
+    if (!root?.classList.contains("rlb-root--open") || event.key !== "Escape")
       return;
-    const dialog = root.querySelector(".rlb-dialog");
-    if (!dialog)
-      return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
-    if (event.key !== "Tab")
-      return;
-    const focusables = dialogFocusables(dialog);
     event.preventDefault();
     event.stopPropagation();
-    if (focusables.length === 0) {
-      dialog.focus();
-      return;
-    }
-    const first = focusables[0];
-    const last = focusables.at(-1);
-    const active = document.activeElement;
-    const index = focusables.indexOf(active);
-    if (event.shiftKey) {
-      if (index <= 0)
-        last.focus();
-      else
-        focusables[index - 1].focus();
-    } else if (index < 0 || index === focusables.length - 1) {
-      first.focus();
-    } else {
-      focusables[index + 1].focus();
-    }
+    close();
   };
   const build = () => {
     const overlay = el("div", "rlb-root rlb-dashboard");
@@ -4443,6 +4558,13 @@ function createDashboard({
     );
     refreshButton.dataset.action = "refresh";
     refreshStatusNode = el("span", "rlb-dashboard__refresh-status rlb-visually-hidden");
+    refreshStatusNode.setAttribute("role", "status");
+    refreshStatusNode.setAttribute("aria-live", "polite");
+    refreshStatusNode.setAttribute("aria-atomic", "true");
+    refreshAlertNode = el("span", "rlb-dashboard__refresh-alert rlb-visually-hidden");
+    refreshAlertNode.setAttribute("role", "alert");
+    refreshAlertNode.setAttribute("aria-live", "assertive");
+    refreshAlertNode.setAttribute("aria-atomic", "true");
     header.append(
       selectWrapper,
       refreshButton,
@@ -4452,7 +4574,8 @@ function createDashboard({
         close,
         { title: "Close" }
       ),
-      refreshStatusNode
+      refreshStatusNode,
+      refreshAlertNode
     );
     summaryNode = el("div", "rlb-summary");
     bodyNode = el("div", "rlb-body rlb-body__scroll");
@@ -4475,6 +4598,7 @@ function createDashboard({
     }
     clearLiveTicker();
     resetDiscardConfirmation();
+    focusTrap.deactivate();
     root.classList.remove("rlb-root--open");
     root.setAttribute("aria-hidden", "true");
     document.removeEventListener("keydown", onKeyDown, true);
@@ -4502,14 +4626,18 @@ function createDashboard({
         root.classList.add("rlb-root--open");
         root.setAttribute("aria-hidden", "false");
         document.addEventListener("keydown", onKeyDown, true);
+        focusTrap.activate();
         render();
         const dialog = root.querySelector(".rlb-dialog");
-        const initial = dialogFocusables(dialog)[0];
+        const initial = dialog.querySelector(
+          'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])'
+        );
         (initial || dialog)?.focus();
       } catch (error) {
         root?.classList.remove("rlb-root--open");
         root?.setAttribute("aria-hidden", "true");
         document.removeEventListener("keydown", onKeyDown, true);
+        focusTrap.deactivate();
         releaseScrollLock?.();
         releaseScrollLock = null;
         returnFocusTo = null;
@@ -4527,10 +4655,12 @@ function createDashboard({
       bodyNode = null;
       activityNode = null;
       lastModel = null;
-      refreshInFlight = null;
+      refreshRuntime.dispose();
+      focusTrap.deactivate();
       focusInFlight = null;
       refreshButton = null;
       refreshStatusNode = null;
+      refreshAlertNode = null;
     }
   };
 }
@@ -4832,12 +4962,70 @@ function presentMutationResult(result, notifyUser) {
   return result;
 }
 
-// src/styles.js
-var STYLE_ID = "roam-logbook-styles";
-var STYLES = `
-.rlb-topbar {
+// src/styles/tokens.js
+var TOKENS = String.raw`.rlb-topbar {
     --rlb-topbar-load-yellow: #b38600;
     --rlb-topbar-load-red: #c23030;
+}
+
+.bp3-dark .rlb-topbar {
+    --rlb-topbar-load-yellow: #e6c35c;
+    --rlb-topbar-load-red: #ff7373;
+}
+
+.rlb-popover,
+.rlb-root {
+    --rlb-surface-action-height: 32px;
+    --rlb-surface-action-inset: 12px;
+    --rlb-surface-title-size: 10px;
+    --rlb-surface-task-size: 13px;
+    --rlb-surface-meta-size: 11px;
+    --rlb-surface-action-size: 13px;
+    --rlb-surface-row-padding: 5px;
+    --rlb-surface-border: rgba(16, 22, 26, 0.12);
+    --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
+    --rlb-surface-hover: rgba(167, 182, 194, 0.15);
+    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
+    --rlb-surface-link: #316a9f;
+    --rlb-surface-link-hover: #2a5a8d;
+    --rlb-session-running: #7eb794;
+    --rlb-canvas: var(--roam-bg-color, #fdfdfd);
+    --rlb-surface: var(--roam-bg-color, #fdfdfd);
+    --rlb-surface-subtle: var(--roam-secondary-bg-color, #f5f8fa);
+    --rlb-text: var(--roam-primary-color, #182026);
+    --rlb-muted: var(--roam-muted-color, #5c7080);
+    --rlb-border: rgba(16, 22, 26, 0.14);
+    --rlb-border-light: rgba(16, 22, 26, 0.08);
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.14);
+    --rlb-accent: var(--roam-accent-color, #316a9f);
+    --rlb-accent-soft: rgba(49, 106, 159, 0.12);
+    --rlb-overlay: rgba(16, 22, 26, 0.56);
+}
+
+.bp3-dark .rlb-popover,
+.bp3-dark .rlb-root {
+    --rlb-surface-border: rgba(255, 255, 255, 0.14);
+    --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
+    --rlb-surface-hover: rgba(167, 182, 194, 0.18);
+    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
+    --rlb-surface-link: #7eb7d5;
+    --rlb-surface-link-hover: #9dcae2;
+    --rlb-session-running: #8ed0aa;
+    --rlb-canvas: var(--roam-bg-color, #293742);
+    --rlb-surface: var(--roam-bg-color, #293742);
+    --rlb-surface-subtle: var(--roam-secondary-bg-color, #202b33);
+    --rlb-text: var(--roam-primary-color, #f5f8fa);
+    --rlb-muted: var(--roam-muted-color, #a7b6c2);
+    --rlb-border: rgba(255, 255, 255, 0.17);
+    --rlb-border-light: rgba(255, 255, 255, 0.09);
+    --rlb-task-link-hover: rgba(167, 182, 194, 0.18);
+    --rlb-accent: #48aff0;
+    --rlb-accent-soft: rgba(72, 175, 240, 0.14);
+    --rlb-overlay: rgba(16, 22, 26, 0.74);
+}`;
+
+// src/styles/topbar.js
+var TOPBAR = String.raw`.rlb-topbar {
     display: flex;
     align-items: center;
     position: relative;
@@ -4909,11 +5097,6 @@ var STYLES = `
     flex: 0 0 auto;
 }
 
-
-.bp3-dark .rlb-topbar {
-    --rlb-topbar-load-yellow: #e6c35c;
-    --rlb-topbar-load-red: #ff7373;
-}
 
 /* The widget shares the left navigation row with Roam's expanding search.
    These classes are applied to the actual host/child found at attach time, so
@@ -5070,26 +5253,13 @@ var STYLES = `
 .bp3-dark .rlb-topbar__time--stale {
     color: #f29d49;
 }
+`;
 
-/* ---- popover ---- */
+// src/styles/surface.js
+var SURFACE = String.raw`/* ---- popover ---- */
 
 /* Lives on <body>, positioned from the button's rect, so the topbar cannot clip it. */
 .rlb-popover {
-    --rlb-surface-action-height: 32px;
-    --rlb-surface-action-inset: 12px;
-    --rlb-surface-title-size: 10px;
-    --rlb-surface-task-size: 13px;
-    --rlb-surface-meta-size: 10px;
-    --rlb-surface-action-size: 13px;
-    --rlb-surface-row-padding: 5px;
-    --rlb-surface-border: rgba(16, 22, 26, 0.12);
-    --rlb-surface-border-light: rgba(16, 22, 26, 0.08);
-    --rlb-surface-hover: rgba(167, 182, 194, 0.15);
-    --rlb-surface-canvas: rgba(167, 182, 194, 0.04);
-    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
-    --rlb-surface-link: #316a9f;
-    --rlb-surface-link-hover: #2a5a8d;
-    --rlb-session-running: #7eb794;
     position: fixed;
     z-index: 30;
     width: min(340px, calc(100vw - 16px));
@@ -5103,11 +5273,12 @@ var STYLES = `
 .rlb-popover__title {
     min-width: 0;
     padding: 3px 6px 6px;
+    color: var(--rlb-muted);
     font-size: var(--rlb-surface-title-size, 10px);
     font-weight: 600;
     letter-spacing: 0.6px;
     text-transform: uppercase;
-    opacity: 0.6;
+    opacity: 1;
 }
 
 .rlb-surface__header {
@@ -5192,7 +5363,8 @@ var STYLES = `
 
 .rlb-popover__empty {
     padding: 6px 6px 12px;
-    opacity: 0.7;
+    color: var(--rlb-muted);
+    opacity: 1;
 }
 
 .rlb-surface__list {
@@ -5263,8 +5435,8 @@ var STYLES = `
 .rlb-surface__section-context {
     display: block;
     margin-left: 0;
-    color: var(--rlb-muted, #7a8b99);
-    font-size: 10px;
+    color: var(--rlb-muted);
+    font-size: 11px;
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
@@ -5274,7 +5446,7 @@ var STYLES = `
 
 .rlb-surface__section-label {
     padding: 7px 6px 3px;
-    color: #7a8b99;
+    color: var(--rlb-muted);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.65px;
@@ -5391,17 +5563,6 @@ var STYLES = `
     border-top-color: rgba(255, 255, 255, 0.15);
 }
 
-.bp3-dark .rlb-popover {
-    --rlb-surface-border: rgba(255, 255, 255, 0.14);
-    --rlb-surface-border-light: rgba(255, 255, 255, 0.09);
-    --rlb-surface-hover: rgba(167, 182, 194, 0.18);
-    --rlb-surface-canvas: rgba(167, 182, 194, 0.06);
-    --rlb-surface-focused: rgba(167, 182, 194, 0.08);
-    --rlb-surface-link: #7eb7d5;
-    --rlb-surface-link-hover: #9dcae2;
-    --rlb-session-running: #8ed0aa;
-}
-
 .rlb-run {
     display: grid;
     grid-template-columns: minmax(0, 1fr) max-content;
@@ -5471,7 +5632,8 @@ var STYLES = `
     min-width: 0;
     font-size: var(--rlb-surface-meta-size, 10px);
     line-height: 1.25;
-    opacity: 0.65;
+    color: var(--rlb-muted);
+    opacity: 1;
     font-variant-numeric: tabular-nums;
 }
 
@@ -5494,7 +5656,8 @@ var STYLES = `
 .rlb-surface__section--focused .rlb-run__total,
 .rlb-surface__section--focused .rlb-run__started,
 .rlb-surface__section--focused .rlb-run__meta > .rlb-run__meta-separator {
-    opacity: 0.65;
+    color: var(--rlb-muted);
+    opacity: 1;
 }
 
 .rlb-surface__section--focused .rlb-run__total {
@@ -5630,12 +5793,6 @@ var STYLES = `
     color: #c23030;
 }
 
-.rlb-run__state {
-    color: #5c7080;
-    opacity: 0.75;
-}
-
-
 .rlb-run__actions .bp3-icon-trash {
     box-sizing: border-box;
     display: inline-flex;
@@ -5676,8 +5833,10 @@ var STYLES = `
 .rlb-table .rlb-running__checkout:focus {
     color: #c23030;
 }
+`;
 
-/* ---- dashboard ---- */
+// src/styles/dashboard.js
+var DASHBOARD = String.raw`/* ---- dashboard ---- */
 
 .rlb-root {
     display: none;
@@ -5692,6 +5851,11 @@ var STYLES = `
     overflow: hidden;
     overscroll-behavior: none;
     touch-action: none;
+    align-items: flex-start;
+    padding: clamp(24px, 7vh, 64px) 24px 32px;
+    background: var(--rlb-overlay);
+    color: var(--rlb-text);
+    font-family: inherit;
 }
 
 .rlb-root--open {
@@ -5711,32 +5875,26 @@ var STYLES = `
 
 .rlb-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-variant-numeric: tabular-nums;
 }
 
 .rlb-table th {
     text-align: left;
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    opacity: 0.6;
     padding: 4px 8px;
-    border-bottom: 1px solid rgba(16, 22, 26, 0.15);
+    border-bottom: 0;
+    color: var(--rlb-muted);
 }
 
 .rlb-table td {
     padding: 6px 8px;
-    border-bottom: 1px solid rgba(16, 22, 26, 0.08);
+    border-bottom: 0;
     vertical-align: top;
-}
-
-.bp3-dark .rlb-table th {
-    border-bottom-color: rgba(255, 255, 255, 0.2);
-}
-
-.bp3-dark .rlb-table td {
-    border-bottom-color: rgba(255, 255, 255, 0.1);
+    font-size: 13px;
 }
 
 .rlb-table__num {
@@ -5759,7 +5917,7 @@ var STYLES = `
 }
 
 .rlb-started__date {
-    opacity: 0.72;
+    color: var(--rlb-muted);
 }
 
 .rlb-started__time {
@@ -5783,15 +5941,16 @@ var STYLES = `
     min-width: 0;
 }
 
-.rlb-tree__layout {
+/* Self-contained specificity, for the same reason as the task-link rules. */
+.rlb-tree__layout.rlb-tree__layout {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) max-content !important;
+    grid-template-columns: auto minmax(0, 1fr) max-content;
     align-items: start;
-    column-gap: 12px !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
-    overflow: visible !important;
+    column-gap: 12px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
 }
 
 .rlb-tree__leading {
@@ -5801,16 +5960,16 @@ var STYLES = `
     min-width: 0;
 }
 
-.rlb-tree__content {
-    display: flex !important;
+.rlb-tree__content.rlb-tree__content {
+    display: flex;
     align-items: baseline;
-    flex: 1 1 auto !important;
-    width: auto !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
-    flex-wrap: wrap !important;
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
     gap: 4px;
-    overflow: visible !important;
+    overflow: visible;
 }
 
 .rlb-tree__actions {
@@ -5855,8 +6014,8 @@ var STYLES = `
 .rlb-section__heading {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 6px;
+    margin-bottom: 6px;
 }
 
 .rlb-section__heading .rlb-section__title {
@@ -6029,87 +6188,52 @@ var STYLES = `
     width: 88px;
 }
 
-.rlb-task-table .rlb-task-link {
-    display: flex !important;
-    flex: 1 1 auto !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
+/* Specificity here has to beat Blueprint's own .bp3-button.bp3-minimal rules
+   (three classes) without depending on a .rlb-root ancestor: the By Task table
+   is rendered standalone in layout tests and could be reparented in the dialog.
+   Repeating .rlb-task-table is a self-contained way to outrank them. */
+.rlb-task-table.rlb-task-table .rlb-task-link {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     justify-content: flex-start;
     text-align: left;
-    white-space: normal !important;
-    overflow: visible !important;
-    overflow-wrap: anywhere !important;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
     text-overflow: initial;
 }
 
-.rlb-task-table .rlb-task-link > .rlb-task-link__text {
-    display: block !important;
-    flex: 1 1 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
+.rlb-task-table.rlb-task-table .rlb-task-link > .rlb-task-link__text {
+    display: block;
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
     text-align: left;
-    white-space: normal !important;
-    overflow: visible !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .rlb-muted {
-    opacity: 0.6;
+    color: var(--rlb-muted);
+    opacity: 1;
 }
 
 .rlb-empty {
-    padding: 24px;
+    padding: 24px 12px;
     text-align: center;
-    opacity: 0.65;
+    color: var(--rlb-muted);
+    opacity: 1;
 }
 
 /* ---- Roam-native dashboard shell ---- */
-
-.rlb-root {
-    --rlb-canvas: var(--roam-bg-color, #fdfdfd);
-    --rlb-surface: var(--roam-bg-color, #fdfdfd);
-    --rlb-surface-subtle: var(--roam-secondary-bg-color, #f5f8fa);
-    --rlb-text: var(--roam-primary-color, #182026);
-    --rlb-muted: var(--roam-muted-color, #5c7080);
-    --rlb-border: rgba(16, 22, 26, 0.14);
-    --rlb-border-light: rgba(16, 22, 26, 0.08);
-    --rlb-surface-link: #316a9f;
-    --rlb-surface-link-hover: #2a5a8d;
-    --rlb-task-link-hover: rgba(167, 182, 194, 0.14);
-    --rlb-session-running: #7eb794;
-    --rlb-accent: var(--roam-accent-color, #316a9f);
-    --rlb-accent-soft: rgba(49, 106, 159, 0.12);
-    --rlb-overlay: rgba(16, 22, 26, 0.56);
-    align-items: flex-start;
-    padding: clamp(24px, 7vh, 64px) 24px 32px;
-    overflow: hidden;
-    overscroll-behavior: none;
-    background: var(--rlb-overlay);
-    color: var(--rlb-text);
-    font-family: inherit;
-}
-
-.bp3-dark .rlb-root {
-    --rlb-canvas: var(--roam-bg-color, #293742);
-    --rlb-surface: var(--roam-bg-color, #293742);
-    --rlb-surface-subtle: var(--roam-secondary-bg-color, #202b33);
-    --rlb-text: var(--roam-primary-color, #f5f8fa);
-    --rlb-muted: var(--roam-muted-color, #a7b6c2);
-    --rlb-border: rgba(255, 255, 255, 0.17);
-    --rlb-border-light: rgba(255, 255, 255, 0.09);
-    --rlb-surface-link: #7eb7d5;
-    --rlb-surface-link-hover: #9dcae2;
-    --rlb-task-link-hover: rgba(167, 182, 194, 0.18);
-    --rlb-session-running: #8ed0aa;
-    --rlb-accent: #48aff0;
-    --rlb-accent-soft: rgba(72, 175, 240, 0.14);
-    --rlb-overlay: rgba(16, 22, 26, 0.74);
-}
 
 .rlb-dialog {
     display: flex;
@@ -6217,11 +6341,6 @@ var STYLES = `
     border-left: 1px solid var(--rlb-overview-divider, var(--rlb-border-light));
 }
 
-.rlb-overview__item--selected {
-    min-width: 0;
-    justify-content: space-between;
-}
-
 .rlb-overview__panel {
     overflow: hidden;
 }
@@ -6276,16 +6395,6 @@ var STYLES = `
     white-space: nowrap;
 }
 
-.rlb-overview__value--quiet .rlb-overview__number {
-    color: var(--rlb-muted);
-    font-size: 18px;
-    font-weight: 500;
-}
-
-.rlb-overview__value--quiet .rlb-overview__context {
-    opacity: 0.82;
-}
-
 .rlb-body,
 .rlb-body__scroll {
     flex: 1 1 auto;
@@ -6335,8 +6444,10 @@ var STYLES = `
     padding-bottom: 2px;
     vertical-align: middle;
 }
+`;
 
-/* Activity is the one visual summary in the Dashboard. Keep its geometry
+// src/styles/activity.js
+var ACTIVITY = String.raw`/* Activity is the one visual summary in the Dashboard. Keep its geometry
    deliberately bounded: values sit above each bar and the date remains below
    it, with no secondary axis or scroll rail competing for attention. */
 .rlb-dashboard .rlb-activity {
@@ -6398,7 +6509,7 @@ var STYLES = `
 
 .rlb-activity__duration {
     color: var(--rlb-text);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     line-height: 18px;
 }
@@ -6406,11 +6517,11 @@ var STYLES = `
 .rlb-activity__unit {
     flex: 0 0 auto;
     color: var(--rlb-muted);
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.45px;
     line-height: 1.25;
-    opacity: 0.78;
+    opacity: 1;
 }
 
 .rlb-activity__bar-wrap {
@@ -6432,7 +6543,7 @@ var STYLES = `
 
 .rlb-activity__bucket--empty .rlb-activity__duration {
     color: var(--rlb-muted);
-    opacity: 0.72;
+    opacity: 1;
 }
 
 .rlb-activity__bucket--empty .rlb-activity__bar {
@@ -6441,12 +6552,14 @@ var STYLES = `
 
 .rlb-activity__date {
     color: var(--rlb-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
     line-height: 20px;
 }
+`;
 
-.rlb-panel__header {
+// src/styles/tasks.js
+var TASKS = String.raw`.rlb-panel__header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -6458,7 +6571,6 @@ var STYLES = `
     flex: 0 0 auto;
 }
 
-.rlb-panel__count,
 .rlb-panel__notice {
     color: var(--rlb-muted);
     font-size: 11px;
@@ -6477,12 +6589,6 @@ var STYLES = `
     letter-spacing: 0.55px;
     line-height: 1.25;
     text-transform: uppercase;
-}
-
-.rlb-section__heading {
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
 }
 
 .rlb-by-task {
@@ -6518,14 +6624,14 @@ var STYLES = `
     background: var(--rlb-surface-subtle);
 }
 
-.rlb-task-filter {
+.rlb-root .bp3-button.rlb-task-filter {
     min-width: 38px;
     height: 22px;
     min-height: 22px;
     padding: 2px 7px;
     border-radius: 3px;
     color: var(--rlb-muted);
-    font-size: 10px !important;
+    font-size: 10px;
     font-weight: 600;
 }
 
@@ -6535,14 +6641,14 @@ var STYLES = `
     color: var(--rlb-text);
 }
 
-.rlb-tree__collapse-all {
+.rlb-root .bp3-button.rlb-tree__collapse-all {
     flex: 0 0 auto;
     height: 22px;
     min-height: 22px;
     margin-left: auto;
     padding: 2px 6px;
     color: var(--rlb-text);
-    font-size: 11px !important;
+    font-size: 11px;
     font-weight: 600;
 }
 
@@ -6559,7 +6665,7 @@ var STYLES = `
 
 .rlb-row--context > td {
     color: var(--rlb-muted);
-    opacity: 0.62;
+    opacity: 1;
 }
 
 .rlb-row--context .rlb-task-link {
@@ -6601,24 +6707,6 @@ var STYLES = `
     line-height: 1;
 }
 
-.rlb-dashboard .rlb-table {
-    border-collapse: separate;
-    border-spacing: 0;
-}
-
-.rlb-dashboard .rlb-table th {
-    padding: 4px 8px;
-    border-bottom: 0;
-    color: var(--rlb-muted);
-    font-size: 10px;
-}
-
-.rlb-dashboard .rlb-table td {
-    padding: 6px 8px;
-    border-bottom: 0;
-    font-size: 13px;
-}
-
 .rlb-dashboard .rlb-table tbody tr:hover td {
     background: rgba(167, 182, 194, 0.12);
 }
@@ -6648,22 +6736,10 @@ var STYLES = `
     font-size: 10px;
 }
 
-.rlb-dashboard .rlb-empty {
-    padding: 24px 12px;
-}
+`;
 
-.rlb-muted {
-    color: var(--rlb-muted);
-    opacity: 1;
-}
-
-.rlb-empty {
-    padding: 24px 12px;
-    color: var(--rlb-muted);
-    opacity: 1;
-}
-
-@media (max-width: 600px) {
+// src/styles/responsive.js
+var RESPONSIVE = String.raw`@media (max-width: 600px) {
     .rlb-root {
         align-items: flex-start;
         padding: 12px;
@@ -6711,18 +6787,6 @@ var STYLES = `
         min-height: 122px;
     }
 
-    .rlb-overview__item--selected {
-        grid-column: 1 / -1;
-        grid-row: 2;
-        border-top: 1px solid var(--rlb-overview-divider, var(--rlb-border-light));
-        border-left: 0;
-    }
-
-    .rlb-overview__item:nth-child(3) {
-        grid-column: 2;
-        grid-row: 1;
-    }
-
     .rlb-overview__item {
         padding: 9px 10px;
     }
@@ -6768,30 +6832,11 @@ var STYLES = `
 
     .rlb-activity__duration,
     .rlb-activity__date {
-        font-size: 8px;
-    }
-
-    .rlb-by-task > .rlb-section__heading {
-        align-items: flex-start;
-        flex-wrap: wrap;
-        row-gap: 4px;
-        height: auto;
-        min-height: 34px;
-        margin: -12px -14px 6px;
-        padding: 6px 10px;
-    }
-
-    .rlb-task-filters {
-        max-width: 100%;
-        flex-wrap: wrap;
+        font-size: 11px;
     }
 
     .rlb-tree__collapse-all {
         margin-left: auto;
-    }
-
-    .rlb-by-task .rlb-task-table thead th {
-        position: static;
     }
 
     .rlb-table {
@@ -6836,6 +6881,9 @@ var STYLES = `
         padding: 10px 12px 20px;
     }
 
+}
+
+@media (max-width: 719px) {
     .rlb-by-task > .rlb-section__heading {
         align-items: flex-start;
         flex-wrap: wrap;
@@ -6849,10 +6897,6 @@ var STYLES = `
     .rlb-task-filters {
         max-width: 100%;
         flex-wrap: wrap;
-    }
-
-    .rlb-by-task .rlb-task-table thead th {
-        position: static;
     }
 }
 
@@ -6909,6 +6953,10 @@ var STYLES = `
 
 }
 `;
+
+// src/styles.js
+var STYLE_ID = "roam-logbook-styles";
+var STYLES = [TOKENS, TOPBAR, SURFACE, DASHBOARD, ACTIVITY, TASKS, RESPONSIVE].join("\n");
 
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
@@ -7296,9 +7344,9 @@ var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
 var TOPBAR_SELECTOR2 = ".rm-topbar";
 var REFRESH_SUCCESS_DURATION = 1800;
-var REFRESH_LOADING_MESSAGE2 = "Refreshing Active Work from graph\u2026";
-var REFRESH_SUCCESS_MESSAGE2 = "Updated just now";
-var REFRESH_ERROR_MESSAGE2 = "Refresh failed; last valid snapshot kept. Retry.";
+var REFRESH_LOADING_MESSAGE = "Refreshing Active Work from graph\u2026";
+var REFRESH_SUCCESS_MESSAGE = "Updated just now";
+var REFRESH_ERROR_MESSAGE = "Refresh failed; last valid snapshot kept. Retry.";
 var RECOVERY_TIMEOUT_MS = 15e3;
 var RECOVERY_FLUSH_LIMIT = 32;
 var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
@@ -7566,17 +7614,17 @@ function createTopbar({
       (result) => {
         if (result?.ok) {
           actionNotice = "";
-          setRefreshState("success", REFRESH_SUCCESS_MESSAGE2, { clearAfter: true });
+          setRefreshState("success", REFRESH_SUCCESS_MESSAGE, { clearAfter: true });
         } else {
           actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-          setRefreshState("error", REFRESH_ERROR_MESSAGE2);
+          setRefreshState("error", REFRESH_ERROR_MESSAGE);
         }
         return result;
       },
       (error) => {
         console.error("[roam-logbook] could not refresh Session surface", error);
         actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-        setRefreshState("error", REFRESH_ERROR_MESSAGE2);
+        setRefreshState("error", REFRESH_ERROR_MESSAGE);
         return {
           ok: false,
           uncertain: true,
@@ -7589,7 +7637,7 @@ function createTopbar({
       refreshInFlight = null;
     });
     actionNotice = "";
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE2);
+    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
     return refreshInFlight;
   };
   const requestSessionRefresh = () => pendingOpenRefresh?.promise || refreshSessions();
@@ -7728,7 +7776,7 @@ function createTopbar({
       closePopover();
       return;
     }
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE2);
+    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
     popover = el("div", "bp3-card bp3-elevation-3 rlb-popover");
     popover.id = POPOVER_ID;
     popover.setAttribute("role", "dialog");

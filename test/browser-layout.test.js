@@ -1256,7 +1256,9 @@ test('Activity chart keeps a 30-day desktop grid inside a narrow dialog and uses
     assert.deepEqual(geometry.nonZeroDates, ['Aug 1', '13'], JSON.stringify(geometry));
     assert.equal(geometry.barWidth, 10, JSON.stringify(geometry));
     assert.equal(geometry.density, 'month-10', JSON.stringify(geometry));
-    assert.ok(Number.parseFloat(geometry.fontSize) <= 10, JSON.stringify(geometry));
+    // 11px is the readable floor for body-ish muted text; the overflow
+    // assertions above are what keep the dense 30-day grid honest.
+    assert.ok(Number.parseFloat(geometry.fontSize) <= 11, JSON.stringify(geometry));
 });
 
 test('Today Activity keeps 24 hourly buckets, sparse labels, and no narrow-layout overflow', async t => {

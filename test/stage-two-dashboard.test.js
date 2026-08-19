@@ -178,11 +178,16 @@ test('Dashboard Refresh announces a retryable error while retaining the last sna
         const refresh = document.querySelector('[data-action="refresh"]');
         refresh.click();
         await settle();
+        // Roles are fixed per node rather than swapped on one node, because a
+        // role change is not reliably picked up by assistive technology.
         const status = document.querySelector('.rlb-dashboard__refresh-status');
+        const alert = document.querySelector('.rlb-dashboard__refresh-alert');
         assert.equal(refresh.dataset.refreshState, 'error');
-        assert.equal(status.getAttribute('role'), 'alert');
-        assert.equal(status.getAttribute('aria-live'), 'assertive');
-        assert.match(status.textContent, /last valid snapshot|Retry/i);
+        assert.equal(status.getAttribute('role'), 'status');
+        assert.equal(alert.getAttribute('role'), 'alert');
+        assert.equal(alert.getAttribute('aria-live'), 'assertive');
+        assert.match(alert.textContent, /last valid snapshot|Retry/i);
+        assert.equal(status.textContent, '');
         assert.equal(
             document.querySelector('[data-running-elapsed="true"]').dataset.clockUid,
             beforeUid
