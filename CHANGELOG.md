@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0-beta.46 — 2026-08-19
+
+- Expanded the Active Threads/Today popover to a controlled 460px desktop
+  width while keeping it constrained to the viewport on 320/340/360px screens.
+- Fixed the Today task grid so its title rail flexes and ellipsizes from the
+  right, the Play and `+N` actions stay in a fixed column, and deep hierarchy
+  indentation remains bounded without horizontal overflow.
+- Kept Threads, Today, empty, and error states in the same responsive shell;
+  no Today query, cache, timing, or interaction semantics changed.
+
 ## 0.9.0-beta.45 — 2026-08-19
 
 - Added a compact `Threads · N` / `Today · N` switch to the existing Active

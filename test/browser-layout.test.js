@@ -963,6 +963,117 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
     }
 });
 
+test('Active Threads popover uses a natural desktop width and bounded Today rails', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+
+    const markup = `
+        <div class="rlb-popover">
+            <header class="rlb-surface__header">
+                <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                <div class="rlb-surface__actions">
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" aria-label="Dashboard"></button>
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button" aria-label="Refresh"></button>
+                </div>
+            </header>
+            <nav class="rlb-surface__view-switch" aria-label="Logbook view">
+                <button class="bp3-button bp3-minimal rlb-surface__view-control">Threads · 2</button>
+                <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected">Today · 55</button>
+            </nav>
+            <div class="rlb-surface__list" role="group" aria-label="Today TODOs">
+                <div class="rlb-today__tree" role="tree">
+                    <div class="rlb-today__row" style="--rlb-today-depth:0" role="treeitem">
+                        <div class="rlb-today__rail">
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Project"></button>
+                            <button class="bp3-button bp3-minimal rlb-today__title">A long project title that should ellipsize on the right without pushing the action rail away</button>
+                        </div>
+                        <div class="rlb-today__action">
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
+                            <span class="rlb-today__hidden-count">+12</span>
+                        </div>
+                    </div>
+                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
+                        <div class="rlb-today__rail">
+                            <span class="rlb-today__spacer"></span>
+                            <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child that must keep a usable title region</button>
+                        </div>
+                        <div class="rlb-today__action">
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Child"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    const expression = `(() => {
+        const rect = node => {
+            const value = node.getBoundingClientRect();
+            return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+        };
+        const popover = document.querySelector('.rlb-popover');
+        const rows = [...popover.querySelectorAll('.rlb-today__row')];
+        const actions = rows.map(row => row.querySelector('.rlb-today__action'));
+        const titles = rows.map(row => row.querySelector('.rlb-today__title'));
+        const rails = rows.map(row => row.querySelector('.rlb-today__rail'));
+        const rowRects = rows.map(rect);
+        const actionRects = actions.map(rect);
+        const titleRects = titles.map(rect);
+        const popoverRect = rect(popover);
+        const titleInk = title => {
+            const range = document.createRange();
+            range.selectNodeContents(title);
+            const value = range.getBoundingClientRect();
+            return { left: value.left, right: value.right };
+        };
+        return {
+            popover: popoverRect,
+            width: popoverRect.width,
+            overflow: popover.scrollWidth > popover.clientWidth + 0.5,
+            rowInside: rowRects.every(row => row.left >= popoverRect.left && row.right <= popoverRect.right + 0.5),
+            actionInside: actionRects.every((action, index) => action.left >= rowRects[index].left && action.right <= rowRects[index].right + 0.5),
+            titleBeforeAction: titleRects.every((title, index) => title.right <= actionRects[index].left + 0.5),
+            actionWidths: actionRects.map(action => action.width),
+            titleWidths: titleRects.map(title => title.width),
+            titleScrolls: titles.map(title => title.scrollWidth > title.clientWidth),
+            titleInkStartsInside: titles.map((title, index) => {
+                const ink = titleInk(title);
+                return ink.left >= titleRects[index].left - 0.5;
+            }),
+            railOverflow: rails.map(rail => rail.scrollWidth > rail.clientWidth),
+            deepIndent: parseFloat(getComputedStyle(rows[1]).paddingLeft),
+        };
+    })()`;
+
+    const desktop = await withChromium(htmlWithLateHost(markup), expression, { width: 960, height: 720 });
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ desktop }));
+    assert.ok(desktop.width >= 440 && desktop.width <= 480, JSON.stringify({ desktop }));
+    assert.equal(desktop.overflow, false, JSON.stringify({ desktop }));
+    assert.equal(desktop.rowInside, true, JSON.stringify({ desktop }));
+    assert.equal(desktop.actionInside, true, JSON.stringify({ desktop }));
+    assert.equal(desktop.titleBeforeAction, true, JSON.stringify({ desktop }));
+    assert.ok(desktop.actionWidths[0] >= 52, JSON.stringify({ desktop }));
+    assert.ok(desktop.actionWidths.every(width => width <= 60), JSON.stringify({ desktop }));
+    assert.ok(desktop.titleWidths[0] > 260, JSON.stringify({ desktop }));
+    assert.equal(desktop.titleScrolls[0], true, JSON.stringify({ desktop }));
+    assert.deepEqual(desktop.titleInkStartsInside, [true, true], JSON.stringify({ desktop }));
+    assert.deepEqual(desktop.railOverflow, [false, false], JSON.stringify({ desktop }));
+    assert.ok(desktop.deepIndent <= 64, JSON.stringify({ desktop }));
+
+    for (const width of [320, 340, 360]) {
+        const geometry = await withChromium(htmlWithLateHost(markup), expression, { width, height: 720 });
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        const context = JSON.stringify({ width, geometry });
+        assert.ok(geometry.width <= width - 16 + 0.5, context);
+        assert.equal(geometry.overflow, false, context);
+        assert.equal(geometry.rowInside, true, context);
+        assert.equal(geometry.actionInside, true, context);
+        assert.equal(geometry.titleBeforeAction, true, context);
+        assert.ok(geometry.actionWidths[0] >= 52, context);
+        assert.ok(geometry.actionWidths.every(actionWidth => actionWidth <= 60), context);
+        assert.deepEqual(geometry.titleInkStartsInside, [true, true], context);
+        assert.deepEqual(geometry.railOverflow, [false, false], context);
+    }
+});
+
 test('Dashboard Timing keeps one live CLOCK in a compact labelled panel', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(

@@ -35,7 +35,7 @@ export function createSessionPopover({
         const trigger = getTrigger();
         const anchor = trigger?.getBoundingClientRect();
         if (!anchor || !root) return;
-        const width = root.offsetWidth || 340;
+        const width = root.offsetWidth || 460;
         const viewport = windowRef.innerWidth || width + 16;
         root.style.top = `${anchor.bottom + 6}px`;
         // Hangs from the trigger's left edge, then pulls back if that would run

@@ -3389,7 +3389,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.45";
+var PLUGIN_VERSION = "0.9.0-beta.46";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -5561,8 +5561,11 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-popover {
     position: fixed;
     z-index: 30;
-    width: min(340px, calc(100vw - 16px));
+    box-sizing: border-box;
+    width: min(460px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
     max-height: 70vh;
+    overflow-x: hidden;
     overflow-y: auto;
     padding: 8px;
     text-align: left;
@@ -5695,6 +5698,7 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-popover__empty {
     padding: 6px 6px 12px;
     color: var(--rlb-muted);
+    overflow-wrap: anywhere;
     opacity: 1;
 }
 
@@ -6155,11 +6159,12 @@ var SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-today__row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) 56px;
     align-items: center;
+    box-sizing: border-box;
     min-width: 0;
     min-height: 30px;
-    padding: 2px 4px 2px calc(4px + (var(--rlb-today-depth, 0) * 14px));
+    padding: 2px 4px 2px min(60px, calc(4px + (var(--rlb-today-depth, 0) * 14px)));
     border-radius: 4px;
 }
 
@@ -6171,6 +6176,8 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-today__rail {
     display: flex;
     align-items: center;
+    overflow: hidden;
+    width: 100%;
     min-width: 0;
 }
 
@@ -6195,7 +6202,11 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {
+    display: block !important;
+    flex: 1 1 0;
+    width: 0;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     padding: 3px 4px !important;
     color: var(--rlb-surface-link);
@@ -6213,11 +6224,15 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__action {
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
     gap: 4px;
-    min-width: 36px;
+    width: 56px;
+    min-width: 56px;
+    max-width: 56px;
+    overflow: visible;
     color: var(--rlb-muted);
 }
 
@@ -6253,7 +6268,11 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__hidden-count {
+    display: inline-block;
+    flex: 0 0 20px;
+    width: 20px;
     min-width: 20px;
+    max-width: 20px;
     color: var(--rlb-muted);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
@@ -7994,7 +8013,7 @@ function createSessionPopover({
     const anchor = trigger?.getBoundingClientRect();
     if (!anchor || !root)
       return;
-    const width = root.offsetWidth || 340;
+    const width = root.offsetWidth || 460;
     const viewport = windowRef.innerWidth || width + 16;
     root.style.top = `${anchor.bottom + 6}px`;
     root.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;

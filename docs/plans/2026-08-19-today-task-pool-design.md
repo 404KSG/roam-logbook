@@ -1,5 +1,14 @@
 # Today Task Pool — beta.45 design
 
+## Follow-up — beta.46 natural surface width
+
+The shared popover shell uses a controlled `460px` desktop width and shrinks to
+`calc(100vw - 16px)` on narrow viewports. Today rows keep a flexible title rail
+beside a fixed `56px` action column, while visual hierarchy indentation is capped
+at `60px`. Long titles are clipped only at the trailing edge; Play and hidden
+descendant counts never overlap or force horizontal scrolling. Threads, Today,
+empty, and error states all inherit this same shell contract.
+
 ## Decision
 
 The existing Active Threads popover remains the single interaction shell and

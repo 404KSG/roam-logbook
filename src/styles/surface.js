@@ -4,8 +4,11 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 .rlb-popover {
     position: fixed;
     z-index: 30;
-    width: min(340px, calc(100vw - 16px));
+    box-sizing: border-box;
+    width: min(460px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
     max-height: 70vh;
+    overflow-x: hidden;
     overflow-y: auto;
     padding: 8px;
     text-align: left;
@@ -138,6 +141,7 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 .rlb-popover__empty {
     padding: 6px 6px 12px;
     color: var(--rlb-muted);
+    overflow-wrap: anywhere;
     opacity: 1;
 }
 
@@ -598,11 +602,12 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-today__row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) 56px;
     align-items: center;
+    box-sizing: border-box;
     min-width: 0;
     min-height: 30px;
-    padding: 2px 4px 2px calc(4px + (var(--rlb-today-depth, 0) * 14px));
+    padding: 2px 4px 2px min(60px, calc(4px + (var(--rlb-today-depth, 0) * 14px)));
     border-radius: 4px;
 }
 
@@ -614,6 +619,8 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 .rlb-today__rail {
     display: flex;
     align-items: center;
+    overflow: hidden;
+    width: 100%;
     min-width: 0;
 }
 
@@ -638,7 +645,11 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {
+    display: block !important;
+    flex: 1 1 0;
+    width: 0;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     padding: 3px 4px !important;
     color: var(--rlb-surface-link);
@@ -656,11 +667,15 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__action {
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
     gap: 4px;
-    min-width: 36px;
+    width: 56px;
+    min-width: 56px;
+    max-width: 56px;
+    overflow: visible;
     color: var(--rlb-muted);
 }
 
@@ -696,7 +711,11 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__hidden-count {
+    display: inline-block;
+    flex: 0 0 20px;
+    width: 20px;
     min-width: 20px;
+    max-width: 20px;
     color: var(--rlb-muted);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
