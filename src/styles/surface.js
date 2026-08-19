@@ -604,15 +604,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     padding: 0 2px 2px;
 }
 
-.rlb-today__controls {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-}
-
 .rlb-today__control {
     color: var(--rlb-muted);
 }
@@ -625,7 +616,8 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-today__row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 56px;
+    --rlb-today-action-column: 32px;
+    grid-template-columns: minmax(0, 1fr) var(--rlb-today-action-column);
     align-items: center;
     box-sizing: border-box;
     min-width: 0;
@@ -694,10 +686,11 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 4px;
-    width: 56px;
-    min-width: 56px;
-    max-width: 56px;
+    gap: 0;
+    width: var(--rlb-today-action-column);
+    min-width: var(--rlb-today-action-column);
+    max-width: var(--rlb-today-action-column);
+    justify-self: end;
     overflow: visible;
     color: var(--rlb-muted);
 }
@@ -725,24 +718,16 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     align-items: center;
     justify-content: center;
     width: 28px;
+    min-width: 28px;
+    max-width: 28px;
     height: 28px;
+    min-height: 28px;
+    max-height: 28px;
     color: var(--rlb-muted);
 }
 
 .rlb-today__timing::before {
     margin: 0;
-}
-
-.rlb-today__hidden-count {
-    display: inline-block;
-    flex: 0 0 20px;
-    width: 20px;
-    min-width: 20px;
-    max-width: 20px;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
 }
 
 @media (max-width: 340px) {

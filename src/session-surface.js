@@ -95,7 +95,7 @@ const renderTodayRow = (row, options) => {
                 event.stopPropagation();
                 options.onToggleToday?.(node.uid);
             },
-            { title: row.expanded ? 'Collapse sub-tasks' : `Expand ${node.hiddenDescendantCount} sub-tasks` }
+            { title: row.expanded ? 'Collapse sub-tasks' : 'Expand sub-tasks' }
         );
         toggle.setAttribute('aria-label', row.expanded ? `Collapse ${title}` : `Expand ${title}`);
         toggle.dataset.action = 'today-toggle';
@@ -134,11 +134,6 @@ const renderTodayRow = (row, options) => {
         play.setAttribute('aria-label', `Start timing ${title}`);
         play.dataset.action = 'today-play';
         action.appendChild(play);
-    }
-    if (!row.expanded && node.hiddenDescendantCount > 0) {
-        action.appendChild(
-            el('span', 'rlb-today__hidden-count', `+${node.hiddenDescendantCount}`)
-        );
     }
     rowNode.appendChild(action);
     return rowNode;
@@ -356,6 +351,14 @@ export function renderSessionSurface(root, model, options = {}) {
         activeView === 'today' && Array.isArray(options.todayModel?.nodes)
             ? options.todayModel.nodes.filter(node => node?.children?.length > 0)
             : [];
+    const visibleTodayRows = activeView === 'today'
+        ? options.todayRows || flattenTodayRows(options.todayModel)
+        : [];
+    const visibleTodayExpandableRows = visibleTodayRows.filter(row => row?.node?.children?.length > 0);
+    const todayAllExpanded = todayExpandableNodes.length > 0 &&
+        visibleTodayExpandableRows.length === todayExpandableNodes.length &&
+        visibleTodayExpandableRows.every(row => row.expanded);
+    const todayToggleLabel = todayAllExpanded ? collapseTodayLabel : expandTodayLabel;
     const title = el('div', 'rlb-popover__title', surfaceTitle(model.activeCount ?? model.rows.length));
     if (options.titleId) title.id = options.titleId;
 
@@ -373,25 +376,16 @@ export function renderSessionSurface(root, model, options = {}) {
         headerActions.appendChild(dashboard);
     }
     if (todayExpandableNodes.length > 0) {
-        const todayControls = el('div', 'rlb-today__controls');
-        todayControls.setAttribute('role', 'group');
-        todayControls.setAttribute('aria-label', 'Today task tree controls');
-        const expandAll = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control',
+        const toggleAll = button(
+            `bp3-button bp3-minimal bp3-small bp3-icon-${todayAllExpanded ? 'collapse-all' : 'expand-all'} rlb-surface__icon-button rlb-today__control`,
             '',
-            () => options.onExpandAllToday?.(),
-            { title: expandTodayLabel, ariaLabel: expandTodayLabel }
+            () => options.onToggleAllToday?.(),
+            { title: todayToggleLabel, ariaLabel: todayToggleLabel }
         );
-        expandAll.dataset.action = 'today-expand-all';
-        const collapseAll = button(
-            'bp3-button bp3-minimal bp3-small bp3-icon-collapse-all rlb-surface__icon-button rlb-today__control',
-            '',
-            () => options.onCollapseAllToday?.(),
-            { title: collapseTodayLabel, ariaLabel: collapseTodayLabel }
-        );
-        collapseAll.dataset.action = 'today-collapse-all';
-        todayControls.append(expandAll, collapseAll);
-        headerActions.appendChild(todayControls);
+        toggleAll.dataset.action = 'today-toggle-all';
+        toggleAll.setAttribute('aria-expanded', String(todayAllExpanded));
+        toggleAll.setAttribute('aria-controls', 'rlb-today-tree');
+        headerActions.appendChild(toggleAll);
     }
     if (options.onRefresh) headerActions.appendChild(renderRefreshControl(options));
     if (options.onClose) {
@@ -441,7 +435,7 @@ export function renderSessionSurface(root, model, options = {}) {
 
     if (activeView === 'today') {
         const todayModel = options.todayModel;
-        const rows = options.todayRows || flattenTodayRows(todayModel);
+        const rows = visibleTodayRows;
         if (!todayModel || ['idle', 'loading'].includes(todayModel.status)) {
             sessionList.appendChild(el('div', 'rlb-popover__empty', 'Loading today…'));
         } else if (todayModel.status === 'error') {
@@ -452,6 +446,7 @@ export function renderSessionSurface(root, model, options = {}) {
             sessionList.appendChild(el('div', 'rlb-popover__empty', 'No unfinished TODOs today.'));
         } else {
             const tree = el('div', 'rlb-today__tree');
+            tree.id = 'rlb-today-tree';
             tree.setAttribute('role', 'tree');
             tree.setAttribute('aria-label', 'Today unfinished TODOs');
             for (const row of rows) tree.appendChild(renderTodayRow(row, options));

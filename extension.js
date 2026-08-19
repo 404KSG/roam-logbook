@@ -271,7 +271,6 @@ var makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
   orderPath: [...orderPath],
   children: []
 });
-var countDescendants = (node) => node.children.reduce((total, child) => total + 1 + countDescendants(child), 0);
 var appendTo = (parent, node, roots) => {
   if (parent)
     parent.children.push(node);
@@ -325,10 +324,8 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
   };
   roots.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((root, index) => walk(root, null, [index]));
   const all = [...visibleByUid.values()];
-  for (const node of all) {
-    node.hiddenDescendantCount = countDescendants(node);
+  for (const node of all)
     node.hasChildren = node.children.length > 0;
-  }
   return {
     roots: outputRoots,
     nodes: all,
@@ -354,7 +351,7 @@ var walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
   for (const node of nodes || []) {
     const forced = forcedPath?.has(node.uid);
     const isExpanded = node.children.length > 0 && (forced || expanded?.has(node.uid));
-    rows.push({ node, depth, expanded: isExpanded, hiddenDescendantCount: node.hiddenDescendantCount });
+    rows.push({ node, depth, expanded: isExpanded });
     if (isExpanded)
       walkVisible(node.children, rows, expanded, forcedPath, depth + 1);
   }
@@ -3482,7 +3479,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.48";
+var PLUGIN_VERSION = "0.9.0-beta.49";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -3714,7 +3711,7 @@ function runningSection({
 }
 
 // src/dashboard-task-tree.js
-var countDescendants2 = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants2(child), 0);
+var countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, statusMark: statusMark2, taskTimingAction }) {
   const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
   section.setAttribute("aria-labelledby", "roam-logbook-by-task-title");
@@ -3900,7 +3897,7 @@ function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, 
       }
       const actions = el("div", "rlb-muted rlb-tree__actions");
       if (node.collapsed) {
-        const hidden = countDescendants2(node);
+        const hidden = countDescendants(node);
         actions.appendChild(
           el("span", "rlb-muted rlb-tree__hidden", `+${hidden} sub-task${hidden > 1 ? "s" : ""}`)
         );
@@ -6254,15 +6251,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
     padding: 0 2px 2px;
 }
 
-.rlb-today__controls {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-}
-
 .rlb-today__control {
     color: var(--rlb-muted);
 }
@@ -6275,7 +6263,8 @@ var SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-today__row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 56px;
+    --rlb-today-action-column: 32px;
+    grid-template-columns: minmax(0, 1fr) var(--rlb-today-action-column);
     align-items: center;
     box-sizing: border-box;
     min-width: 0;
@@ -6344,10 +6333,11 @@ var SURFACE = String.raw`/* ---- popover ---- */
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 4px;
-    width: 56px;
-    min-width: 56px;
-    max-width: 56px;
+    gap: 0;
+    width: var(--rlb-today-action-column);
+    min-width: var(--rlb-today-action-column);
+    max-width: var(--rlb-today-action-column);
+    justify-self: end;
     overflow: visible;
     color: var(--rlb-muted);
 }
@@ -6375,24 +6365,16 @@ var SURFACE = String.raw`/* ---- popover ---- */
     align-items: center;
     justify-content: center;
     width: 28px;
+    min-width: 28px;
+    max-width: 28px;
     height: 28px;
+    min-height: 28px;
+    max-height: 28px;
     color: var(--rlb-muted);
 }
 
 .rlb-today__timing::before {
     margin: 0;
-}
-
-.rlb-today__hidden-count {
-    display: inline-block;
-    flex: 0 0 20px;
-    width: 20px;
-    min-width: 20px;
-    max-width: 20px;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
 }
 
 @media (max-width: 340px) {
@@ -7623,7 +7605,7 @@ var renderTodayRow = (row, options) => {
         event.stopPropagation();
         options.onToggleToday?.(node.uid);
       },
-      { title: row.expanded ? "Collapse sub-tasks" : `Expand ${node.hiddenDescendantCount} sub-tasks` }
+      { title: row.expanded ? "Collapse sub-tasks" : "Expand sub-tasks" }
     );
     toggle.setAttribute("aria-label", row.expanded ? `Collapse ${title}` : `Expand ${title}`);
     toggle.dataset.action = "today-toggle";
@@ -7660,11 +7642,6 @@ var renderTodayRow = (row, options) => {
     play.setAttribute("aria-label", `Start timing ${title}`);
     play.dataset.action = "today-play";
     action.appendChild(play);
-  }
-  if (!row.expanded && node.hiddenDescendantCount > 0) {
-    action.appendChild(
-      el("span", "rlb-today__hidden-count", `+${node.hiddenDescendantCount}`)
-    );
   }
   rowNode.appendChild(action);
   return rowNode;
@@ -7862,6 +7839,10 @@ var renderRefreshControl = (options) => {
 function renderSessionSurface(root, model, options = {}) {
   const activeView = options.view === "today" ? "today" : "threads";
   const todayExpandableNodes = activeView === "today" && Array.isArray(options.todayModel?.nodes) ? options.todayModel.nodes.filter((node) => node?.children?.length > 0) : [];
+  const visibleTodayRows = activeView === "today" ? options.todayRows || flattenTodayRows(options.todayModel) : [];
+  const visibleTodayExpandableRows = visibleTodayRows.filter((row) => row?.node?.children?.length > 0);
+  const todayAllExpanded = todayExpandableNodes.length > 0 && visibleTodayExpandableRows.length === todayExpandableNodes.length && visibleTodayExpandableRows.every((row) => row.expanded);
+  const todayToggleLabel = todayAllExpanded ? collapseTodayLabel : expandTodayLabel;
   const title = el("div", "rlb-popover__title", surfaceTitle(model.activeCount ?? model.rows.length));
   if (options.titleId)
     title.id = options.titleId;
@@ -7879,25 +7860,16 @@ function renderSessionSurface(root, model, options = {}) {
     headerActions.appendChild(dashboard);
   }
   if (todayExpandableNodes.length > 0) {
-    const todayControls = el("div", "rlb-today__controls");
-    todayControls.setAttribute("role", "group");
-    todayControls.setAttribute("aria-label", "Today task tree controls");
-    const expandAll = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control",
+    const toggleAll = button(
+      `bp3-button bp3-minimal bp3-small bp3-icon-${todayAllExpanded ? "collapse-all" : "expand-all"} rlb-surface__icon-button rlb-today__control`,
       "",
-      () => options.onExpandAllToday?.(),
-      { title: expandTodayLabel, ariaLabel: expandTodayLabel }
+      () => options.onToggleAllToday?.(),
+      { title: todayToggleLabel, ariaLabel: todayToggleLabel }
     );
-    expandAll.dataset.action = "today-expand-all";
-    const collapseAll = button(
-      "bp3-button bp3-minimal bp3-small bp3-icon-collapse-all rlb-surface__icon-button rlb-today__control",
-      "",
-      () => options.onCollapseAllToday?.(),
-      { title: collapseTodayLabel, ariaLabel: collapseTodayLabel }
-    );
-    collapseAll.dataset.action = "today-collapse-all";
-    todayControls.append(expandAll, collapseAll);
-    headerActions.appendChild(todayControls);
+    toggleAll.dataset.action = "today-toggle-all";
+    toggleAll.setAttribute("aria-expanded", String(todayAllExpanded));
+    toggleAll.setAttribute("aria-controls", "rlb-today-tree");
+    headerActions.appendChild(toggleAll);
   }
   if (options.onRefresh)
     headerActions.appendChild(renderRefreshControl(options));
@@ -7946,7 +7918,7 @@ function renderSessionSurface(root, model, options = {}) {
   root.appendChild(sessionList);
   if (activeView === "today") {
     const todayModel = options.todayModel;
-    const rows = options.todayRows || flattenTodayRows(todayModel);
+    const rows = visibleTodayRows;
     if (!todayModel || ["idle", "loading"].includes(todayModel.status)) {
       sessionList.appendChild(el("div", "rlb-popover__empty", "Loading today\u2026"));
     } else if (todayModel.status === "error") {
@@ -7957,6 +7929,7 @@ function renderSessionSurface(root, model, options = {}) {
       sessionList.appendChild(el("div", "rlb-popover__empty", "No unfinished TODOs today."));
     } else {
       const tree = el("div", "rlb-today__tree");
+      tree.id = "rlb-today-tree";
       tree.setAttribute("role", "tree");
       tree.setAttribute("aria-label", "Today unfinished TODOs");
       for (const row of rows)
@@ -8914,6 +8887,7 @@ function createTopbar({
       onRefresh: requestSessionRefresh,
       view: surfaceView,
       todayModel: today,
+      todayExpanded,
       todayRows: todayRows(today),
       currentTaskUid: getActiveWork(nowDate()).focused?.taskUid || null,
       onSwitchView: (view) => {
@@ -8931,14 +8905,11 @@ function createTopbar({
         todayExpanded = next;
         renderSurfaces();
       },
-      onExpandAllToday: () => {
-        todayExpanded = new Set(
-          (today.nodes || []).filter((node) => node?.children?.length > 0).map((node) => node.uid)
-        );
-        renderSurfaces();
-      },
-      onCollapseAllToday: () => {
-        todayExpanded = /* @__PURE__ */ new Set();
+      onToggleAllToday: () => {
+        const expandable = (today.nodes || []).filter((node) => node?.children?.length > 0);
+        const renderedExpandable = todayRows(today).filter((row) => row?.node?.children?.length > 0);
+        const allExpanded = expandable.length > 0 && renderedExpandable.length === expandable.length && renderedExpandable.every((row) => row.expanded);
+        todayExpanded = allExpanded ? /* @__PURE__ */ new Set() : new Set(expandable.map((node) => node.uid));
         renderSurfaces();
       },
       onStartToday: (taskUid) => void run(() => clockIn(taskUid, { source: "active-work-switch" })),

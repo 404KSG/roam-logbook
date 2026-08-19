@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.48**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.49**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.48 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.49 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -150,9 +150,12 @@ Refresh reloads both views.
 Today preserves Daily Notes order and task hierarchy through plain intermediary
 blocks. DONE rows are hidden; unfinished children under a DONE parent are
 promoted to the nearest visible TODO ancestor. Parent rows are collapsed by
-default with a hidden descendant count, while the current Timing Line's path is
-expanded. Expand all and Collapse all are available whenever the tree has parent
-Tasks; collapsing still keeps the current Timing Line's ancestor path visible.
+default, while the current Timing Line's path is expanded. One stateful
+Expand/Collapse all toggle appears whenever the tree has parent Tasks; its icon,
+title, and ARIA state follow the current mode, and collapsing still keeps the
+current Timing Line's ancestor path visible. Each row keeps its Play or
+Currently timing control in one fixed right-aligned action column; no hidden
+descendant counts are rendered.
 A task title opens the block, Shift+Click uses Roam's right sidebar,
 and an idle TODO's Play icon transfers the existing single Timing Line without
 closing the popover. A failed Today read never masquerades as an empty list.

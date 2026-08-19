@@ -46,7 +46,8 @@ test('Today view switches in place, collapses hierarchy, and exposes icon-only P
     assert.equal(root.querySelector('[data-view="threads"]')?.textContent, 'Threads · 0');
     assert.equal(root.querySelector('[data-view="today"]')?.textContent, 'Today · 2');
     assert.equal(root.querySelectorAll('.rlb-today__row').length, 1);
-    assert.equal(root.querySelector('.rlb-today__hidden-count')?.textContent, '+1');
+    assert.equal(root.querySelector('.rlb-today__hidden-count'), null);
+    assert.equal(root.querySelector('.rlb-today__toggle')?.title, 'Expand sub-tasks');
     assert.equal(root.querySelector('.rlb-today__play')?.getAttribute('aria-label'), 'Start timing Project');
     root.querySelector('.rlb-today__play').click();
     assert.equal(started, 'root-1');
@@ -74,8 +75,10 @@ test('Today current Timing Line branch is expanded and its indicator is non-inte
             view: 'today',
             todayModel: model,
             todayRows: flattenTodayRows(model, { currentPath: new Set(['child-2', 'root-2']) }),
+            todayExpanded: new Set(),
             currentTaskUid: 'child-2',
             onSwitchView: () => {},
+            onToggleAllToday: () => {},
             onOpenTask: () => {},
         }
     );
@@ -89,11 +92,16 @@ test('Today current Timing Line branch is expanded and its indicator is non-inte
     assert.equal(indicator.getAttribute('aria-label'), 'Currently timing');
     assert.equal(indicator.dataset.action, undefined);
     assert.equal(root.querySelector('[data-task-uid="child-2"] [data-action="today-play"]'), null);
+    const toggle = root.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(toggle.title, 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-label'), 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.ok(toggle.classList.contains('bp3-icon-collapse-all'));
 
     unmount(dom);
 });
 
-test('Today exposes accessible Expand all and Collapse all controls only for expandable trees', () => {
+test('Today exposes one stateful accessible bulk tree toggle only for expandable trees', () => {
     const { dom, root } = mount();
     const tree = buildTodayTodoTree([
         {
@@ -113,40 +121,46 @@ test('Today exposes accessible Expand all and Collapse all controls only for exp
         },
     ]);
     const model = { ...tree, status: 'success' };
-    let expanded = 0;
-    let collapsed = 0;
-    renderSessionSurface(
+    let toggled = 0;
+    let expanded = new Set();
+    const render = () => renderSessionSurface(
         root,
         buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
         {
             view: 'today',
             todayModel: model,
-            todayRows: flattenTodayRows(model),
+            todayExpanded: expanded,
+            todayRows: flattenTodayRows(model, { expanded }),
             onSwitchView: () => {},
-            onExpandAllToday: () => { expanded += 1; },
-            onCollapseAllToday: () => { collapsed += 1; },
+            onToggleAllToday: () => { toggled += 1; },
             onOpenTask: () => {},
         }
     );
+    render();
 
-    const controls = root.querySelector('.rlb-today__controls');
-    assert.ok(controls);
-    assert.equal(controls.parentElement, root.querySelector('.rlb-surface__actions'));
-    assert.equal(controls.getAttribute('role'), 'group');
-    const expand = root.querySelector('[data-action="today-expand-all"]');
-    const collapse = root.querySelector('[data-action="today-collapse-all"]');
-    assert.ok(expand);
-    assert.ok(collapse);
-    assert.equal(expand.title, 'Expand all Today tasks');
-    assert.equal(expand.getAttribute('aria-label'), 'Expand all Today tasks');
-    assert.equal(collapse.title, 'Collapse all Today tasks');
-    assert.equal(collapse.getAttribute('aria-label'), 'Collapse all Today tasks');
-    assert.equal(expand.tabIndex, 0);
-    assert.equal(collapse.tabIndex, 0);
-    expand.click();
-    collapse.click();
-    assert.equal(expanded, 1);
-    assert.equal(collapsed, 1);
+    let toggle = root.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(root.querySelectorAll('[data-action="today-toggle-all"]').length, 1);
+    assert.ok(toggle);
+    assert.equal(root.querySelector('.rlb-today__controls'), null);
+    assert.equal(toggle.title, 'Expand all Today tasks');
+    assert.equal(toggle.getAttribute('aria-label'), 'Expand all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(toggle.getAttribute('aria-controls'), 'rlb-today-tree');
+    assert.equal(toggle.classList.contains('bp3-icon-expand-all'), true);
+    toggle.click();
+    assert.equal(toggled, 1);
+
+    expanded = new Set(model.nodes.filter(node => node.children.length > 0).map(node => node.uid));
+    render();
+    toggle = root.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(root.querySelectorAll('[data-action="today-toggle-all"]').length, 1);
+    assert.equal(toggle.title, 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-label'), 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(toggle.classList.contains('bp3-icon-collapse-all'), true);
+    assert.equal(toggle.classList.contains('bp3-icon-expand-all'), false);
+    toggle.click();
+    assert.equal(toggled, 2);
 
     renderSessionSurface(
         root,
@@ -155,11 +169,9 @@ test('Today exposes accessible Expand all and Collapse all controls only for exp
             view: 'threads',
             todayModel: model,
             onSwitchView: () => {},
-            onExpandAllToday: () => {},
-            onCollapseAllToday: () => {},
         }
     );
-    assert.equal(root.querySelector('.rlb-today__controls'), null);
+    assert.equal(root.querySelector('[data-action="today-toggle-all"]'), null);
 
     unmount(dom);
 });

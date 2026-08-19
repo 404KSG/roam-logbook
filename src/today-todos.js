@@ -35,9 +35,6 @@ const makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
     children: [],
 });
 
-const countDescendants = node =>
-    node.children.reduce((total, child) => total + 1 + countDescendants(child), 0);
-
 const appendTo = (parent, node, roots) => {
     if (parent) parent.children.push(node);
     else roots.push(node);
@@ -113,10 +110,7 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
         .forEach((root, index) => walk(root, null, [index]));
 
     const all = [...visibleByUid.values()];
-    for (const node of all) {
-        node.hiddenDescendantCount = countDescendants(node);
-        node.hasChildren = node.children.length > 0;
-    }
+    for (const node of all) node.hasChildren = node.children.length > 0;
     return {
         roots: outputRoots,
         nodes: all,
@@ -144,7 +138,7 @@ const walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
     for (const node of nodes || []) {
         const forced = forcedPath?.has(node.uid);
         const isExpanded = node.children.length > 0 && (forced || expanded?.has(node.uid));
-        rows.push({ node, depth, expanded: isExpanded, hiddenDescendantCount: node.hiddenDescendantCount });
+        rows.push({ node, depth, expanded: isExpanded });
         if (isExpanded) walkVisible(node.children, rows, expanded, forcedPath, depth + 1);
     }
     return rows;

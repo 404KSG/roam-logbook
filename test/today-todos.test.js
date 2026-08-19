@@ -25,7 +25,7 @@ test('Today tree preserves Roam order through plain intermediary blocks', () => 
 
     assert.deepEqual(model.roots.map(node => node.uid), ['root-a', 'root-b']);
     assert.deepEqual(model.roots[0].children.map(node => node.uid), ['child-a']);
-    assert.equal(model.roots[0].hiddenDescendantCount, 1);
+    assert.equal('hiddenDescendantCount' in model.roots[0], false);
 });
 
 test('DONE blocks disappear but unfinished descendants promote to the nearest TODO ancestor', () => {

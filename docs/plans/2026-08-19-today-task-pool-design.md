@@ -1,5 +1,22 @@
 # Today Task Pool — beta.45 design
 
+## Follow-up — beta.49 Today tree controls and action rail
+
+Today now exposes one stateful bulk tree toggle instead of separate Expand all
+and Collapse all buttons. The control is present only when at least one parent
+Task exists. It derives its mode from the actually rendered parent rows,
+including ancestors forced open by the current Timing Line, and updates its
+Blueprint icon, title, `aria-label`, `aria-expanded`, and `aria-controls`
+together. Clearing the local expansion set still lets the pure tree model keep
+that Timing Line ancestor path open.
+
+Hidden descendant counts are no longer part of the Today model or DOM. A row's
+chevron communicates whether it has children and whether they are expanded;
+its tooltip contains no count. Every row uses the same fixed 32px right action
+column for Play or Currently timing, so hierarchy depth changes only the title
+rail and never shifts the action x-coordinate. DOM tests and Chromium geometry
+tests cover both the desktop and narrow-width contracts.
+
 ## Follow-up — beta.48 immediate Timing Line navigation
 
 The previous beta.47 sidebar cache improved repeated switches only after a

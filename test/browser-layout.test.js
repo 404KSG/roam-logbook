@@ -972,6 +972,7 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                 <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
                 <div class="rlb-surface__actions">
                     <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" aria-label="Dashboard"></button>
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control" data-action="today-toggle-all" title="Expand all Today tasks" aria-label="Expand all Today tasks" aria-expanded="false" aria-controls="rlb-today-tree"></button>
                     <button class="bp3-button bp3-minimal bp3-small bp3-icon-refresh rlb-surface__icon-button" aria-label="Refresh"></button>
                 </div>
             </header>
@@ -988,7 +989,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                         </div>
                         <div class="rlb-today__action">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
-                            <span class="rlb-today__hidden-count">+12</span>
                         </div>
                     </div>
                     <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
@@ -997,7 +997,7 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                             <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child that must keep a usable title region</button>
                         </div>
                         <div class="rlb-today__action">
-                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Child"></button>
+                            <span class="bp3-icon bp3-icon-time rlb-today__timing" role="img" aria-label="Currently timing"></span>
                         </div>
                     </div>
                 </div>
@@ -1039,6 +1039,10 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                 return ink.left >= titleRects[index].left - 0.5;
             }),
             railOverflow: rails.map(rail => rail.scrollWidth > rail.clientWidth),
+            actionRightDelta: Math.max(...actionRects.map(action => action.right)) - Math.min(...actionRects.map(action => action.right)),
+            hiddenCountNodes: popover.querySelectorAll('.rlb-today__hidden-count').length,
+            hiddenCountText: /\\+\\d+/.test(popover.textContent),
+            bulkToggleCount: popover.querySelectorAll('[data-action="today-toggle-all"]').length,
             deepIndent: parseFloat(getComputedStyle(rows[1]).paddingLeft),
         };
     })()`;
@@ -1050,12 +1054,15 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
     assert.equal(desktop.rowInside, true, JSON.stringify({ desktop }));
     assert.equal(desktop.actionInside, true, JSON.stringify({ desktop }));
     assert.equal(desktop.titleBeforeAction, true, JSON.stringify({ desktop }));
-    assert.ok(desktop.actionWidths[0] >= 52, JSON.stringify({ desktop }));
-    assert.ok(desktop.actionWidths.every(width => width <= 60), JSON.stringify({ desktop }));
+    assert.ok(desktop.actionWidths.every(width => Math.abs(width - 32) <= 0.5), JSON.stringify({ desktop }));
     assert.ok(desktop.titleWidths[0] > 260, JSON.stringify({ desktop }));
     assert.equal(desktop.titleScrolls[0], true, JSON.stringify({ desktop }));
     assert.deepEqual(desktop.titleInkStartsInside, [true, true], JSON.stringify({ desktop }));
     assert.deepEqual(desktop.railOverflow, [false, false], JSON.stringify({ desktop }));
+    assert.ok(desktop.actionRightDelta <= 0.5, JSON.stringify({ desktop }));
+    assert.equal(desktop.hiddenCountNodes, 0, JSON.stringify({ desktop }));
+    assert.equal(desktop.hiddenCountText, false, JSON.stringify({ desktop }));
+    assert.equal(desktop.bulkToggleCount, 1, JSON.stringify({ desktop }));
     assert.ok(desktop.deepIndent <= 64, JSON.stringify({ desktop }));
 
     for (const width of [320, 340, 360]) {
@@ -1067,10 +1074,160 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
         assert.equal(geometry.rowInside, true, context);
         assert.equal(geometry.actionInside, true, context);
         assert.equal(geometry.titleBeforeAction, true, context);
-        assert.ok(geometry.actionWidths[0] >= 52, context);
-        assert.ok(geometry.actionWidths.every(actionWidth => actionWidth <= 60), context);
+        assert.ok(geometry.actionWidths.every(actionWidth => Math.abs(actionWidth - 32) <= 0.5), context);
         assert.deepEqual(geometry.titleInkStartsInside, [true, true], context);
         assert.deepEqual(geometry.railOverflow, [false, false], context);
+        assert.ok(geometry.actionRightDelta <= 0.5, context);
+        assert.equal(geometry.hiddenCountNodes, 0, context);
+        assert.equal(geometry.hiddenCountText, false, context);
+        assert.equal(geometry.bulkToggleCount, 1, context);
+    }
+});
+
+test('Today bulk control is one stateful toggle with aligned actions at desktop and narrow widths', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+
+    const markup = width => `
+        <div class="rlb-popover" style="width:${width}px">
+            <header class="rlb-surface__header">
+                <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                <div class="rlb-surface__actions">
+                    <button
+                        class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control"
+                        data-action="today-toggle-all"
+                        title="Expand all Today tasks"
+                        aria-label="Expand all Today tasks"
+                        aria-expanded="false"
+                        aria-controls="rlb-today-tree"></button>
+                </div>
+            </header>
+            <div class="rlb-surface__list" role="group" aria-label="Today TODOs">
+                <div class="rlb-today__tree" id="rlb-today-tree" role="tree">
+                    <div class="rlb-today__row" style="--rlb-today-depth:0" role="treeitem" aria-expanded="false">
+                        <div class="rlb-today__rail">
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Project"></button>
+                            <button class="bp3-button bp3-minimal rlb-today__title">A long project title that stays inside the flexible rail</button>
+                        </div>
+                        <div class="rlb-today__action">
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
+                        </div>
+                    </div>
+                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
+                        <div class="rlb-today__rail">
+                            <span class="rlb-today__spacer"></span>
+                            <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child with a fixed action rail</button>
+                        </div>
+                        <div class="rlb-today__action">
+                            <span class="bp3-icon bp3-icon-time rlb-today__timing" role="img" aria-label="Currently timing"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+            const todayToggle = document.querySelector('[data-action="today-toggle-all"]');
+            todayToggle.addEventListener('click', () => {
+                const expanded = todayToggle.getAttribute('aria-expanded') === 'true';
+                const next = !expanded;
+                const label = next ? 'Collapse all Today tasks' : 'Expand all Today tasks';
+                todayToggle.classList.toggle('bp3-icon-expand-all', !next);
+                todayToggle.classList.toggle('bp3-icon-collapse-all', next);
+                todayToggle.setAttribute('aria-expanded', String(next));
+                todayToggle.setAttribute('aria-label', label);
+                todayToggle.title = label;
+            });
+        </script>`;
+
+    const expression = `(() => {
+        const rect = node => {
+            const value = node.getBoundingClientRect();
+            return { left: value.left, right: value.right, width: value.width, top: value.top, bottom: value.bottom };
+        };
+        const measure = () => {
+            const popover = document.querySelector('.rlb-popover');
+            const rows = [...popover.querySelectorAll('.rlb-today__row')];
+            const actions = rows.map(row => row.querySelector('.rlb-today__action'));
+            const titles = rows.map(row => row.querySelector('.rlb-today__title'));
+            const rowRects = rows.map(rect);
+            const actionRects = actions.map(rect);
+            const titleRects = titles.map(rect);
+            return {
+                actionWidths: actionRects.map(value => value.width),
+                actionRightDelta: Math.max(...actionRects.map(value => value.right)) - Math.min(...actionRects.map(value => value.right)),
+                titleBeforeAction: titleRects.every((value, index) => value.right <= actionRects[index].left + 0.5),
+                rowsInside: rowRects.every(value => value.left >= popover.getBoundingClientRect().left && value.right <= popover.getBoundingClientRect().right + 0.5),
+                overflow: popover.scrollWidth > popover.clientWidth + 0.5 || rows.some(row => row.scrollWidth > row.clientWidth + 0.5),
+            };
+        };
+        const toggle = document.querySelector('[data-action="today-toggle-all"]');
+        const initial = {
+            count: document.querySelectorAll('[data-action="today-toggle-all"]').length,
+            icon: toggle.classList.contains('bp3-icon-expand-all'),
+            title: toggle.title,
+            aria: toggle.getAttribute('aria-label'),
+            expanded: toggle.getAttribute('aria-expanded'),
+        };
+        toggle.click();
+        const expanded = {
+            icon: toggle.classList.contains('bp3-icon-collapse-all'),
+            noExpandIcon: !toggle.classList.contains('bp3-icon-expand-all'),
+            title: toggle.title,
+            aria: toggle.getAttribute('aria-label'),
+            expanded: toggle.getAttribute('aria-expanded'),
+        };
+        toggle.click();
+        const collapsed = {
+            icon: toggle.classList.contains('bp3-icon-expand-all'),
+            title: toggle.title,
+            aria: toggle.getAttribute('aria-label'),
+            expanded: toggle.getAttribute('aria-expanded'),
+        };
+        return {
+            initial,
+            expanded,
+            collapsed,
+            hiddenCountNodes: document.querySelectorAll('.rlb-today__hidden-count').length,
+            hiddenCountText: /\\+\\d+/.test(document.body.textContent),
+            geometry: measure(),
+        };
+    })()`;
+
+    for (const width of [460, 320]) {
+        const geometry = await withChromium(
+            htmlWithLateHost(markup(width),
+            ),
+            expression,
+            { width: width + 24, height: 720 }
+        );
+        if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify({ width, geometry }));
+        const context = JSON.stringify({ width, geometry });
+        assert.deepEqual(geometry.initial, {
+            count: 1,
+            icon: true,
+            title: 'Expand all Today tasks',
+            aria: 'Expand all Today tasks',
+            expanded: 'false',
+        }, context);
+        assert.deepEqual(geometry.expanded, {
+            icon: true,
+            noExpandIcon: true,
+            title: 'Collapse all Today tasks',
+            aria: 'Collapse all Today tasks',
+            expanded: 'true',
+        }, context);
+        assert.deepEqual(geometry.collapsed, {
+            icon: true,
+            title: 'Expand all Today tasks',
+            aria: 'Expand all Today tasks',
+            expanded: 'false',
+        }, context);
+        assert.equal(geometry.hiddenCountNodes, 0, context);
+        assert.equal(geometry.hiddenCountText, false, context);
+        assert.ok(geometry.geometry.actionWidths.every(value => Math.abs(value - 32) <= 0.5), context);
+        assert.ok(geometry.geometry.actionRightDelta <= 0.5, context);
+        assert.equal(geometry.geometry.titleBeforeAction, true, context);
+        assert.equal(geometry.geometry.rowsInside, true, context);
+        assert.equal(geometry.geometry.overflow, false, context);
     }
 });
 

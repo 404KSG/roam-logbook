@@ -389,6 +389,7 @@ export function createTopbar({
             onRefresh: requestSessionRefresh,
             view: surfaceView,
             todayModel: today,
+            todayExpanded,
             todayRows: todayRows(today),
             currentTaskUid: clock.getActiveWork(nowDate()).focused?.taskUid || null,
             onSwitchView: view => {
@@ -403,22 +404,17 @@ export function createTopbar({
                 todayExpanded = next;
                 renderSurfaces();
             },
-            onExpandAllToday: () => {
-                // The batch action is intentionally derived from the current
-                // model, so the local expansion state can contain parent UIDs
-                // only; task leaves and stale graph UIDs never enter it.
-                todayExpanded = new Set(
-                    (today.nodes || [])
-                        .filter(node => node?.children?.length > 0)
-                        .map(node => node.uid)
-                );
-                renderSurfaces();
-            },
-            onCollapseAllToday: () => {
-                // flattenTodayRows() re-applies the current Timing Line path
-                // as forced-open, so clearing the local set collapses every
-                // other branch while keeping that active branch visible.
-                todayExpanded = new Set();
+            onToggleAllToday: () => {
+                const expandable = (today.nodes || []).filter(node => node?.children?.length > 0);
+                const renderedExpandable = todayRows(today).filter(row => row?.node?.children?.length > 0);
+                const allExpanded = expandable.length > 0 &&
+                    renderedExpandable.length === expandable.length &&
+                    renderedExpandable.every(row => row.expanded);
+                // Clearing the set still lets flattenTodayRows() keep the
+                // Timing Line ancestor path forcibly visible after Collapse all.
+                todayExpanded = allExpanded
+                    ? new Set()
+                    : new Set(expandable.map(node => node.uid));
                 renderSurfaces();
             },
             onStartToday: taskUid => void run(() => clock.clockIn(taskUid, { source: 'active-work-switch' })),

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0-beta.49 — 2026-08-19
+
+- Replaced the Today tree's separate Expand all and Collapse all buttons with
+  one stateful toggle. Its Blueprint icon, title, ARIA label, and
+  `aria-expanded` state follow the current tree mode; Collapse all still keeps
+  the current Timing Line ancestor path visible.
+- Removed hidden descendant count badges and count-bearing expansion tooltips
+  from Today rows. Play and Currently timing now share one fixed 32px,
+  right-aligned action column across parent, leaf, and deeply nested rows.
+- Added DOM and Chromium coverage for the one-button state transition, absent
+  count markup, action-column alignment, and narrow-layout overflow.
+
 ## 0.9.0-beta.48 — 2026-08-19
 
 - Started native right-sidebar navigation from the immediate user Clock In

@@ -67,13 +67,26 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     assert.equal(document.querySelector('body > .rlb-popover'), popover);
     assert.equal(popover.querySelector('[data-view="today"]').getAttribute('aria-pressed'), 'true');
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
-    assert.equal(popover.querySelector('.rlb-today__hidden-count')?.textContent, '+1');
+    assert.equal(popover.querySelector('.rlb-today__hidden-count'), null);
 
-    assert.ok(popover.querySelector('.rlb-today__controls'));
-    popover.querySelector('[data-action="today-expand-all"]').click();
+    let toggle = popover.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(popover.querySelectorAll('[data-action="today-toggle-all"]').length, 1);
+    assert.equal(toggle.title, 'Expand all Today tasks');
+    assert.equal(toggle.getAttribute('aria-label'), 'Expand all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.ok(toggle.classList.contains('bp3-icon-expand-all'));
+    toggle.click();
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 2);
-    popover.querySelector('[data-action="today-collapse-all"]').click();
+    toggle = popover.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(toggle.title, 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-label'), 'Collapse all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.ok(toggle.classList.contains('bp3-icon-collapse-all'));
+    toggle.click();
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
+    toggle = popover.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(toggle.title, 'Expand all Today tasks');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
 
     popover.querySelector('[data-action="today-play"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
