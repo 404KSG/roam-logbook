@@ -10,6 +10,10 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     max-height: 70vh;
     overflow-x: hidden;
     overflow-y: auto;
+    /* Reserve the classic scrollbar's width without painting a permanent
+       scrollbar rail. This keeps the popover content from shifting when a
+       Today tree crosses the overflow threshold. */
+    scrollbar-gutter: stable;
     padding: 8px;
     text-align: left;
     cursor: default;
@@ -598,6 +602,25 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     display: grid;
     min-width: 0;
     padding: 0 2px 2px;
+}
+
+.rlb-today__controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.rlb-today__control {
+    color: var(--rlb-muted);
+}
+
+.rlb-today__control:hover,
+.rlb-today__control:focus-visible {
+    color: var(--rlb-surface-link-hover);
+    background: var(--rlb-surface-hover);
 }
 
 .rlb-today__row {

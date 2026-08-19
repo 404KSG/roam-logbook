@@ -92,6 +92,122 @@ test('an existing Timing Line is reordered and expanded without duplication', as
     assert.deepEqual(forbidden, []);
 });
 
+test('a recently confirmed Timing Line uses the native reveal fast path', async () => {
+    const calls = [];
+    const forbidden = installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return [{ type: 'block', 'block-uid': 'timing-task', order: 0 }];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+    });
+
+    await frontBlockInRightSidebar('timing-task');
+    calls.length = 0;
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(calls, [
+        {
+            action: 'setWindowOrder',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        {
+            action: 'expandWindow',
+            spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
+        },
+    ]);
+    assert.deepEqual(forbidden, []);
+});
+
+test('a closed cached Timing Line invalidates the fast path and recovers without duplication', async () => {
+    const calls = [];
+    let present = false;
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return present ? [{ type: 'block', 'block-uid': 'timing-task', order: 0 }] : [];
+        },
+        addWindow: async spec => {
+            calls.push({ action: 'addWindow', spec });
+            present = true;
+        },
+        setWindowOrder: async () => {
+            calls.push('setWindowOrder');
+            if (!present) throw new Error('native window was closed');
+        },
+        expandWindow: async () => calls.push('expandWindow'),
+    });
+
+    // Seed the cache from an authoritative native window list.
+    present = true;
+    await frontBlockInRightSidebar('timing-task');
+    present = false;
+    calls.length = 0;
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'setWindowOrder',
+        'open',
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+    assert.equal(present, true);
+});
+
+test('a superseded cached Timing Line stops before fallback sidebar work', async () => {
+    const calls = [];
+    let supersedeDuringReveal = false;
+    let current = true;
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return [{ type: 'block', 'block-uid': 'timing-task', order: 0 }];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => {
+            calls.push({ action: 'setWindowOrder', spec });
+            if (supersedeDuringReveal) current = false;
+        },
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+    });
+
+    await frontBlockInRightSidebar('timing-task');
+    calls.length = 0;
+    supersedeDuringReveal = true;
+
+    assert.deepEqual(
+        await frontBlockInRightSidebar('timing-task', { isCurrent: () => current }),
+        { ok: false, skipped: true, reason: 'superseded' }
+    );
+    assert.deepEqual(calls, [
+        {
+            action: 'setWindowOrder',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+});
+
 test('legacy sidebar fallback includes order 0 and preserves dedupe', async () => {
     const calls = [];
     installSidebar({

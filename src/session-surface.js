@@ -30,6 +30,8 @@ const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
 const refreshLabel = 'Refresh Active Work from graph';
 const dashboardLabel = 'Open Roam Logbook Dashboard';
+const expandTodayLabel = 'Expand all Today tasks';
+const collapseTodayLabel = 'Collapse all Today tasks';
 const switchLabel = view => `Show ${view === 'today' ? 'Today tasks' : 'Active Threads'}`;
 
 /** Backward-compatible seam; Active Work and Dashboard now share one formatter. */
@@ -349,6 +351,11 @@ const renderRefreshControl = options => {
 
 /** Render one current-session surface into a supplied popover/sidebar shell. */
 export function renderSessionSurface(root, model, options = {}) {
+    const activeView = options.view === 'today' ? 'today' : 'threads';
+    const todayExpandableNodes =
+        activeView === 'today' && Array.isArray(options.todayModel?.nodes)
+            ? options.todayModel.nodes.filter(node => node?.children?.length > 0)
+            : [];
     const title = el('div', 'rlb-popover__title', surfaceTitle(model.activeCount ?? model.rows.length));
     if (options.titleId) title.id = options.titleId;
 
@@ -365,6 +372,27 @@ export function renderSessionSurface(root, model, options = {}) {
         dashboard.dataset.action = 'dashboard';
         headerActions.appendChild(dashboard);
     }
+    if (todayExpandableNodes.length > 0) {
+        const todayControls = el('div', 'rlb-today__controls');
+        todayControls.setAttribute('role', 'group');
+        todayControls.setAttribute('aria-label', 'Today task tree controls');
+        const expandAll = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control',
+            '',
+            () => options.onExpandAllToday?.(),
+            { title: expandTodayLabel, ariaLabel: expandTodayLabel }
+        );
+        expandAll.dataset.action = 'today-expand-all';
+        const collapseAll = button(
+            'bp3-button bp3-minimal bp3-small bp3-icon-collapse-all rlb-surface__icon-button rlb-today__control',
+            '',
+            () => options.onCollapseAllToday?.(),
+            { title: collapseTodayLabel, ariaLabel: collapseTodayLabel }
+        );
+        collapseAll.dataset.action = 'today-collapse-all';
+        todayControls.append(expandAll, collapseAll);
+        headerActions.appendChild(todayControls);
+    }
     if (options.onRefresh) headerActions.appendChild(renderRefreshControl(options));
     if (options.onClose) {
         const close = button(
@@ -379,7 +407,6 @@ export function renderSessionSurface(root, model, options = {}) {
     if (headerActions.childElementCount > 0) header.appendChild(headerActions);
     root.replaceChildren(header);
 
-    const activeView = options.view === 'today' ? 'today' : 'threads';
     if (options.onSwitchView) {
         const switcher = el('nav', 'rlb-surface__view-switch');
         switcher.setAttribute('aria-label', 'Logbook view');

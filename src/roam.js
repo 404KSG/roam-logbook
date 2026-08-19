@@ -675,6 +675,51 @@ export async function openBlock(uid) {
 // same block windows when an older Roam build does not dedupe addWindow itself.
 const requestedSidebarBlocks = new WeakMap();
 const sidebarOperationQueues = new WeakMap();
+// A confirmed native window can be fronted without reopening the sidebar or
+// asking Roam for the complete window list again. The cache is deliberately
+// weakly keyed by the native sidebar object and time-bounded: Roam remains the
+// authority, while a recently closed window is recovered through the fallback
+// path below instead of being treated as permanently present.
+const knownSidebarBlockWindows = new WeakMap();
+const SIDEBAR_WINDOW_CACHE_TTL_MS = 30_000;
+
+const sidebarWindowCache = sidebar => {
+    let cache = knownSidebarBlockWindows.get(sidebar);
+    if (!cache) {
+        cache = new Map();
+        knownSidebarBlockWindows.set(sidebar, cache);
+    }
+    return cache;
+};
+
+const rememberSidebarWindows = (sidebar, windows) => {
+    if (!Array.isArray(windows)) return;
+    const cache = sidebarWindowCache(sidebar);
+    cache.clear();
+    for (const sidebarWindow of windows) {
+        const uid = sidebarWindow?.['block-uid'];
+        if (sidebarWindow?.type === 'block' && typeof uid === 'string' && uid) {
+            cache.set(uid, Date.now());
+        }
+    }
+};
+
+const rememberSidebarWindow = (sidebar, uid) => {
+    sidebarWindowCache(sidebar).set(uid, Date.now());
+};
+
+const forgetSidebarWindow = (sidebar, uid) => {
+    sidebarWindowCache(sidebar).delete(uid);
+};
+
+const hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
+    const knownAt = sidebarWindowCache(sidebar).get(uid);
+    if (!Number.isFinite(knownAt) || Date.now() - knownAt > SIDEBAR_WINDOW_CACHE_TTL_MS) {
+        forgetSidebarWindow(sidebar, uid);
+        return false;
+    }
+    return true;
+};
 
 const blockSidebarWindow = (uid, order) => {
     const sidebarWindow = { type: 'block', 'block-uid': uid };
@@ -751,12 +796,43 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
 
     try {
         return await runSidebarOperation(sidebar, async () => {
+            // A successful authoritative read followed by a successful reveal
+            // is the common path while switching between recently used Timing
+            // Lines. Do not pay the open/getWindows round trip again. Native
+            // calls are still serialized by runSidebarOperation, and any
+            // rejection invalidates the hint and immediately falls through to
+            // Roam's authoritative window list for close/recovery handling.
+            if (
+                hasRecentlyKnownSidebarWindow(sidebar, uid) &&
+                typeof sidebar.setWindowOrder === 'function'
+            ) {
+                if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+                try {
+                    const visibility = await revealExistingBlockWindow(sidebar, uid, {
+                        isCurrent,
+                        requireOrder: true,
+                        unavailableMessage:
+                            'Roam could not move the Timing Line sidebar window to the top.',
+                    });
+                    if (visibility.ok) {
+                        return { ok: true, deduped: true, reordered: visibility.reordered };
+                    }
+                    if (visibility.skipped) return visibility;
+                } catch {
+                    // The user may have closed the cached native window. Drop
+                    // the hint and let getWindows decide whether to recover by
+                    // reusing the window or adding exactly one replacement.
+                }
+                forgetSidebarWindow(sidebar, uid);
+            }
+
             await sidebar.open?.();
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
 
             if (typeof sidebar.getWindows === 'function') {
                 const windows = await sidebar.getWindows();
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+                rememberSidebarWindows(sidebar, windows);
                 const existing = Array.isArray(windows)
                     ? windows.find(
                           sidebarWindow =>
@@ -773,11 +849,13 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                             'Roam could not move the Timing Line sidebar window to the top.',
                     });
                     if (visibility.ok === false) return visibility;
+                    rememberSidebarWindow(sidebar, uid);
                     return { ok: true, deduped: true, reordered: visibility.reordered };
                 }
 
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
                 await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+                rememberSidebarWindow(sidebar, uid);
                 return { ok: true, added: true };
             }
 
@@ -794,8 +872,10 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
             try {
                 await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
                 requested.add(uid);
+                rememberSidebarWindow(sidebar, uid);
             } catch (error) {
                 requested.delete(uid);
+                forgetSidebarWindow(sidebar, uid);
                 throw error;
             }
             return { ok: true, added: true };

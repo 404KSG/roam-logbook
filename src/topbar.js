@@ -403,6 +403,24 @@ export function createTopbar({
                 todayExpanded = next;
                 renderSurfaces();
             },
+            onExpandAllToday: () => {
+                // The batch action is intentionally derived from the current
+                // model, so the local expansion state can contain parent UIDs
+                // only; task leaves and stale graph UIDs never enter it.
+                todayExpanded = new Set(
+                    (today.nodes || [])
+                        .filter(node => node?.children?.length > 0)
+                        .map(node => node.uid)
+                );
+                renderSurfaces();
+            },
+            onCollapseAllToday: () => {
+                // flattenTodayRows() re-applies the current Timing Line path
+                // as forced-open, so clearing the local set collapses every
+                // other branch while keeping that active branch visible.
+                todayExpanded = new Set();
+                renderSurfaces();
+            },
             onStartToday: taskUid => void run(() => clock.clockIn(taskUid, { source: 'active-work-switch' })),
             onOpenTask: (taskUid, event) => {
                 if (event?.shiftKey) {

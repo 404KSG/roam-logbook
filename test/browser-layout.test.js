@@ -1074,6 +1074,65 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
     }
 });
 
+test('Active Threads popover reserves scrollbar space before Today starts overflowing', async t => {
+    if (!(await findChromium())) return t.skip('Chromium is unavailable');
+
+    const geometry = await withChromium(
+        htmlWithLateHost(`
+            <div class="rlb-popover" style="max-height:160px">
+                <header class="rlb-surface__header">
+                    <div class="rlb-popover__title">ACTIVE THREADS · 2</div>
+                    <div class="rlb-surface__actions">
+                        <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" aria-label="Dashboard"></button>
+                    </div>
+                </header>
+                <div class="rlb-surface__list" id="stable-list">
+                    <div class="rlb-today__row"><div class="rlb-today__rail">Short row</div></div>
+                </div>
+            </div>`),
+        `(() => {
+            const popover = document.querySelector('.rlb-popover');
+            const list = document.querySelector('#stable-list');
+            const measure = () => {
+                const popoverRect = popover.getBoundingClientRect();
+                const listRect = list.getBoundingClientRect();
+                return {
+                    popoverClientWidth: popover.clientWidth,
+                    listLeft: listRect.left,
+                    listRight: listRect.right,
+                    listWidth: listRect.width,
+                    overflowing: popover.scrollHeight > popover.clientHeight,
+                };
+            };
+            const before = measure();
+            for (let index = 0; index < 30; index += 1) {
+                const row = document.createElement('div');
+                row.className = 'rlb-today__row';
+                row.innerHTML = '<div class="rlb-today__rail">Overflow row</div>';
+                list.appendChild(row);
+            }
+            const after = measure();
+            return {
+                gutter: getComputedStyle(popover).scrollbarGutter,
+                before,
+                after,
+                widthDelta: Math.abs(after.listWidth - before.listWidth),
+                leftDelta: Math.abs(after.listLeft - before.listLeft),
+                rightDelta: Math.abs(after.listRight - before.listRight),
+            };
+        })()`
+    );
+
+    if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
+    assert.match(geometry.gutter, /stable/, JSON.stringify(geometry));
+    assert.equal(geometry.before.overflowing, false, JSON.stringify(geometry));
+    assert.equal(geometry.after.overflowing, true, JSON.stringify(geometry));
+    assert.equal(geometry.after.popoverClientWidth, geometry.before.popoverClientWidth, JSON.stringify(geometry));
+    assert.ok(geometry.widthDelta <= 1, JSON.stringify(geometry));
+    assert.ok(geometry.leftDelta <= 1, JSON.stringify(geometry));
+    assert.ok(geometry.rightDelta <= 1, JSON.stringify(geometry));
+});
+
 test('Dashboard Timing keeps one live CLOCK in a compact labelled panel', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(

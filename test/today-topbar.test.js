@@ -69,6 +69,12 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
     assert.equal(popover.querySelector('.rlb-today__hidden-count')?.textContent, '+1');
 
+    assert.ok(popover.querySelector('.rlb-today__controls'));
+    popover.querySelector('[data-action="today-expand-all"]').click();
+    assert.equal(popover.querySelectorAll('.rlb-today__row').length, 2);
+    popover.querySelector('[data-action="today-collapse-all"]').click();
+    assert.equal(popover.querySelectorAll('.rlb-today__row').length, 1);
+
     popover.querySelector('[data-action="today-play"]').click();
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(document.querySelector('body > .rlb-popover'), popover, 'Play keeps the task pool open');
