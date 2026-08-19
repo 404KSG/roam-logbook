@@ -8915,8 +8915,6 @@ function createTopbar({
     return Promise.all([current, today]).then(([result]) => result);
   };
   const scheduleOpenRevalidation = () => {
-    if (refreshRuntime.inFlight)
-      return refreshRuntime.inFlight;
     if (pendingOpenRefresh)
       return pendingOpenRefresh.promise;
     let resolvePending;

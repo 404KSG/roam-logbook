@@ -264,3 +264,77 @@ test('entering Today revalidates only when its successful snapshot is older than
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.ok(graph.fastQueryCount() > pastBoundary, 'older than 30 seconds revalidates');
 });
+
+test('reopening during an in-flight Active Work refresh starts a fresh Today lifecycle', async t => {
+    const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    const graph = installGraph([
+        {
+            uid: 'reopen-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Reopen task',
+        },
+    ]);
+    const originalQuery = graph.api.data.q;
+    let todayReads = 0;
+    graph.api.data.q = (datalog, ...args) => {
+        if (String(datalog).includes(':find ?page-uid ?uid ?string ?order ?parent-uid')) {
+            todayReads += 1;
+        }
+        return originalQuery(datalog, ...args);
+    };
+    const clock = await import('../src/clock.js');
+    const { createTopbar } = await import('../src/topbar.js');
+    clock.reset();
+    const scheduled = [];
+    const topbar = createTopbar({
+        now: () => new Date('2026-08-19T10:00:00'),
+        setIntervalFn: () => 1,
+        clearIntervalFn: () => {},
+        scheduleAfterPaintFn: callback => {
+            scheduled.push(callback);
+            return () => {
+                const index = scheduled.indexOf(callback);
+                if (index >= 0) scheduled.splice(index, 1);
+            };
+        },
+    });
+    topbar.mount();
+    t.after(() => {
+        graph.api.data.q = originalQuery;
+        topbar.unmount();
+        clock.reset();
+        uninstallGraph();
+        dom.window.close();
+        delete globalThis.document;
+        delete globalThis.window;
+        delete globalThis.MutationObserver;
+        delete globalThis.HTMLElement;
+    });
+
+    const trigger = document.querySelector('#roam-logbook-topbar button');
+    trigger.click();
+    assert.equal(scheduled.length, 1, 'the first open schedules post-paint revalidation');
+    scheduled.shift()();
+
+    trigger.click();
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+    trigger.click();
+    assert.equal(
+        scheduled.length,
+        1,
+        'a reopened popover schedules Today even while Active Work refresh is coalesced'
+    );
+    scheduled.shift()();
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const popover = document.querySelector('body > .rlb-popover');
+    assert.equal(popover.querySelector('[data-view="today"]').textContent, 'Today 1');
+    assert.equal(popover.querySelector('.rlb-surface__spinner'), null);
+    assert.ok(todayReads >= 1, 'the reopened lifecycle performs a Today read');
+});

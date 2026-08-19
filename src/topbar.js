@@ -361,7 +361,9 @@ export function createTopbar({
     };
 
     const scheduleOpenRevalidation = () => {
-        if (refreshRuntime.inFlight) return refreshRuntime.inFlight;
+        // Active Work and Today share the open-time refresh boundary, but not
+        // their lifecycle token. A close/reopen may coalesce the Active Work
+        // promise while still needing to schedule Today for the new popover.
         if (pendingOpenRefresh) return pendingOpenRefresh.promise;
 
         let resolvePending;
