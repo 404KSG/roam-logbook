@@ -11,6 +11,8 @@
   right-aligned action column across parent, leaf, and deeply nested rows.
 - Added DOM and Chromium coverage for the one-button state transition, absent
   count markup, action-column alignment, and narrow-layout overflow.
+- Made the Chromium layout fixture retry one isolated browser bootstrap after
+  a cold-start failure while leaving fixture and assertion failures unmasked.
 
 ## 0.9.0-beta.48 — 2026-08-19
 

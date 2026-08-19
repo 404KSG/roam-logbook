@@ -13,6 +13,36 @@ const CANDIDATES = [
 ].filter(Boolean);
 
 export const CHROMIUM_DEBUGGER_TIMEOUT_MS = 30_000;
+export const CHROMIUM_STARTUP_MAX_ATTEMPTS = 2;
+export const CHROMIUM_STARTUP_RETRY_DELAY_MS = 250;
+export const CHROMIUM_STARTUP_ERROR_CODE = 'ERR_CHROMIUM_STARTUP';
+
+export class ChromiumStartupError extends Error {
+    constructor(message, cause) {
+        super(message);
+        this.name = 'ChromiumStartupError';
+        this.code = CHROMIUM_STARTUP_ERROR_CODE;
+        if (cause) this.cause = cause;
+    }
+}
+
+export function isChromiumStartupFailure(error) {
+    return error instanceof ChromiumStartupError || error?.code === CHROMIUM_STARTUP_ERROR_CODE;
+}
+
+export function shouldRetryChromiumStartup(
+    error,
+    attempt,
+    maxAttempts = CHROMIUM_STARTUP_MAX_ATTEMPTS
+) {
+    return (
+        isChromiumStartupFailure(error) &&
+        Number.isInteger(attempt) &&
+        attempt >= 1 &&
+        Number.isInteger(maxAttempts) &&
+        maxAttempts > attempt
+    );
+}
 
 export async function findChromium() {
     for (const candidate of CANDIDATES) {
@@ -64,7 +94,7 @@ function createClient(url) {
 async function waitForDebugger(process) {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(
-            () => reject(new Error('Chromium did not expose a debugger endpoint')),
+            () => reject(new ChromiumStartupError('Chromium did not expose a debugger endpoint')),
             CHROMIUM_DEBUGGER_TIMEOUT_MS
         );
         let output = '';
@@ -77,7 +107,7 @@ async function waitForDebugger(process) {
         });
         process.once('exit', code => {
             clearTimeout(timeout);
-            reject(new Error(`Chromium exited before setup (${code})`));
+            reject(new ChromiumStartupError(`Chromium exited before setup (${code})`));
         });
     });
 }
@@ -116,20 +146,19 @@ export function chromiumLaunchArgs(profile) {
     ];
 }
 
-export async function withChromium(html, expression, viewport = null) {
-    const executable = await findChromium();
-    if (!executable) throw new Error('Chromium is unavailable');
-
+async function withChromiumAttempt(executable, html, expression, viewport) {
     const profile = await mkdtemp(join(tmpdir(), 'roam-logbook-layout-'));
-    const browser = spawn(
-        executable,
-        chromiumLaunchArgs(profile),
-        { stdio: ['ignore', 'ignore', 'pipe'] }
-    );
+    let browser;
     let client;
     let targetId;
+    let phase = 'startup';
 
     try {
+        browser = spawn(
+            executable,
+            chromiumLaunchArgs(profile),
+            { stdio: ['ignore', 'ignore', 'pipe'] }
+        );
         const debuggerUrl = await waitForDebugger(browser);
         client = createClient(debuggerUrl);
         ({ targetId } = await client.send('Target.createTarget', { url: 'about:blank' }));
@@ -147,6 +176,7 @@ export async function withChromium(html, expression, viewport = null) {
                 sessionId
             );
         }
+        phase = 'fixture';
         await client.send(
             'Page.navigate',
             { url: `data:text/html;charset=utf-8,${encodeURIComponent(html)}` },
@@ -162,10 +192,20 @@ export async function withChromium(html, expression, viewport = null) {
             throw new Error(result.exceptionDetails.exception?.description ?? 'Fixture evaluation failed');
         }
         return result.result.value;
+    } catch (error) {
+        if (phase === 'startup' && !isChromiumStartupFailure(error)) {
+            throw new ChromiumStartupError(
+                `Chromium bootstrap failed: ${error?.message ?? String(error)}`,
+                error
+            );
+        }
+        throw error;
     } finally {
         if (client && targetId) await client.send('Target.closeTarget', { targetId }).catch(() => {});
         const exited =
-            browser.exitCode === null && browser.signalCode === null ? once(browser, 'exit') : null;
+            browser && browser.exitCode === null && browser.signalCode === null
+                ? once(browser, 'exit')
+                : null;
         if (client) await client.send('Browser.close').catch(() => {});
         client?.close();
         if (exited) {
@@ -179,7 +219,7 @@ export async function withChromium(html, expression, viewport = null) {
                 await forced;
             }
         }
-        if (browser.exitCode === null && browser.signalCode === null) {
+        if (browser && browser.exitCode === null && browser.signalCode === null) {
             const exited = once(browser, 'exit');
             browser.kill();
             await exited;
@@ -187,4 +227,20 @@ export async function withChromium(html, expression, viewport = null) {
         await new Promise(resolve => setTimeout(resolve, 100));
         await rm(profile, { recursive: true, force: true });
     }
+}
+
+export async function withChromium(html, expression, viewport = null) {
+    const executable = await findChromium();
+    if (!executable) throw new Error('Chromium is unavailable');
+
+    for (let attempt = 1; attempt <= CHROMIUM_STARTUP_MAX_ATTEMPTS; attempt += 1) {
+        try {
+            return await withChromiumAttempt(executable, html, expression, viewport);
+        } catch (error) {
+            if (!shouldRetryChromiumStartup(error, attempt)) throw error;
+            await new Promise(resolve => setTimeout(resolve, CHROMIUM_STARTUP_RETRY_DELAY_MS));
+        }
+    }
+
+    throw new Error('Chromium startup attempts exhausted');
 }
