@@ -22,14 +22,10 @@ export function tasksSection(
 
     const rollupHelp =
         'Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.';
-    const info = button(
-        'bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info',
-        '',
-        null,
-        { title: rollupHelp }
-    );
+    const info = el('span', 'bp3-icon bp3-icon-info-sign rlb-tree__info');
     info.setAttribute('role', 'img');
-    info.setAttribute('tabindex', '-1');
+    info.title = rollupHelp;
+    info.setAttribute('aria-label', 'Task rollup information');
     info.setAttribute('aria-describedby', 'roam-logbook-task-rollup-help');
     heading.appendChild(info);
     const help = el('span', 'rlb-visually-hidden', rollupHelp);
@@ -190,7 +186,6 @@ export function tasksSection(
                     { title: node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks' }
                 );
                 caret.setAttribute('aria-expanded', String(!node.collapsed));
-                caret.setAttribute('aria-label', node.collapsed ? 'Expand sub-tasks' : 'Collapse sub-tasks');
                 leading.appendChild(caret);
             } else {
                 // Keeps every title on the same left edge, caret or not.

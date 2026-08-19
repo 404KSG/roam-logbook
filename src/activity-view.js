@@ -18,6 +18,25 @@ const activityRangeLabel = rangeId => ({
     all: 'All time',
 }[rangeId] || 'selected range');
 
+const moveActivityFocus = (plot, current, key) => {
+    const columns = [...plot.querySelectorAll('[data-activity-bucket]')];
+    const index = columns.indexOf(current);
+    if (index < 0) return;
+    let nextIndex = index;
+    if (key === 'Home') nextIndex = 0;
+    else if (key === 'End') nextIndex = columns.length - 1;
+    else if (key === 'ArrowRight' || key === 'ArrowDown') nextIndex = index + 1;
+    else if (key === 'ArrowLeft' || key === 'ArrowUp') nextIndex = index - 1;
+    else return;
+
+    nextIndex = Math.max(0, Math.min(columns.length - 1, nextIndex));
+    if (nextIndex === index) return;
+    for (const [columnIndex, column] of columns.entries()) {
+        column.tabIndex = columnIndex === nextIndex ? 0 : -1;
+    }
+    columns[nextIndex].focus();
+};
+
 const updateBucketNode = (node, bucket, maxMinutes) => {
     node.dataset.activityDuration = bucket.durationLabel;
     node.dataset.activityMinutes = String(bucket.minutes);
@@ -58,15 +77,26 @@ export function renderActivity(activity) {
     plot.style.setProperty('--rlb-activity-columns', String(activity.buckets.length));
     plot.style.setProperty('--rlb-activity-bar-width', `${activity.density.barWidthPx}px`);
     plot.dataset.activityDensity = activity.density.id;
+    plot.addEventListener('keydown', event => {
+        const current = event.target?.closest?.('[data-activity-bucket]');
+        if (!current || !plot.contains(current)) return;
+        if (!['Home', 'End', 'ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) {
+            return;
+        }
+        event.preventDefault();
+        moveActivityFocus(plot, current, event.key);
+    });
     const maxMinutes = activity.maxMinutes;
-    for (const bucket of activity.buckets) {
+    for (const [index, bucket] of activity.buckets.entries()) {
         const column = el('div', 'rlb-activity__bucket');
         column.dataset.activityBucket = bucket.id;
         column.dataset.activityDuration = bucket.durationLabel;
         column.dataset.activityMinutes = String(bucket.minutes);
         column.dataset.activitySessions = String(bucket.sessionCount);
         column.dataset.activityUnit = bucket.unit;
-        column.tabIndex = 0;
+        // Keep the whole chart to one Tab stop; arrow keys move within the
+        // bucket set without creating thirty sequential stops for a month.
+        column.tabIndex = index === 0 ? 0 : -1;
         column.setAttribute('role', 'img');
         column.title = bucket.ariaLabel;
         column.setAttribute('aria-label', bucket.ariaLabel);

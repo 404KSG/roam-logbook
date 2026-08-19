@@ -63,6 +63,8 @@ const pomodoro = await import('../src/pomodoro.js');
 const { formatElapsed, formatStamp } = await import('../src/time.js');
 
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
+const topbarButton = () => topbarWidget().querySelector('button');
+const topbarStatus = () => topbarWidget().querySelector('#roam-logbook-topbar-status');
 const dialog = () => document.getElementById('roam-logbook-dashboard');
 const click = node => node.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 
@@ -77,7 +79,8 @@ test.after(() => extension.onunload());
 
 test('onload mounts the always-on topbar and registers the minimal command surface', () => {
     assert.ok(topbarWidget(), 'widget should be attached to .rm-topbar');
-    assert.equal(topbarWidget().textContent, '', 'idle stays icon-only');
+    assert.equal(topbarButton().textContent, '', 'idle stays icon-only');
+    assert.equal(topbarStatus().textContent, 'No Active Work.');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__icon.bp3-icon-history'));
     assert.ok(
         topbarWidget().querySelector('button.rlb-topbar__button--icon-only'),
@@ -319,20 +322,18 @@ test('clocking in shows elapsed time and a singular Thread count in the topbar',
     const [running] = clock.getRunning();
     assert.equal(pomodoro.targetMinutes(running.clockUid), 45, 'Clock In assigns the global target');
 
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
+    assert.match(topbarButton().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel').textContent, '1 Thread');
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
-    assert.doesNotMatch(topbarWidget().textContent, /this is a test task|\/|clocks/);
+    assert.doesNotMatch(topbarButton().textContent, /this is a test task|\/|clocks/);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
-    assert.match(topbarWidget().querySelector('button').title, /^1 Thread\n/);
-    assert.equal(
-        topbarWidget().querySelector('button').getAttribute('aria-label'),
-        topbarWidget().querySelector('button').title
-    );
+    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().getAttribute('aria-label'), 'Open Roam Logbook Active Work');
+    assert.equal(topbarStatus().textContent, '1 Thread. Timing is running.');
 });
 
 test('banked task time stays available in the tooltip, not the visible topbar', () => {
@@ -353,8 +354,8 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
         'banked time is derived by Active Work, not queried per tick'
     );
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
-    assert.match(topbarWidget().querySelector('button').title, /2h 0\dm on this task in total/);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
+    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.match(topbarButton().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
 });
 
 test('the shared Pomodoro cycle stays overrun when a running CLOCK is edited', () => {
@@ -374,7 +375,7 @@ test('the shared Pomodoro cycle stays overrun when a running CLOCK is edited', (
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time--stale'), null);
     assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__button--overrun'), null);
-    assert.match(topbarWidget().querySelector('button').title, /over by/);
+    assert.equal(topbarStatus().textContent, '1 Thread. Pomodoro is over its target.');
 
     graph.store.get(entry.clockUid).string = `CLOCK:: ${formatStamp(new Date(Date.now() - 60_000))}`;
     clock.refresh();
@@ -396,7 +397,7 @@ test('the shared overrun state takes priority over stale metadata', () => {
         topbarWidget().querySelector('.rlb-topbar__time').textContent,
         formatElapsed(Date.now() - cycle.startedAt)
     );
-    assert.doesNotMatch(topbarWidget().querySelector('button').title, /likely forgotten/);
+    assert.doesNotMatch(topbarStatus().textContent, /likely forgotten/);
 
     click(topbarWidget().querySelector('button'));
     const popover = document.querySelector('body > .rlb-popover');
@@ -416,8 +417,9 @@ test('a long task name stays in the tooltip without entering visible topbar text
     clock.refresh();
 
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
-    assert.match(topbarWidget().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
-    assert.match(topbarWidget().querySelector('button').title, new RegExp(longName.slice(0, 20)));
+    assert.match(topbarButton().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
+    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.doesNotMatch(topbarStatus().textContent, new RegExp(longName.slice(0, 20)));
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
     clock.refresh();
@@ -470,12 +472,9 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
         assert.doesNotMatch(topbarWidget().textContent, /parallel task|third parallel task|this is a test task|clocks|\//);
-        assert.match(topbarWidget().querySelector('button').title, /^3 Threads\n/);
-        assert.doesNotMatch(topbarWidget().querySelector('button').title, /clocks running/i);
-        assert.equal(
-            topbarWidget().querySelector('button').getAttribute('aria-label'),
-            topbarWidget().querySelector('button').title
-        );
+        assert.equal(topbarButton().title, 'Open Active Work details');
+        assert.equal(topbarStatus().textContent, '3 Threads. Timing is running.');
+        assert.doesNotMatch(topbarStatus().textContent, /clocks running/i);
 
         click(topbarWidget().querySelector('button'));
         const popover = document.querySelector('body > .rlb-popover');
@@ -488,7 +487,7 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         ]);
         const headerRefresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
         assert.match(headerRefresh.className, /\bbp3-icon-refresh\b/);
-        assert.equal(headerRefresh.title, 'Refresh Active Work from graph');
+        assert.equal(headerRefresh.title, '');
         assert.equal(headerRefresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
         assert.equal(popover.querySelector('.rlb-surface__footer'), null);
         click(topbarWidget().querySelector('button'));
@@ -528,13 +527,12 @@ test('the popover lists the running clock', () => {
     const checkout = popover.querySelector('[data-action="clock-out"]');
     assert.equal(checkout.textContent, '');
     assert.ok(checkout.classList.contains('bp3-icon-log-out'));
-    assert.equal(checkout.title, 'Check Out');
-    assert.ok(checkout.title);
-    assert.equal(checkout.getAttribute('aria-label'), checkout.title);
+    assert.equal(checkout.title, '');
+    assert.equal(checkout.getAttribute('aria-label'), 'Check Out');
     const discard = popover.querySelector('.bp3-icon-trash');
     assert.ok(discard, 'discard action should be present');
-    assert.ok(discard.title);
-    assert.equal(discard.getAttribute('aria-label'), discard.title);
+    assert.match(discard.getAttribute('aria-label'), /Discard this CLOCK entry/);
+    assert.equal(discard.title, '');
     const headerActions = [...popover.querySelectorAll('.rlb-surface__header .rlb-surface__actions > *')];
     assert.deepEqual(headerActions.map(action => action.dataset.action || 'refresh-cell'), [
         'dashboard',
@@ -542,7 +540,7 @@ test('the popover lists the running clock', () => {
     ]);
     const refresh = popover.querySelector('.rlb-surface__header [data-action="refresh"]');
     assert.match(refresh.className, /\bbp3-icon-refresh\b/);
-    assert.equal(refresh.title, 'Refresh Active Work from graph');
+    assert.equal(refresh.title, '');
     assert.equal(refresh.getAttribute('aria-label'), 'Refresh Active Work from graph');
     assert.equal(popover.querySelector('.rlb-surface__footer'), null);
 
@@ -582,7 +580,8 @@ test('the dashboard renders totals and the task breakdown', () => {
         const action = dialog().querySelector(selector);
         assert.ok(action.classList.contains('rlb-icon-button'));
         assert.ok(action.title);
-        assert.equal(action.getAttribute('aria-label'), action.title);
+        assert.ok(action.getAttribute('aria-label'));
+        assert.equal(action.title, '');
     }
     assert.match(dialog().textContent, /Today/);
     assert.match(dialog().textContent, /Graph Engineering:/);
@@ -742,14 +741,8 @@ test('clocking out through the palette closes the current Timing Line once', asy
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.match(
-        topbarWidget().querySelector('button').title,
-        /0 timing lines · 2 parallel threads · Leave after 45m without focus/
-    );
-    assert.equal(
-        topbarWidget().querySelector('button').getAttribute('aria-label'),
-        topbarWidget().querySelector('button').title
-    );
+    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarStatus().textContent, '2 Threads. No Timing Line is active.');
 });
 
 test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {
@@ -761,8 +754,8 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     assert.equal(pomodoro.isActive(before.clockUid), true);
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 45:00/);
-    assert.match(topbarWidget().textContent.trim(), / Threads?$/);
+    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.match(topbarButton().textContent.trim(), / Threads?$/);
 
     duration.action.onChange({ target: { value: '20' } });
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45, 'an active Session keeps its captured target');
@@ -793,7 +786,7 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     assert.equal(clock.getRunning().length, 1, 'passing the repaired target never closes the CLOCK');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.match(topbarWidget().querySelector('button').title, /Pomodoro cycle 20:00/);
+    assert.equal(topbarButton().title, 'Open Active Work details');
 
     duration.action.onChange({ target: { value: '-4' } });
     assert.equal(settingsStore.get('pomodoroMinutes'), '20', 'invalid input keeps the current safe value');

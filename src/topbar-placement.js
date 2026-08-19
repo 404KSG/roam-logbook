@@ -148,7 +148,7 @@ export const syncTopbarLayout = (
     layoutHosts.clear();
     searchHosts.clear();
 
-    const host = placement.parent;
+    const host = placement?.parent;
     if (!host?.classList) return;
     host.classList.add('rlb-topbar__layout');
     ensureLayoutHostDisplay(host, layoutHostDisplay, documentRef);

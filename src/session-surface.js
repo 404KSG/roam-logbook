@@ -65,7 +65,6 @@ const renderTitle = (row, onOpenTask) => {
         event => onOpenTask?.(row.taskUid, event),
         { title: fullTaskLabel(title) }
     );
-    taskButton.setAttribute('aria-label', fullTaskLabel(title));
     return taskButton;
 };
 

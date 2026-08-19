@@ -7,13 +7,14 @@ export function el(tag, className, text) {
     return node;
 }
 
-export function button(className, text, onClick, { title } = {}) {
+export function button(className, text, onClick, { title, ariaLabel } = {}) {
     const node = el('button', className, text);
     node.type = 'button';
-    if (title) {
-        node.title = title;
-        node.setAttribute('aria-label', title);
-    }
+    // Keep the visual tooltip: `title` also supplies the accessible name for an
+    // icon-only button, so adding an identical aria-label would only make
+    // assistive tech announce the same string twice.
+    if (title) node.title = title;
+    if (ariaLabel && ariaLabel !== title) node.setAttribute('aria-label', ariaLabel);
     node.addEventListener('click', onClick);
     return node;
 }

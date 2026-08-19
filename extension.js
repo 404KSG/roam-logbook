@@ -2751,13 +2751,13 @@ function el(tag, className, text) {
     node.textContent = text;
   return node;
 }
-function button(className, text, onClick, { title } = {}) {
+function button(className, text, onClick, { title, ariaLabel } = {}) {
   const node = el("button", className, text);
   node.type = "button";
-  if (title) {
+  if (title)
     node.title = title;
-    node.setAttribute("aria-label", title);
-  }
+  if (ariaLabel && ariaLabel !== title)
+    node.setAttribute("aria-label", ariaLabel);
   node.addEventListener("click", onClick);
   return node;
 }
@@ -2793,6 +2793,30 @@ var activityRangeLabel = (rangeId) => ({
   month: "Last 30 days",
   all: "All time"
 })[rangeId] || "selected range";
+var moveActivityFocus = (plot, current, key) => {
+  const columns = [...plot.querySelectorAll("[data-activity-bucket]")];
+  const index = columns.indexOf(current);
+  if (index < 0)
+    return;
+  let nextIndex = index;
+  if (key === "Home")
+    nextIndex = 0;
+  else if (key === "End")
+    nextIndex = columns.length - 1;
+  else if (key === "ArrowRight" || key === "ArrowDown")
+    nextIndex = index + 1;
+  else if (key === "ArrowLeft" || key === "ArrowUp")
+    nextIndex = index - 1;
+  else
+    return;
+  nextIndex = Math.max(0, Math.min(columns.length - 1, nextIndex));
+  if (nextIndex === index)
+    return;
+  for (const [columnIndex, column] of columns.entries()) {
+    column.tabIndex = columnIndex === nextIndex ? 0 : -1;
+  }
+  columns[nextIndex].focus();
+};
 var updateBucketNode = (node, bucket, maxMinutes) => {
   node.dataset.activityDuration = bucket.durationLabel;
   node.dataset.activityMinutes = String(bucket.minutes);
@@ -2828,15 +2852,25 @@ function renderActivity(activity) {
   plot.style.setProperty("--rlb-activity-columns", String(activity.buckets.length));
   plot.style.setProperty("--rlb-activity-bar-width", `${activity.density.barWidthPx}px`);
   plot.dataset.activityDensity = activity.density.id;
+  plot.addEventListener("keydown", (event) => {
+    const current = event.target?.closest?.("[data-activity-bucket]");
+    if (!current || !plot.contains(current))
+      return;
+    if (!["Home", "End", "ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    moveActivityFocus(plot, current, event.key);
+  });
   const maxMinutes = activity.maxMinutes;
-  for (const bucket of activity.buckets) {
+  for (const [index, bucket] of activity.buckets.entries()) {
     const column = el("div", "rlb-activity__bucket");
     column.dataset.activityBucket = bucket.id;
     column.dataset.activityDuration = bucket.durationLabel;
     column.dataset.activityMinutes = String(bucket.minutes);
     column.dataset.activitySessions = String(bucket.sessionCount);
     column.dataset.activityUnit = bucket.unit;
-    column.tabIndex = 0;
+    column.tabIndex = index === 0 ? 0 : -1;
     column.setAttribute("role", "img");
     column.title = bucket.ariaLabel;
     column.setAttribute("aria-label", bucket.ariaLabel);
@@ -3321,14 +3355,10 @@ function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, 
   const taskCount = el("span", "rlb-task-count");
   heading.appendChild(taskCount);
   const rollupHelp = "Totals include sub-tasks. A task shown under more than one parent may overlap between branches; headline totals count each Session once.";
-  const info = button(
-    "bp3-button bp3-minimal bp3-small bp3-icon-info-sign rlb-tree__info",
-    "",
-    null,
-    { title: rollupHelp }
-  );
+  const info = el("span", "bp3-icon bp3-icon-info-sign rlb-tree__info");
   info.setAttribute("role", "img");
-  info.setAttribute("tabindex", "-1");
+  info.title = rollupHelp;
+  info.setAttribute("aria-label", "Task rollup information");
   info.setAttribute("aria-describedby", "roam-logbook-task-rollup-help");
   heading.appendChild(info);
   const help = el("span", "rlb-visually-hidden", rollupHelp);
@@ -3478,7 +3508,6 @@ function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, 
           { title: node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks" }
         );
         caret.setAttribute("aria-expanded", String(!node.collapsed));
-        caret.setAttribute("aria-label", node.collapsed ? "Expand sub-tasks" : "Collapse sub-tasks");
         leading.appendChild(caret);
       } else {
         leading.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
@@ -4821,19 +4850,12 @@ var instantMs = (value) => value instanceof Date ? value.getTime() : Number.isFi
 function cycleElapsedMs(now = Date.now()) {
   return cycle ? Math.max(0, instantMs(now) - cycle.startedAt) : 0;
 }
-function cycleThresholdMinutes() {
-  return cycle?.thresholdMinutes ?? null;
-}
 function cycleThresholdMs() {
   return cycle ? cycle.thresholdMinutes * 6e4 : null;
 }
 function isCycleOverrun(now = Date.now()) {
   const threshold = cycleThresholdMs();
   return threshold !== null && cycleElapsedMs(now) >= threshold;
-}
-function cycleOverrunMs(now = Date.now()) {
-  const threshold = cycleThresholdMs();
-  return threshold === null ? 0 : Math.max(0, cycleElapsedMs(now) - threshold);
 }
 function reconcileCycle(running2 = [], { now = Date.now() } = {}) {
   const entries = Array.isArray(running2) ? running2 : [];
@@ -7003,7 +7025,6 @@ var renderTitle = (row, onOpenTask) => {
     (event) => onOpenTask?.(row.taskUid, event),
     { title: fullTaskLabel(title) }
   );
-  taskButton.setAttribute("aria-label", fullTaskLabel(title));
   return taskButton;
 };
 var renderRunningRow = (row, now, options) => {
@@ -7338,24 +7359,539 @@ function updateSessionSurfaceElapsed(root, entries, now, openLines = [], openLin
   }
 }
 
+// src/modal-inert.js
+var APP_ROOT_SELECTOR = "#app, .roam-app, .roam-body, [data-roam-app]";
+var inertStates = /* @__PURE__ */ new WeakMap();
+var findAppRoot = (documentRef, modalRoot) => documentRef.querySelector(APP_ROOT_SELECTOR) || [...documentRef.body?.children || []].find(
+  (node) => node !== modalRoot && !node.classList?.contains("rlb-popover")
+) || null;
+function acquireModalInert({
+  documentRef = document,
+  modalRoot = null,
+  appRoot = null
+} = {}) {
+  const root = appRoot || findAppRoot(documentRef, modalRoot);
+  if (!root || root === modalRoot || modalRoot?.contains(root))
+    return () => {
+    };
+  let state = inertStates.get(root);
+  if (!state) {
+    state = {
+      count: 0,
+      hadAttribute: root.hasAttribute("inert"),
+      attributeValue: root.getAttribute("inert"),
+      propertyValue: "inert" in root ? root.inert : void 0
+    };
+    inertStates.set(root, state);
+  }
+  state.count += 1;
+  try {
+    root.inert = true;
+  } catch {
+  }
+  root.setAttribute("inert", "");
+  let released = false;
+  return () => {
+    if (released)
+      return;
+    released = true;
+    state.count -= 1;
+    if (state.count > 0)
+      return;
+    if (state.hadAttribute)
+      root.setAttribute("inert", state.attributeValue ?? "");
+    else
+      root.removeAttribute("inert");
+    if (state.propertyValue !== void 0) {
+      try {
+        root.inert = state.propertyValue;
+      } catch {
+      }
+    }
+    inertStates.delete(root);
+  };
+}
+
+// src/session-popover.js
+var FOCUSABLE_SELECTOR2 = 'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])';
+function createSessionPopover({
+  id,
+  titleId,
+  getTrigger = () => null,
+  onRender = () => {
+  },
+  onBeforeOpen = () => {
+  },
+  onOpened = () => {
+  },
+  onBeforeClose = () => {
+  },
+  acquireInert = acquireModalInert,
+  documentRef = document,
+  windowRef = window
+} = {}) {
+  let root = null;
+  let releaseInert = null;
+  const focusTrap = createFocusTrap(() => root, { documentRef });
+  const syncTriggerAria = (expanded) => {
+    const trigger = getTrigger();
+    trigger?.setAttribute("aria-expanded", expanded ? "true" : "false");
+    trigger?.setAttribute("aria-controls", id);
+  };
+  const position = () => {
+    const trigger = getTrigger();
+    const anchor = trigger?.getBoundingClientRect();
+    if (!anchor || !root)
+      return;
+    const width = root.offsetWidth || 340;
+    const viewport = windowRef.innerWidth || width + 16;
+    root.style.top = `${anchor.bottom + 6}px`;
+    root.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
+  };
+  function onDocumentMouseDown(event) {
+    if (!root)
+      return;
+    const trigger = getTrigger();
+    if (trigger?.contains(event.target) || root.contains(event.target))
+      return;
+    close();
+  }
+  function onKeyDown(event) {
+    if (!root || event.key !== "Escape")
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  }
+  const close = ({ restoreFocus = true } = {}) => {
+    if (!root)
+      return;
+    const current = root;
+    let closeError = null;
+    try {
+      onBeforeClose({ restoreFocus, root: current });
+    } catch (error) {
+      closeError = error;
+    } finally {
+      focusTrap.deactivate();
+      releaseInert?.();
+      releaseInert = null;
+      current.remove();
+      root = null;
+      documentRef.removeEventListener("mousedown", onDocumentMouseDown, true);
+      documentRef.removeEventListener("keydown", onKeyDown, true);
+      windowRef.removeEventListener("resize", close);
+      syncTriggerAria(false);
+      if (restoreFocus && getTrigger()?.isConnected)
+        getTrigger().focus();
+    }
+    if (closeError)
+      throw closeError;
+  };
+  const render = () => {
+    if (root)
+      onRender(root);
+  };
+  const open = () => {
+    if (root)
+      return root;
+    onBeforeOpen();
+    root = el("div", "bp3-card bp3-elevation-3 rlb-popover");
+    root.id = id;
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-labelledby", titleId);
+    try {
+      documentRef.body.appendChild(root);
+      releaseInert = acquireInert?.({ documentRef, modalRoot: root }) || null;
+      syncTriggerAria(true);
+      onRender(root);
+      position();
+      documentRef.addEventListener("mousedown", onDocumentMouseDown, true);
+      documentRef.addEventListener("keydown", onKeyDown, true);
+      windowRef.addEventListener("resize", close);
+      focusTrap.activate();
+      const firstFocusable = root.querySelector(FOCUSABLE_SELECTOR2);
+      if (firstFocusable)
+        firstFocusable.focus();
+      else {
+        root.tabIndex = -1;
+        root.focus();
+      }
+      onOpened(root);
+      return root;
+    } catch (error) {
+      focusTrap.deactivate();
+      releaseInert?.();
+      releaseInert = null;
+      root.remove();
+      root = null;
+      documentRef.removeEventListener("mousedown", onDocumentMouseDown, true);
+      documentRef.removeEventListener("keydown", onKeyDown, true);
+      windowRef.removeEventListener("resize", close);
+      syncTriggerAria(false);
+      throw error;
+    }
+  };
+  return {
+    get root() {
+      return root;
+    },
+    get isOpen() {
+      return Boolean(root);
+    },
+    open,
+    close,
+    render,
+    position,
+    toggle(event) {
+      if (event?.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (root)
+        close();
+      else
+        open();
+    },
+    destroy() {
+      close({ restoreFocus: false });
+    }
+  };
+}
+
+// src/topbar-host.js
+var DEFAULT_SELECTOR = ".rm-topbar";
+var RECOVERY_TIMEOUT_MS = 15e3;
+var RECOVERY_FLUSH_LIMIT = 32;
+function createTopbarHost({
+  selector = DEFAULT_SELECTOR,
+  getContainer = () => null,
+  getPopover = () => null,
+  isDestroyed = () => false,
+  onAttach = () => {
+  },
+  onMissing = () => {
+  },
+  onDisabled = () => {
+  },
+  documentRef = document,
+  mutationObserver = MutationObserver,
+  setTimeoutFn = (callback, delay) => setTimeout(callback, delay),
+  clearTimeoutFn = (timer) => clearTimeout(timer),
+  recoveryTimeoutMs = RECOVERY_TIMEOUT_MS,
+  recoveryFlushLimit = RECOVERY_FLUSH_LIMIT
+} = {}) {
+  let observer = null;
+  let hostObserver = null;
+  let recoveryObserver = null;
+  let outerRecoveryObserver = null;
+  let recoveryTarget = null;
+  let outerRecoveryTarget = null;
+  let observedTopbar = null;
+  let attachQueued = false;
+  let attachTimer = null;
+  let attachCount = 0;
+  let recoveryShutdownTimer = null;
+  let recoveryFlushes = 0;
+  let recoveryDisabled = false;
+  const isPluginNode2 = (node) => {
+    const container = getContainer();
+    const popover = getPopover();
+    return Boolean(
+      node && (node === container || node === popover || container?.contains(node) || popover?.contains(node))
+    );
+  };
+  const hasNonPluginMutation = (record) => {
+    if (isPluginNode2(record.target))
+      return false;
+    const nodes = [...record.addedNodes, ...record.removedNodes];
+    return nodes.length === 0 || nodes.some((node) => !isPluginNode2(node));
+  };
+  const touchesTopbar = (record) => {
+    if (isPluginNode2(record.target))
+      return false;
+    const nodes = [...record.addedNodes, ...record.removedNodes];
+    if (nodes.length > 0 && nodes.every(isPluginNode2))
+      return false;
+    const target = record.target;
+    if (target?.matches?.(selector) || target?.closest?.(selector))
+      return true;
+    if (recoveryTarget === documentRef.body && target !== recoveryTarget) {
+      return nodes.some((node) => node?.matches?.(selector));
+    }
+    return nodes.some(
+      (node) => node?.matches?.(selector) || node?.querySelector?.(selector)
+    );
+  };
+  const scheduleAttach = () => {
+    if (isDestroyed() || attachQueued)
+      return;
+    attachQueued = true;
+    const flush = () => {
+      attachQueued = false;
+      attachTimer = null;
+      attach2();
+    };
+    if (typeof queueMicrotask === "function")
+      queueMicrotask(flush);
+    else
+      attachTimer = setTimeoutFn(flush, 0);
+  };
+  const observeTopbar = (topbar) => {
+    hostObserver?.disconnect();
+    observedTopbar = topbar;
+    hostObserver = new mutationObserver((records) => {
+      if (records.some(hasNonPluginMutation))
+        scheduleAttach();
+    });
+    hostObserver.observe(topbar, { childList: true, subtree: true });
+  };
+  const clearRecoveryShutdown = () => {
+    if (recoveryShutdownTimer)
+      clearTimeoutFn(recoveryShutdownTimer);
+    recoveryShutdownTimer = null;
+  };
+  const disableRecovery = () => {
+    if (recoveryDisabled)
+      return;
+    recoveryDisabled = true;
+    clearRecoveryShutdown();
+    recoveryObserver?.disconnect();
+    recoveryObserver = null;
+    outerRecoveryObserver?.disconnect();
+    outerRecoveryObserver = null;
+    observer = null;
+    recoveryTarget = null;
+    outerRecoveryTarget = null;
+    onDisabled();
+  };
+  const armRecoveryShutdown = () => {
+    if (recoveryDisabled || recoveryShutdownTimer)
+      return;
+    recoveryShutdownTimer = setTimeoutFn(() => {
+      recoveryShutdownTimer = null;
+      if (!isDestroyed() && !documentRef.querySelector(selector))
+        disableRecovery();
+    }, recoveryTimeoutMs);
+  };
+  const noteRecoveryMiss = () => {
+    recoveryFlushes += 1;
+    if (recoveryFlushes >= recoveryFlushLimit)
+      disableRecovery();
+  };
+  const observeRecoveryTarget = (topbar) => {
+    if (!topbar && recoveryDisabled)
+      return;
+    if (topbar) {
+      clearRecoveryShutdown();
+      recoveryFlushes = 0;
+      recoveryDisabled = false;
+    } else {
+      armRecoveryShutdown();
+    }
+    const target = topbar?.parentElement || documentRef.body;
+    const subtree = !topbar;
+    const outerTarget = topbar?.parentElement?.parentElement || null;
+    if (recoveryObserver && recoveryTarget === target && outerRecoveryTarget === outerTarget)
+      return;
+    recoveryObserver?.disconnect();
+    outerRecoveryObserver?.disconnect();
+    recoveryObserver = new mutationObserver((records) => {
+      if (records.some(touchesTopbar))
+        scheduleAttach();
+    });
+    recoveryTarget = target;
+    recoveryObserver.observe(target, { childList: true, ...subtree ? { subtree: true } : {} });
+    outerRecoveryTarget = outerTarget;
+    if (outerTarget && outerTarget !== target) {
+      outerRecoveryObserver = new mutationObserver((records) => {
+        if (records.some(touchesTopbar))
+          scheduleAttach();
+      });
+      outerRecoveryObserver.observe(outerTarget, { childList: true });
+    } else {
+      outerRecoveryObserver = null;
+    }
+    observer = recoveryObserver;
+  };
+  function attach2() {
+    if (isDestroyed())
+      return;
+    attachCount += 1;
+    const topbar = documentRef.querySelector(selector);
+    observeRecoveryTarget(topbar);
+    if (!topbar) {
+      onMissing();
+      noteRecoveryMiss();
+      return;
+    }
+    clearRecoveryShutdown();
+    recoveryFlushes = 0;
+    recoveryDisabled = false;
+    if (topbar !== observedTopbar)
+      observeTopbar(topbar);
+    onAttach(topbar);
+  }
+  const stop = () => {
+    clearRecoveryShutdown();
+    observer?.disconnect();
+    observer = null;
+    hostObserver?.disconnect();
+    hostObserver = null;
+    recoveryObserver?.disconnect();
+    recoveryObserver = null;
+    outerRecoveryObserver?.disconnect();
+    outerRecoveryObserver = null;
+    recoveryTarget = null;
+    outerRecoveryTarget = null;
+    observedTopbar = null;
+    attachQueued = false;
+    if (attachTimer)
+      clearTimeoutFn(attachTimer);
+    attachTimer = null;
+  };
+  return {
+    attach: attach2,
+    refresh: attach2,
+    stop,
+    scheduleAttach,
+    getPerformanceSnapshot() {
+      return { attachCount };
+    }
+  };
+}
+
+// src/topbar-placement.js
+var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
+var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
+var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
+var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
+var controlSignals = (element) => [
+  element.className,
+  element.getAttribute?.("data-icon"),
+  element.getAttribute?.("aria-label"),
+  element.getAttribute?.("title"),
+  element.getAttribute?.("data-name")
+].filter((value) => typeof value === "string").join(" ").replaceAll("_", "-").toLowerCase();
+var isMainControl = (element) => element.matches?.('input, textarea, select, [contenteditable="true"]') || MAIN_CONTROL_PATTERN.test(controlSignals(element));
+var containsMainControl = (element) => isMainControl(element) || Boolean(
+  element.querySelector?.('input, textarea, select, [contenteditable="true"]') || [...element.querySelectorAll?.("*") || []].some(isMainControl)
+);
+var navigationCluster = (signal, topbar) => {
+  let anchor = signal.closest?.('button, a, [role="button"]') || signal;
+  while (anchor.parentElement && anchor.parentElement !== topbar && ![...anchor.parentElement.querySelectorAll("*")].some(isMainControl)) {
+    anchor = anchor.parentElement;
+  }
+  return anchor;
+};
+var surfaceChild = (signal, topbar) => {
+  let boundary = signal;
+  while (boundary.parentElement && boundary.parentElement !== topbar && !boundary.previousElementSibling) {
+    boundary = boundary.parentElement;
+  }
+  return boundary;
+};
+var afterNavigation = (topbar, { container = null } = {}) => {
+  const descendants = [...topbar.querySelectorAll("*")].filter(
+    (node) => node !== container && !container?.contains(node)
+  );
+  const mainIndex = descendants.findIndex(isMainControl);
+  const leading = mainIndex >= 0 ? descendants.slice(0, mainIndex) : descendants;
+  const signal = leading.find((node) => FORWARD_PATTERN.test(controlSignals(node))) || leading.find((node) => BACK_PATTERN.test(controlSignals(node))) || leading.find((node) => MENU_PATTERN.test(controlSignals(node)));
+  if (signal) {
+    const anchor = navigationCluster(signal, topbar);
+    const next = anchor.nextSibling;
+    return {
+      parent: anchor.parentNode,
+      before: next === container ? container.nextSibling : next
+    };
+  }
+  const main = descendants.find(isMainControl);
+  if (main) {
+    const boundary = surfaceChild(main, topbar);
+    return { parent: boundary.parentNode, before: boundary };
+  }
+  let surface = topbar;
+  while (surface.children.length === 1 && surface.firstElementChild !== container && surface.firstElementChild.children.length > 0) {
+    surface = surface.firstElementChild;
+  }
+  return { parent: surface, before: surface.firstElementChild?.nextSibling ?? null };
+};
+var restoreLayoutHostDisplay = (host, layoutHostDisplay) => {
+  const previous = layoutHostDisplay.get(host);
+  if (!previous || !host?.style)
+    return;
+  if (previous.value)
+    host.style.setProperty("display", previous.value, previous.priority);
+  else
+    host.style.removeProperty("display");
+  layoutHostDisplay.delete(host);
+};
+var clearLayoutHost = (host, layoutHostDisplay) => {
+  host.classList.remove("rlb-topbar__layout");
+  restoreLayoutHostDisplay(host, layoutHostDisplay);
+};
+var ensureLayoutHostDisplay = (host, layoutHostDisplay, documentRef) => {
+  if (!host?.style)
+    return;
+  let display = "";
+  try {
+    display = documentRef.defaultView?.getComputedStyle?.(host)?.display || "";
+  } catch {
+  }
+  if (display === "flex")
+    return;
+  if (!layoutHostDisplay.has(host)) {
+    layoutHostDisplay.set(host, {
+      value: host.style.getPropertyValue("display"),
+      priority: host.style.getPropertyPriority("display")
+    });
+  }
+  host.style.setProperty("display", "flex");
+};
+var syncTopbarLayout = (placement, {
+  container = null,
+  layoutHosts = /* @__PURE__ */ new Set(),
+  searchHosts = /* @__PURE__ */ new Set(),
+  layoutHostDisplay = /* @__PURE__ */ new Map(),
+  documentRef = document
+} = {}) => {
+  for (const host2 of layoutHosts)
+    clearLayoutHost(host2, layoutHostDisplay);
+  for (const host2 of searchHosts)
+    host2.classList.remove("rlb-topbar__search");
+  layoutHosts.clear();
+  searchHosts.clear();
+  const host = placement?.parent;
+  if (!host?.classList)
+    return;
+  host.classList.add("rlb-topbar__layout");
+  ensureLayoutHostDisplay(host, layoutHostDisplay, documentRef);
+  layoutHosts.add(host);
+  for (const child of host.children) {
+    if (child === container || !containsMainControl(child))
+      continue;
+    child.classList.add("rlb-topbar__search");
+    searchHosts.add(child);
+    break;
+  }
+};
+
 // src/topbar.js
 var WIDGET_ID = "roam-logbook-topbar";
 var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
+var TOPBAR_STATUS_ID = "roam-logbook-topbar-status";
+var TOPBAR_LABEL = "Open Roam Logbook Active Work";
+var TOPBAR_TITLE = "Open Active Work details";
 var TOPBAR_SELECTOR2 = ".rm-topbar";
-var REFRESH_SUCCESS_DURATION = 1800;
-var REFRESH_LOADING_MESSAGE = "Refreshing Active Work from graph\u2026";
-var REFRESH_SUCCESS_MESSAGE = "Updated just now";
-var REFRESH_ERROR_MESSAGE = "Refresh failed; last valid snapshot kept. Retry.";
-var RECOVERY_TIMEOUT_MS = 15e3;
-var RECOVERY_FLUSH_LIMIT = 32;
-var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
-var activeWorkDescription = (timingCount, openLineCount, windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) => {
-  const timing = Number.isFinite(Number(timingCount)) ? Math.max(0, Math.floor(Number(timingCount))) : 0;
-  const openLines = Number.isFinite(Number(openLineCount)) ? Math.max(0, Math.floor(Number(openLineCount))) : 0;
-  const window2 = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
-  return `${timing} timing line${timing === 1 ? "" : "s"} \xB7 ${openLines} parallel thread${openLines === 1 ? "" : "s"} \xB7 Leave after ${window2}m without focus`;
+var TOPBAR_REFRESH_MESSAGES = {
+  ...REFRESH_MESSAGES.activeWork,
+  loading: "Refreshing Active Work state from graph\u2026"
 };
+var activeCount = (count) => `${count} Thread${count === 1 ? "" : "s"}`;
 var sessionLoadTone = (count) => {
   const normalized2 = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   if (normalized2 >= 7)
@@ -7405,10 +7941,6 @@ function createPostPaintScheduler({
     };
   };
 }
-var FORWARD_PATTERN = /\b(forward|arrow-right|chevron-right)\b/i;
-var BACK_PATTERN = /\b(back|arrow-left|chevron-left)\b/i;
-var MENU_PATTERN = /\b(menu|left-sidebar|navigation)\b/i;
-var MAIN_CONTROL_PATTERN = /\b(find-or-create|search|topbar(?:__|-)?(?:main|right))\b/i;
 function createTopbar({
   onOpenDashboard,
   onMutationResult = () => {
@@ -7425,49 +7957,32 @@ function createTopbar({
   let parallelNode = null;
   let separatorNode = null;
   let buttonNode = null;
+  let statusNode = null;
   let popover = null;
-  let observer = null;
-  let hostObserver = null;
-  let recoveryObserver = null;
-  let outerRecoveryObserver = null;
-  let recoveryTarget = null;
-  let outerRecoveryTarget = null;
-  let observedTopbar = null;
+  let sessionPopover = null;
+  let topbarHost = null;
   let ticker = null;
   let unsubscribe = null;
   let destroyed = false;
-  let discardConfirmUid = null;
-  let discardConfirmTimer = null;
-  let attachQueued = false;
-  let attachTimer = null;
-  let attachCount = 0;
   let tickCount = 0;
   let layoutMode = null;
+  let statusSignature = "";
   let actionNotice = "";
-  let refreshInFlight = null;
   let pendingOpenRefresh = null;
-  let refreshClearTimer = null;
   let refreshState = { state: "idle", message: "" };
   let activeSignature = "";
   let themeRuntime = null;
   const layoutHosts = /* @__PURE__ */ new Set();
   const searchHosts = /* @__PURE__ */ new Set();
   const layoutHostDisplay = /* @__PURE__ */ new Map();
-  let recoveryShutdownTimer = null;
-  let recoveryFlushes = 0;
-  let recoveryDisabled = false;
   const nowDate = () => {
     const value = nowFn();
     return value instanceof Date ? value : new Date(value);
   };
-  const resetClockOutConfirmation = () => {
+  const resetPopoverState = () => {
+    cancelPendingOpenRefresh();
     confirmation?.reset();
-  };
-  const resetDiscardConfirmation = () => {
-    discardConfirmUid = null;
-    if (discardConfirmTimer)
-      clearTimeout(discardConfirmTimer);
-    discardConfirmTimer = null;
+    actionNotice = "";
   };
   const cancelPendingOpenRefresh = () => {
     const pending = pendingOpenRefresh;
@@ -7475,8 +7990,8 @@ function createTopbar({
       return;
     pendingOpenRefresh = null;
     pending.cancel?.();
-    if (refreshState.state === "loading" && !refreshInFlight) {
-      refreshState = { state: "idle", message: "" };
+    if (refreshState.state === "loading" && !refreshRuntime.inFlight) {
+      refreshRuntime.reset();
     }
     pending.resolve({
       ok: false,
@@ -7485,69 +8000,13 @@ function createTopbar({
     });
   };
   const closePopover = ({ restoreFocus = true } = {}) => {
-    cancelPendingOpenRefresh();
-    resetClockOutConfirmation();
-    resetDiscardConfirmation();
-    actionNotice = "";
-    popover?.remove();
-    popover = null;
-    document.removeEventListener("mousedown", onDocumentMouseDown, true);
-    document.removeEventListener("keydown", onPopoverKeyDown, true);
-    window.removeEventListener("resize", closePopover);
-    syncSurfaceAria(null);
+    if (sessionPopover?.isOpen) {
+      sessionPopover.close({ restoreFocus });
+      return;
+    }
+    resetPopoverState();
     if (restoreFocus && buttonNode?.isConnected)
       buttonNode.focus();
-  };
-  function onDocumentMouseDown(event) {
-    if (!popover)
-      return;
-    if (container?.contains(event.target) || popover.contains(event.target))
-      return;
-    closePopover();
-  }
-  function onPopoverKeyDown(event) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closePopover();
-      return;
-    }
-    if (event.key !== "Tab" || !popover)
-      return;
-    const focusables = [
-      ...popover.querySelectorAll(
-        'button, select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])'
-      )
-    ].filter((node) => !node.disabled && node.getAttribute("aria-hidden") !== "true");
-    event.preventDefault();
-    event.stopPropagation();
-    if (focusables.length === 0) {
-      popover.tabIndex = -1;
-      popover.focus();
-      return;
-    }
-    const first = focusables[0];
-    const last = focusables.at(-1);
-    const index = focusables.indexOf(document.activeElement);
-    if (event.shiftKey) {
-      if (index <= 0)
-        last.focus();
-      else
-        focusables[index - 1].focus();
-    } else if (index < 0 || index === focusables.length - 1) {
-      first.focus();
-    } else {
-      focusables[index + 1].focus();
-    }
-  }
-  const positionPopover = () => {
-    const anchor = buttonNode?.getBoundingClientRect();
-    if (!anchor || !popover)
-      return;
-    const width = popover.offsetWidth || 340;
-    const viewport = window.innerWidth || width + 16;
-    popover.style.top = `${anchor.bottom + 6}px`;
-    popover.style.left = `${Math.max(8, Math.min(anchor.left, viewport - width - 8))}px`;
   };
   const sessionModel = () => {
     const activeWork = getActiveWork(nowDate());
@@ -7582,68 +8041,49 @@ function createTopbar({
     renderButton(getRunning(), nowDate(), { reconcile: false });
     renderSurfaces();
   };
-  const setRefreshState = (state, message, { clearAfter = false } = {}) => {
-    if (refreshClearTimer)
-      clearTimeout(refreshClearTimer);
-    refreshClearTimer = null;
-    refreshState = { state, message };
-    renderRefreshState();
-    if (clearAfter && !destroyed) {
-      refreshClearTimer = setTimeout(() => {
-        refreshClearTimer = null;
-        if (refreshState.state !== "success")
-          return;
-        refreshState = { state: "idle", message: "" };
-        renderRefreshState();
-      }, REFRESH_SUCCESS_DURATION);
-    }
-  };
+  const refreshRuntime = createRefreshState({
+    onRender: (state) => {
+      refreshState = state;
+      renderRefreshState();
+    },
+    messages: TOPBAR_REFRESH_MESSAGES
+  });
   const refreshSessions = () => {
-    if (refreshInFlight)
-      return refreshInFlight;
-    const request = Promise.resolve().then(() => refreshResult()).then(async (result) => {
-      if (!result?.ok)
-        return result;
-      const snapshot = getEntriesSnapshot();
-      const reconciliation = await reconcileOpenClocks({
-        source: "refresh",
-        entries: snapshot
-      });
-      return { ...result, reconciliation };
-    }).then(
-      (result) => {
-        if (result?.ok) {
-          actionNotice = "";
-          setRefreshState("success", REFRESH_SUCCESS_MESSAGE, { clearAfter: true });
-        } else {
-          actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-          setRefreshState("error", REFRESH_ERROR_MESSAGE);
-        }
-        return result;
+    actionNotice = "";
+    return refreshRuntime.run(
+      async () => {
+        const result = await refreshResult();
+        if (!result?.ok)
+          return result;
+        const snapshot = getEntriesSnapshot();
+        const reconciliation = await reconcileOpenClocks({
+          source: "refresh",
+          entries: snapshot
+        });
+        return { ...result, reconciliation };
       },
-      (error) => {
-        console.error("[roam-logbook] could not refresh Session surface", error);
-        actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
-        setRefreshState("error", REFRESH_ERROR_MESSAGE);
-        return {
-          ok: false,
-          uncertain: true,
-          running: getRunning(),
-          error
-        };
+      {
+        isSuccess: (result) => result?.ok,
+        onFailure: (result) => {
+          actionNotice = mutationResultNotice(result) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+        },
+        onError: (error) => {
+          console.error("[roam-logbook] could not refresh Session surface", error);
+          actionNotice = mutationResultNotice(error) || getNotice() || GRAPH_SYNC_RETRY_NOTICE;
+          return {
+            ok: false,
+            uncertain: true,
+            running: getRunning(),
+            error
+          };
+        }
       }
     );
-    refreshInFlight = request.finally(() => {
-      refreshInFlight = null;
-    });
-    actionNotice = "";
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
-    return refreshInFlight;
   };
   const requestSessionRefresh = () => pendingOpenRefresh?.promise || refreshSessions();
   const scheduleOpenRevalidation = () => {
-    if (refreshInFlight)
-      return refreshInFlight;
+    if (refreshRuntime.inFlight)
+      return refreshRuntime.inFlight;
     if (pendingOpenRefresh)
       return pendingOpenRefresh.promise;
     let resolvePending;
@@ -7687,8 +8127,11 @@ function createTopbar({
     }
     renderSurfaces();
   };
-  const surfaceOptions = () => {
+  const surfaceOptions = (model) => {
     const scope = "session-surface";
+    const discarding = model?.rows?.find(
+      (row) => confirmation?.isArmed(`discard:${row.entry.clockUid}`, scope)
+    );
     return {
       titleId: POPOVER_TITLE_ID,
       staleHours: staleHours(),
@@ -7720,18 +8163,10 @@ function createTopbar({
       onFocusRecent: (entry) => void run(() => clockIn(entry.taskUid, { source: "active-work-switch" })),
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
       onDiscard: (entry) => {
-        if (discardConfirmUid !== entry.clockUid) {
-          discardConfirmUid = entry.clockUid;
-          if (discardConfirmTimer)
-            clearTimeout(discardConfirmTimer);
-          discardConfirmTimer = setTimeout(() => {
-            resetDiscardConfirmation();
-            renderSurfaces();
-          }, 5e3);
+        if (!confirmation?.arm(`discard:${entry.clockUid}`, scope)) {
           renderSurfaces();
           return;
         }
-        resetDiscardConfirmation();
         void run(() => discardClock(entry.clockUid));
       },
       onOpenDashboard: () => {
@@ -7743,11 +8178,10 @@ function createTopbar({
           renderSurfaces();
           return;
         }
-        resetClockOutConfirmation();
         void run(() => clockOutAll());
       },
       onClose: null,
-      discardingClockUid: discardConfirmUid
+      discardingClockUid: discarding?.entry.clockUid || null
     };
   };
   function renderPopover() {
@@ -7756,50 +8190,33 @@ function createTopbar({
     ensureThemeRuntime();
     const model = sessionModel();
     const refreshStatus = getLastRefreshStatus();
-    const options = surfaceOptions();
+    const options = surfaceOptions(model);
     options.openLineWindowMinutes = model.openLineWindowMinutes;
-    options.emptyMessage = refreshState.state === "loading" ? "Refreshing Active Work state from graph\u2026" : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
+    options.emptyMessage = refreshState.state === "loading" ? TOPBAR_REFRESH_MESSAGES.loading : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
     renderSessionSurface(popover, model, options);
     themeRuntime?.apply(popover);
   }
-  const syncSurfaceAria = (expanded) => {
-    buttonNode?.setAttribute("aria-expanded", expanded ? "true" : "false");
-    buttonNode?.setAttribute("aria-controls", POPOVER_ID);
-  };
-  const togglePopover = (event) => {
-    if (event?.shiftKey) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
+  sessionPopover = createSessionPopover({
+    id: POPOVER_ID,
+    titleId: POPOVER_TITLE_ID,
+    getTrigger: () => buttonNode,
+    onBeforeOpen: () => {
+      refreshRuntime.set("loading", TOPBAR_REFRESH_MESSAGES.loading);
+    },
+    onRender: (root) => {
+      popover = root;
+      ensureThemeRuntime();
+      renderPopover();
+    },
+    onBeforeClose: () => {
+      popover = null;
+      resetPopoverState();
+    },
+    onOpened: () => {
+      void scheduleOpenRevalidation();
     }
-    if (popover) {
-      closePopover();
-      return;
-    }
-    setRefreshState("loading", REFRESH_LOADING_MESSAGE);
-    popover = el("div", "bp3-card bp3-elevation-3 rlb-popover");
-    popover.id = POPOVER_ID;
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-modal", "true");
-    popover.setAttribute("aria-labelledby", POPOVER_TITLE_ID);
-    document.body.appendChild(popover);
-    ensureThemeRuntime().apply(popover);
-    buttonNode?.setAttribute("aria-haspopup", "dialog");
-    syncSurfaceAria(POPOVER_ID);
-    renderPopover();
-    positionPopover();
-    document.addEventListener("mousedown", onDocumentMouseDown, true);
-    document.addEventListener("keydown", onPopoverKeyDown, true);
-    window.addEventListener("resize", closePopover);
-    const firstFocusable = popover.querySelector("button");
-    if (firstFocusable)
-      firstFocusable.focus();
-    else {
-      popover.tabIndex = -1;
-      popover.focus();
-    }
-    void scheduleOpenRevalidation();
-  };
+  });
+  const togglePopover = (event) => sessionPopover?.toggle(event);
   confirmation?.setOnChange(() => {
     renderSurfaces();
   });
@@ -7816,17 +8233,23 @@ function createTopbar({
       buttonNode.replaceChildren(timeNode);
     layoutMode = mode;
   };
+  const syncTopbarStatus = ({ running: running2, state, count }) => {
+    const normalizedCount = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
+    const semanticState = running2 ? state : "idle";
+    const signature = `${semanticState}:${normalizedCount}`;
+    if (!statusNode || statusSignature === signature)
+      return;
+    statusSignature = signature;
+    const countLabel = activeCount(normalizedCount);
+    const message = !running2 ? normalizedCount > 0 ? `${countLabel}. No Timing Line is active.` : "No Active Work." : semanticState === "overrun" ? `${countLabel}. Pomodoro is over its target.` : semanticState === "stale" ? `${countLabel}. A clock is likely forgotten.` : `${countLabel}. Timing is running.`;
+    statusNode.textContent = message;
+  };
   const renderButton = (entries = getRunning(), now = nowDate(), { reconcile: reconcile2 = true, activeWork: suppliedActiveWork = null } = {}) => {
     if (!buttonNode)
       return;
     const derived = suppliedActiveWork || getActiveWork(now);
     const focused = derived.focused || entries[0] || null;
     const activeWork = focused === derived.focused ? derived : focused ? { ...derived, focused, items: [focused, ...derived.items], count: derived.count + (derived.items.some((item) => item.taskUid === focused.taskUid) ? 0 : 1) } : derived;
-    const composition = activeWorkDescription(
-      focused ? 1 : 0,
-      activeWork.recent.length,
-      activeWork.windowMinutes
-    );
     const focusedEntries = focused ? [focused] : [];
     const running2 = focusedEntries.length > 0;
     if (running2 && reconcile2)
@@ -7838,7 +8261,10 @@ function createTopbar({
     const signature = activeWork.items.map((item) => `${item.activeKind || "focused"}:${item.taskUid}`).join("|");
     const activeChanged = signature !== activeSignature;
     activeSignature = signature;
-    parallelNode.className = loadTone === "neutral" ? "rlb-topbar__parallel" : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
+    const nextParallelClass = loadTone === "neutral" ? "rlb-topbar__parallel" : `rlb-topbar__parallel rlb-topbar__parallel--load-${loadTone}`;
+    if (parallelNode.className !== nextParallelClass) {
+      parallelNode.className = nextParallelClass;
+    }
     if (!running2) {
       const hasActiveWork = activeWork.count > 0;
       buttonNode.classList.toggle("rlb-topbar__button--icon-only", !hasActiveWork);
@@ -7846,47 +8272,33 @@ function createTopbar({
       buttonNode.classList.remove("rlb-topbar__button--parallel");
       iconNode.className = "bp3-icon bp3-icon-history rlb-topbar__icon";
       timeNode.textContent = "";
-      timeNode.className = "rlb-topbar__time";
+      if (timeNode.className !== "rlb-topbar__time") {
+        timeNode.className = "rlb-topbar__time";
+      }
       parallelNode.textContent = hasActiveWork ? activeCount(activeWork.count) : "";
       separatorNode.textContent = "";
       syncButtonLayout(hasActiveWork ? "active" : "idle");
-      buttonNode.title = hasActiveWork ? `${activeCount(activeWork.count)}
-${composition}
-No Timing Line is active. Click for details.` : `${activeCount(0)}
-${composition}
-No Active Work is available. Click for details.`;
-      buttonNode.setAttribute("aria-label", buttonNode.title);
+      syncTopbarStatus({ running: false, state: "idle", count: activeWork.count });
       if (activeChanged && popover)
         renderPopover();
       return;
     }
     buttonNode.classList.remove("rlb-topbar__button--icon-only");
     buttonNode.classList.remove("rlb-topbar__button--active");
-    const first = activeWork.focused || focusedEntries[0];
     const state = overrun ? "overrun" : stale ? "stale" : "neutral";
-    timeNode.className = `rlb-topbar__time rlb-topbar__time--${state}`;
+    const nextTimeClass = `rlb-topbar__time rlb-topbar__time--${state}`;
+    if (timeNode.className !== nextTimeClass)
+      timeNode.className = nextTimeClass;
     timeNode.textContent = formatElapsed(cycleElapsed);
     buttonNode.classList.add("rlb-topbar__button--parallel");
     parallelNode.textContent = activeCount(activeWork.count);
     separatorNode.textContent = "";
     syncButtonLayout("parallel");
-    if (activeWork.count > 1) {
-      const threshold = cycleThresholdMinutes();
-      buttonNode.title = `${activeCount(activeWork.count)}
-${composition}
-Primary timer: ${first.title}
-Shared cycle ${formatElapsed(cycleElapsed)}` + (threshold ? `
-Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (overrun ? "\nA Pomodoro is over its target." : "") + (!overrun && stale ? "\nA clock is likely forgotten." : "") + "\nClick for all clock details.";
-    } else {
-      const totalMinutes2 = (activeWork.focused?.priorMinutes || 0) + Math.floor((now - first.start.getTime()) / 6e4);
-      const threshold = cycleThresholdMinutes();
-      buttonNode.title = `${activeCount(activeWork.count)}
-${composition}
-Clocked in: ${first.title}
-Shared cycle ${formatElapsed(cycleElapsed)} \xB7 ${formatMinutesHuman(totalMinutes2)} on this task in total` + (threshold ? `
-Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${formatElapsed(cycleOverrunMs(now))}` : `${formatElapsed(threshold * 6e4 - cycleElapsed)} left`}` : "") + (!overrun && stale ? "\nThis clock is likely forgotten." : "");
-    }
-    buttonNode.setAttribute("aria-label", buttonNode.title);
+    syncTopbarStatus({
+      running: true,
+      state: state === "neutral" ? "running" : state,
+      count: activeWork.count
+    });
     if (activeChanged && popover)
       renderPopover();
   };
@@ -7914,53 +8326,6 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
       return;
     ticker = setIntervalFn(tick, 1e3);
   };
-  const clearRecoveryShutdown = () => {
-    if (recoveryShutdownTimer)
-      clearTimeout(recoveryShutdownTimer);
-    recoveryShutdownTimer = null;
-  };
-  const disableRecovery = () => {
-    if (recoveryDisabled)
-      return;
-    recoveryDisabled = true;
-    clearRecoveryShutdown();
-    recoveryObserver?.disconnect();
-    recoveryObserver = null;
-    outerRecoveryObserver?.disconnect();
-    outerRecoveryObserver = null;
-    observer = null;
-    recoveryTarget = null;
-    outerRecoveryTarget = null;
-    console.warn("[roam-logbook] Roam topbar host not found; widget disabled");
-  };
-  const armRecoveryShutdown = () => {
-    if (recoveryDisabled || recoveryShutdownTimer)
-      return;
-    recoveryShutdownTimer = setTimeout(() => {
-      recoveryShutdownTimer = null;
-      if (!destroyed && !document.querySelector(TOPBAR_SELECTOR2))
-        disableRecovery();
-    }, RECOVERY_TIMEOUT_MS);
-  };
-  const noteRecoveryMiss = () => {
-    recoveryFlushes += 1;
-    if (recoveryFlushes >= RECOVERY_FLUSH_LIMIT)
-      disableRecovery();
-  };
-  const stopAttachmentObservers = () => {
-    clearRecoveryShutdown();
-    observer?.disconnect();
-    observer = null;
-    hostObserver?.disconnect();
-    hostObserver = null;
-    recoveryObserver?.disconnect();
-    recoveryObserver = null;
-    outerRecoveryObserver?.disconnect();
-    outerRecoveryObserver = null;
-    recoveryTarget = null;
-    outerRecoveryTarget = null;
-    observedTopbar = null;
-  };
   const build = () => {
     container = el("div", "rlb-topbar");
     container.id = WIDGET_ID;
@@ -7973,231 +8338,58 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
     buttonNode.setAttribute("aria-haspopup", "dialog");
     buttonNode.setAttribute("aria-controls", POPOVER_ID);
     buttonNode.setAttribute("aria-expanded", "false");
+    buttonNode.setAttribute("aria-label", TOPBAR_LABEL);
+    buttonNode.setAttribute("aria-describedby", TOPBAR_STATUS_ID);
+    buttonNode.title = TOPBAR_TITLE;
+    statusNode = el("span", "rlb-visually-hidden");
+    statusNode.id = TOPBAR_STATUS_ID;
+    statusNode.setAttribute("role", "status");
+    statusNode.setAttribute("aria-live", "polite");
+    statusNode.setAttribute("aria-atomic", "true");
     buttonNode.appendChild(iconNode);
-    container.appendChild(buttonNode);
+    container.append(buttonNode, statusNode);
     renderButton();
   };
-  const attach2 = () => {
+  const attach2 = (topbar) => {
     if (destroyed)
       return;
-    attachCount += 1;
-    const topbar = document.querySelector(TOPBAR_SELECTOR2);
-    observeRecoveryTarget(topbar);
-    if (!topbar) {
-      stopTicker();
-      noteRecoveryMiss();
-      return;
-    }
-    clearRecoveryShutdown();
-    recoveryFlushes = 0;
-    recoveryDisabled = false;
     themeRuntime?.refresh();
     startTicker();
-    if (topbar !== observedTopbar)
-      observeTopbar(topbar);
     if (!container)
       build();
-    const placement = afterNavigation(topbar);
-    syncTopbarLayout(placement);
+    const placement = afterNavigation(topbar, { container });
+    syncTopbarLayout(placement, {
+      container,
+      layoutHosts,
+      searchHosts,
+      layoutHostDisplay,
+      documentRef: document
+    });
     if (container.parentNode !== placement.parent || container.nextSibling !== placement.before) {
       placement.parent.insertBefore(container, placement.before);
     }
   };
-  const isPluginNode2 = (node) => Boolean(
-    node && (node === container || node === popover || container?.contains(node) || popover?.contains(node))
-  );
-  const hasNonPluginMutation = (record) => {
-    if (isPluginNode2(record.target))
-      return false;
-    const nodes = [...record.addedNodes, ...record.removedNodes];
-    return nodes.length === 0 || nodes.some((node) => !isPluginNode2(node));
-  };
-  const touchesTopbar = (record) => {
-    if (isPluginNode2(record.target))
-      return false;
-    const nodes = [...record.addedNodes, ...record.removedNodes];
-    if (nodes.length > 0 && nodes.every(isPluginNode2))
-      return false;
-    const target = record.target;
-    if (target?.matches?.(TOPBAR_SELECTOR2) || target?.closest?.(TOPBAR_SELECTOR2))
-      return true;
-    if (recoveryTarget === document.body && target !== recoveryTarget) {
-      return nodes.some((node) => node?.matches?.(TOPBAR_SELECTOR2));
-    }
-    return nodes.some(
-      (node) => node?.matches?.(TOPBAR_SELECTOR2) || node?.querySelector?.(TOPBAR_SELECTOR2)
-    );
-  };
-  const scheduleAttach = () => {
-    if (destroyed || attachQueued)
-      return;
-    attachQueued = true;
-    const flush = () => {
-      attachQueued = false;
-      attachTimer = null;
-      attach2();
-    };
-    if (typeof queueMicrotask === "function")
-      queueMicrotask(flush);
-    else
-      attachTimer = setTimeout(flush, 0);
-  };
-  const observeTopbar = (topbar) => {
-    hostObserver?.disconnect();
-    observedTopbar = topbar;
-    hostObserver = new MutationObserver((records) => {
-      if (records.some(hasNonPluginMutation))
-        scheduleAttach();
-    });
-    hostObserver.observe(topbar, { childList: true, subtree: true });
-  };
-  const observeRecoveryTarget = (topbar) => {
-    if (!topbar && recoveryDisabled)
-      return;
-    if (topbar) {
-      clearRecoveryShutdown();
-      recoveryFlushes = 0;
-      recoveryDisabled = false;
-    } else {
-      armRecoveryShutdown();
-    }
-    const target = topbar?.parentElement || document.body;
-    const subtree = !topbar;
-    const outerTarget = topbar?.parentElement?.parentElement || null;
-    if (recoveryObserver && recoveryTarget === target && outerRecoveryTarget === outerTarget)
-      return;
-    recoveryObserver?.disconnect();
-    outerRecoveryObserver?.disconnect();
-    recoveryObserver = new MutationObserver((records) => {
-      if (records.some(touchesTopbar))
-        scheduleAttach();
-    });
-    recoveryTarget = target;
-    recoveryObserver.observe(target, { childList: true, ...subtree ? { subtree: true } : {} });
-    outerRecoveryTarget = outerTarget;
-    if (outerTarget && outerTarget !== target) {
-      outerRecoveryObserver = new MutationObserver((records) => {
-        if (records.some(touchesTopbar))
-          scheduleAttach();
-      });
-      outerRecoveryObserver.observe(outerTarget, { childList: true });
-    } else {
-      outerRecoveryObserver = null;
-    }
-    observer = recoveryObserver;
-  };
-  const afterNavigation = (topbar) => {
-    const descendants = [...topbar.querySelectorAll("*")].filter(
-      (node) => node !== container && !container?.contains(node)
-    );
-    const mainIndex = descendants.findIndex(isMainControl);
-    const leading = mainIndex >= 0 ? descendants.slice(0, mainIndex) : descendants;
-    const signal = leading.find((node) => FORWARD_PATTERN.test(controlSignals(node))) || leading.find((node) => BACK_PATTERN.test(controlSignals(node))) || leading.find((node) => MENU_PATTERN.test(controlSignals(node)));
-    if (signal) {
-      const anchor = navigationCluster(signal, topbar);
-      const next = anchor.nextSibling;
-      return {
-        parent: anchor.parentNode,
-        before: next === container ? container.nextSibling : next
-      };
-    }
-    const main = descendants.find(isMainControl);
-    if (main) {
-      const boundary = surfaceChild(main, topbar);
-      return { parent: boundary.parentNode, before: boundary };
-    }
-    let surface = topbar;
-    while (surface.children.length === 1 && surface.firstElementChild !== container && surface.firstElementChild.children.length > 0) {
-      surface = surface.firstElementChild;
-    }
-    return { parent: surface, before: surface.firstElementChild?.nextSibling ?? null };
-  };
-  const controlSignals = (element) => [
-    element.className,
-    element.getAttribute?.("data-icon"),
-    element.getAttribute?.("aria-label"),
-    element.getAttribute?.("title"),
-    element.getAttribute?.("data-name")
-  ].filter((value) => typeof value === "string").join(" ").replaceAll("_", "-").toLowerCase();
-  const isMainControl = (element) => element.matches?.('input, textarea, select, [contenteditable="true"]') || MAIN_CONTROL_PATTERN.test(controlSignals(element));
-  const containsMainControl = (element) => isMainControl(element) || Boolean(
-    element.querySelector?.('input, textarea, select, [contenteditable="true"]') || [...element.querySelectorAll?.("*") || []].some(isMainControl)
-  );
-  const restoreLayoutHostDisplay = (host) => {
-    const previous = layoutHostDisplay.get(host);
-    if (!previous || !host?.style)
-      return;
-    if (previous.value)
-      host.style.setProperty("display", previous.value, previous.priority);
-    else
-      host.style.removeProperty("display");
-    layoutHostDisplay.delete(host);
-  };
-  const clearLayoutHost = (host) => {
-    host.classList.remove("rlb-topbar__layout");
-    restoreLayoutHostDisplay(host);
-  };
-  const ensureLayoutHostDisplay = (host) => {
-    if (!host?.style)
-      return;
-    let display = "";
-    try {
-      display = document.defaultView?.getComputedStyle?.(host)?.display || "";
-    } catch {
-    }
-    if (display === "flex")
-      return;
-    if (!layoutHostDisplay.has(host)) {
-      layoutHostDisplay.set(host, {
-        value: host.style.getPropertyValue("display"),
-        priority: host.style.getPropertyPriority("display")
-      });
-    }
-    host.style.setProperty("display", "flex");
-  };
-  const syncTopbarLayout = (placement) => {
-    for (const host2 of layoutHosts)
-      clearLayoutHost(host2);
-    for (const host2 of searchHosts)
-      host2.classList.remove("rlb-topbar__search");
-    layoutHosts.clear();
-    searchHosts.clear();
-    const host = placement.parent;
-    if (!host?.classList)
-      return;
-    host.classList.add("rlb-topbar__layout");
-    ensureLayoutHostDisplay(host);
-    layoutHosts.add(host);
-    for (const child of host.children) {
-      if (child === container || !containsMainControl(child))
-        continue;
-      child.classList.add("rlb-topbar__search");
-      searchHosts.add(child);
-      break;
-    }
-  };
-  const navigationCluster = (signal, topbar) => {
-    let anchor = signal.closest?.('button, a, [role="button"]') || signal;
-    while (anchor.parentElement && anchor.parentElement !== topbar && ![...anchor.parentElement.querySelectorAll("*")].some(isMainControl)) {
-      anchor = anchor.parentElement;
-    }
-    return anchor;
-  };
-  const surfaceChild = (signal, topbar) => {
-    let boundary = signal;
-    while (boundary.parentElement && boundary.parentElement !== topbar && !boundary.previousElementSibling) {
-      boundary = boundary.parentElement;
-    }
-    return boundary;
-  };
+  topbarHost = createTopbarHost({
+    selector: TOPBAR_SELECTOR2,
+    getContainer: () => container,
+    getPopover: () => popover,
+    isDestroyed: () => destroyed,
+    onAttach: attach2,
+    onMissing: stopTicker,
+    onDisabled: () => console.warn("[roam-logbook] Roam topbar host not found; widget disabled"),
+    documentRef: document,
+    mutationObserver: MutationObserver,
+    clearTimeoutFn: clearTimeout
+  });
   const remove = () => {
     closePopover({ restoreFocus: false });
-    for (const host of layoutHosts)
-      clearLayoutHost(host);
-    for (const host of searchHosts)
-      host.classList.remove("rlb-topbar__search");
-    layoutHosts.clear();
-    searchHosts.clear();
+    syncTopbarLayout(null, {
+      container,
+      layoutHosts,
+      searchHosts,
+      layoutHostDisplay,
+      documentRef: document
+    });
     container?.remove();
   };
   return {
@@ -8206,31 +8398,26 @@ Pomodoro cycle ${formatElapsed(threshold * 6e4)} \u2014 ${overrun ? `over by ${f
         renderButton();
         renderSurfaces();
       });
-      attach2();
+      topbarHost.attach();
       ensureThemeRuntime();
     },
-    refresh: attach2,
+    refresh: () => topbarHost.refresh(),
     getPerformanceSnapshot() {
-      return { attachCount, tickCount };
+      return { ...topbarHost.getPerformanceSnapshot(), tickCount };
     },
     unmount() {
       destroyed = true;
       confirmation?.setOnChange(null);
       cancelPendingOpenRefresh();
-      if (refreshClearTimer)
-        clearTimeout(refreshClearTimer);
-      refreshClearTimer = null;
-      refreshInFlight = null;
+      refreshRuntime.dispose();
       unsubscribe?.();
       unsubscribe = null;
       stopTicker();
-      stopAttachmentObservers();
-      attachQueued = false;
-      if (attachTimer)
-        clearTimeout(attachTimer);
-      attachTimer = null;
+      topbarHost.stop();
       remove();
       container = null;
+      popover = null;
+      statusNode = null;
       themeRuntime?.release();
       themeRuntime = null;
     }
