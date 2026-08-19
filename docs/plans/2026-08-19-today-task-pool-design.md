@@ -1,5 +1,23 @@
 # Today Task Pool — beta.45 design
 
+## Follow-up — beta.48 immediate Timing Line navigation
+
+The previous beta.47 sidebar cache improved repeated switches only after a
+native block window had already been confirmed. First-time Today tasks still
+waited for two serial chains: drawer/CLOCK/post-write graph confirmation, then
+`rightSidebar.open()` before `getWindows()` and `addWindow()`.
+
+Beta.48 separates the reversible navigation intent from the authoritative graph
+mutation. A user or Active Work Clock In publishes the target block immediately;
+the sidebar adapter begins rendering it while the mutation queue continues its
+normal validation, writes, and post-write confirmation. Confirmed CLOCK actions
+remain facts but no longer start a duplicate sidebar request.
+
+The native adapter also treats `rightSidebar.open()` as a non-blocking warm-up.
+`getWindows()` and `addWindow()` are no longer gated by the host animation
+promise. Warm-up failure is diagnostic only; dedupe, stale-cache fallback,
+serialized native writes, and latest-intent cancellation remain mandatory.
+
 ## Follow-up — beta.47 responsive interactions
 
 Today exposes icon-only Expand all and Collapse all controls in the existing

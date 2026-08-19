@@ -943,6 +943,17 @@ var sidebarFailure = (reason, message, error) => ({
   message,
   ...error ? { error } : {}
 });
+var warmOpenSidebar = (sidebar) => {
+  if (typeof sidebar?.open !== "function")
+    return;
+  try {
+    Promise.resolve(sidebar.open()).catch((error) => {
+      console.debug("[roam-logbook] sidebar warm-open failed", error);
+    });
+  } catch (error) {
+    console.debug("[roam-logbook] sidebar warm-open failed", error);
+  }
+};
 var runSidebarOperation = (sidebar, operation) => {
   const previous = sidebarOperationQueues.get(sidebar) || Promise.resolve();
   const current = previous.catch(() => void 0).then(operation);
@@ -1004,9 +1015,9 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
         }
         forgetSidebarWindow(sidebar, uid);
       }
-      await sidebar.open?.();
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
+      warmOpenSidebar(sidebar);
       if (typeof sidebar.getWindows === "function") {
         const windows = await sidebar.getWindows();
         if (!isCurrent())
@@ -1537,6 +1548,7 @@ var lastRefreshStatus = { ok: true, error: null };
 var notice = "";
 var listeners = /* @__PURE__ */ new Set();
 var actionListeners = /* @__PURE__ */ new Set();
+var clockInIntentListeners = /* @__PURE__ */ new Set();
 var GRAPH_UNCERTAIN = "Graph state could not be confirmed; no further changes were made.";
 async function withGraphGuard(action) {
   try {
@@ -1557,6 +1569,19 @@ function subscribe(listener) {
 function subscribeActions(listener) {
   actionListeners.add(listener);
   return () => actionListeners.delete(listener);
+}
+function subscribeClockInIntents(listener) {
+  clockInIntentListeners.add(listener);
+  return () => clockInIntentListeners.delete(listener);
+}
+function publishClockInIntent(intent) {
+  for (const listener of clockInIntentListeners) {
+    try {
+      listener(intent);
+    } catch (error) {
+      console.error("[roam-logbook] Clock In intent listener failed", error);
+    }
+  }
 }
 function publishAction(action) {
   for (const listener of actionListeners) {
@@ -1656,6 +1681,7 @@ function reset() {
   notice = "";
   listeners.clear();
   actionListeners.clear();
+  clockInIntentListeners.clear();
   resetMutationQueue();
 }
 function resolveTaskUid(uid) {
@@ -1800,6 +1826,14 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
   };
 }
 async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
+  let intentTaskUid = null;
+  try {
+    intentTaskUid = resolveTaskUid(blockUid);
+  } catch {
+  }
+  if (intentTaskUid) {
+    publishClockInIntent({ type: "clock-in-intent", source, taskUid: intentTaskUid });
+  }
   return enqueueMutation(
     () => withGraphGuard(async () => {
       const taskUid = resolveTaskUid(blockUid);
@@ -3448,7 +3482,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.47";
+var PLUGIN_VERSION = "0.9.0-beta.48";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -9479,7 +9513,7 @@ function attachCompletionHandling({ onResult = null, onWatchIssue = null } = {})
 var USER_CLOCK_IN_SOURCES = /* @__PURE__ */ new Set(["user", "active-work-switch"]);
 var DEFAULT_FAILURE_NOTICE = "Timing Line started, but Roam could not move it to the top of the right sidebar.";
 function isTimingLineFrontIntent(action) {
-  return action?.type === "clock-in" && USER_CLOCK_IN_SOURCES.has(action.source) && typeof action.taskUid === "string" && action.taskUid.length > 0;
+  return action?.type === "clock-in-intent" && USER_CLOCK_IN_SOURCES.has(action.source) && typeof action.taskUid === "string" && action.taskUid.length > 0;
 }
 function createTimingLineSidebarFronting({
   frontBlock = frontBlockInRightSidebar,
@@ -9684,7 +9718,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
       setExtensionAPI(extensionAPI2);
       initializeDefaultOnSwitches();
       timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
-      detachTimingLineSidebar = subscribeActions(
+      detachTimingLineSidebar = subscribeClockInIntents(
         timingLineSidebar.handleAction
       );
       injectStyles(STYLE_ID, STYLES);

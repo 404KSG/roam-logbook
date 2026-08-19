@@ -1,6 +1,6 @@
 # Roam Logbook – 404KSG
 
-Current package version: **0.9.0-beta.47**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.48**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.47 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.48 keeps the single-page Activity panel and cached Today task-pool view while reducing Settings and Hotkeys to the controls that still change the current single-focus workflow; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -41,8 +41,11 @@ is reported as uncertain.
 
 The Command Palette exposes only three shortcut-ready actions: **Logbook: Focus current block**, **Logbook: Clock out Timing Line**, and **Logbook: Open dashboard**. Focus starts or switches to the unfinished TODO being edited. Clock out Timing Line ends the actual global Timing Line on its first invocation, independent of editor focus.
 
-By default, a successful user Clock In also opens that Timing Line in Roam's
-native right sidebar at order 0. Switching work moves an existing block window
+By default, a user Clock In immediately starts opening that Task in Roam's
+native right sidebar at order 0, while the serialized CLOCK mutation continues
+to perform its graph writes and post-write confirmation independently. A slow
+native sidebar-open animation no longer blocks the window read/add path.
+Switching work moves an existing block window
 back to the top instead of duplicating it, while preserving every other sidebar
 window. A recently confirmed window takes a bounded fast path on later switches;
 if the user closed it, the plugin falls back to Roam's authoritative window list
@@ -50,7 +53,9 @@ and recreates it once. Task-title Shift+Click applies native re-fronting and exp
 an existing block window when Roam exposes those APIs, so a task remains visible
 after switching away and back. Reload, Refresh, and graph reconciliation never
 move the sidebar. This behavior can be disabled in Settings without changing
-any Clock data.
+any Clock data. Sidebar navigation is reversible UI feedback: a later graph
+failure can leave the requested Task visible, but it never claims that timing
+started and never weakens the existing uncertainty notice or write boundary.
 
 **Topbar** — lives in Roam's left navigation cluster, immediately after Back/Forward and before the main/right controls, so it cannot compress the action row. Idle it is a single neutral-gray history icon. While work is focused, it shows the shared continuous work-cycle time and the number of Threads in the Active Work working set:
 

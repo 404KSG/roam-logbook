@@ -272,7 +272,7 @@ test('context menu target text falls back to the host context after a graph read
     }
 });
 
-test('command-palette Focus fronts the confirmed Timing Line at order 0', async () => {
+test('command-palette Focus starts native sidebar rendering at order 0', async () => {
     const calls = [];
     const previousSidebar = window.roamAlphaAPI.ui.rightSidebar;
     const previousFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;

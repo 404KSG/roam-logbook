@@ -313,7 +313,7 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         isEnabled: () => true,
     });
     const unsubscribe = clock.subscribeActions(action => actions.push(action));
-    const unsubscribeFronting = clock.subscribeActions(fronting.handleAction);
+    const unsubscribeFronting = clock.subscribeClockInIntents(fronting.handleAction);
 
     const rowFor = title =>
         [...document.querySelectorAll('.rlb-task-table tbody tr')].find(

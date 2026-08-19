@@ -81,6 +81,33 @@ test('repeating Clock In on the confirmed Timing Line publishes a user action', 
     }
 });
 
+test('Clock In publishes sidebar navigation intent before graph confirmation settles', async () => {
+    seed([TASK]);
+    const intents = [];
+    const unsubscribe = clock.subscribeClockInIntents(intent => intents.push(intent));
+    let settled = false;
+    try {
+        const pending = clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            source: 'active-work-switch',
+        }).finally(() => {
+            settled = true;
+        });
+
+        assert.equal(settled, false);
+        assert.deepEqual(intents, [
+            {
+                type: 'clock-in-intent',
+                source: 'active-work-switch',
+                taskUid: TASK.uid,
+            },
+        ]);
+        await pending;
+    } finally {
+        unsubscribe();
+    }
+});
+
 test('the drawer sits directly under the task, as in org', async () => {
     const graph = seed([TASK]);
     await clock.clockIn('taskone01', { now: AT_1558 });

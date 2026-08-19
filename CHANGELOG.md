@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.48 — 2026-08-19
+
+- Started native right-sidebar navigation from the immediate user Clock In
+  intent instead of waiting for drawer creation, CLOCK writes, and post-write
+  graph confirmation. Timing remains authoritative and serialized; navigation
+  is a reversible UI effect that can render alongside the graph mutation.
+- Removed the redundant `await rightSidebar.open()` gate from first-time task
+  display. The sidebar now warm-opens without blocking the authoritative
+  `getWindows` and `addWindow` path, while synchronous throws and rejected
+  warm-ups remain isolated from a successful block reveal.
+- Preserved latest-intent wins, native-window deduplication, stale-cache
+  recovery, unrelated sidebar windows, and the existing graph uncertainty
+  boundary. Added deterministic regressions for pre-confirmation intent and a
+  slow or rejected native `open()` call.
+
 ## 0.9.0-beta.47 — 2026-08-19
 
 - Added a bounded fast path for recently confirmed Timing Line sidebar windows,

@@ -1,9 +1,10 @@
 /**
- * UI orchestration for confirmed, user-initiated Timing Line changes.
+ * UI orchestration for immediate, user-initiated Timing Line navigation.
  *
- * Clock mutations publish facts; this seam decides whether those facts should
- * cause a native right-sidebar effect. Requests are serialized so a slow older
- * intent cannot finish after and displace the newest Timing Line.
+ * The graph mutation remains authoritative for timing. This seam responds to
+ * the reversible navigation intent early, so native sidebar rendering can run
+ * alongside graph confirmation. Requests are serialized so a slow older intent
+ * cannot finish after and displace the newest requested Timing Line.
  */
 
 import { frontBlockInRightSidebar } from './roam.js';
@@ -15,7 +16,7 @@ const DEFAULT_FAILURE_NOTICE =
 
 export function isTimingLineFrontIntent(action) {
     return (
-        action?.type === 'clock-in' &&
+        action?.type === 'clock-in-intent' &&
         USER_CLOCK_IN_SOURCES.has(action.source) &&
         typeof action.taskUid === 'string' &&
         action.taskUid.length > 0

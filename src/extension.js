@@ -207,7 +207,7 @@ function createController({ extensionAPI }) {
             setExtensionAPI(extensionAPI);
             initializeDefaultOnSwitches();
             timingLineSidebar = createTimingLineSidebarFronting({ onNotice: notifyUser });
-            detachTimingLineSidebar = clock.subscribeActions(
+            detachTimingLineSidebar = clock.subscribeClockInIntents(
                 timingLineSidebar.handleAction
             );
             injectStyles(STYLE_ID, STYLES);

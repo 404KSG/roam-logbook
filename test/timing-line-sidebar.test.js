@@ -58,6 +58,53 @@ test('a new Timing Line opens at native sidebar order 0 without unrelated UI ope
     assert.deepEqual(forbidden, []);
 });
 
+test('the first Timing Line add does not wait for a redundant sidebar open', async () => {
+    const calls = [];
+    let releaseOpen;
+    const openSettled = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    let addStarted = false;
+
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openSettled;
+        },
+        getWindows: () => {
+            calls.push('getWindows');
+            return [];
+        },
+        addWindow: async spec => {
+            addStarted = true;
+            calls.push({ action: 'addWindow', spec });
+        },
+    });
+
+    const resultPromise = frontBlockInRightSidebar('timing-task');
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.equal(addStarted, true);
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+});
+
 test('an existing Timing Line is reordered and expanded without duplication', async () => {
     const calls = [];
     const forbidden = installSidebar({
@@ -172,6 +219,55 @@ test('a closed cached Timing Line invalidates the fast path and recovers without
     assert.equal(present, true);
 });
 
+test('a rejected warm-open does not block the first Timing Line add', async () => {
+    const calls = [];
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            throw new Error('native sidebar open rejected');
+        },
+        getWindows: () => {
+            calls.push('getWindows');
+            return [];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        added: true,
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+});
+
+test('a superseded first Timing Line add does not warm-open or inspect the sidebar', async () => {
+    const calls = [];
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return [];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    assert.deepEqual(
+        await frontBlockInRightSidebar('timing-task', { isCurrent: () => false }),
+        { ok: false, skipped: true, reason: 'superseded' }
+    );
+    assert.deepEqual(calls, []);
+});
+
 test('a superseded cached Timing Line stops before fallback sidebar work', async () => {
     const calls = [];
     let supersedeDuringReveal = false;
@@ -229,7 +325,7 @@ test('legacy sidebar fallback includes order 0 and preserves dedupe', async () =
     ]);
 });
 
-test('fronting accepts only confirmed user and Active Work Clock In sources', async () => {
+test('fronting accepts only immediate user and Active Work Clock In intents', async () => {
     const calls = [];
     const fronting = createTimingLineSidebarFronting({
         frontBlock: async uid => {
@@ -240,6 +336,7 @@ test('fronting accepts only confirmed user and Active Work Clock In sources', as
     });
 
     for (const action of [
+        { type: 'clock-in', source: 'user', taskUid: 'confirmed-task' },
         { type: 'clock-in', source: 'refresh', taskUid: 'refresh-task' },
         { type: 'clock-in', source: 'legacy-reconcile', taskUid: 'legacy-task' },
         { type: 'clock-out', source: 'user', taskUid: 'closed-task' },
@@ -249,13 +346,13 @@ test('fronting accepts only confirmed user and Active Work Clock In sources', as
     }
 
     assert.equal(
-        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'palette-task' }),
+        fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'palette-task' }),
         true
     );
     await fronting.whenIdle();
     assert.equal(
         fronting.handleAction({
-            type: 'clock-in',
+            type: 'clock-in-intent',
             source: 'active-work-switch',
             taskUid: 'open-line-task',
         }),
@@ -276,7 +373,7 @@ test('disabled fronting performs no sidebar work', async () => {
     });
 
     assert.equal(
-        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'timing-task' }),
+        fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'timing-task' }),
         false
     );
     await fronting.whenIdle();
@@ -296,7 +393,7 @@ test('sidebar failures stay isolated and emit one concise non-blocking notice', 
     });
 
     assert.equal(
-        fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'timing-task' }),
+        fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'timing-task' }),
         true
     );
     await assert.doesNotReject(fronting.whenIdle());
@@ -329,9 +426,9 @@ test('rapid switches serialize side effects so the newest intent finishes last',
         isEnabled: () => true,
     });
 
-    fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'task-a' });
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-a' });
     await firstStarted;
-    fronting.handleAction({ type: 'clock-in', source: 'user', taskUid: 'task-b' });
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-b' });
     releaseFirst();
     await fronting.whenIdle();
 
@@ -340,7 +437,7 @@ test('rapid switches serialize side effects so the newest intent finishes last',
     assert.equal(applied.at(-1), 'task-b');
 });
 
-test('repeating a confirmed Clock In can front the same block again', async () => {
+test('repeating a Clock In intent can front the same block again', async () => {
     const calls = [];
     const fronting = createTimingLineSidebarFronting({
         frontBlock: async uid => {
@@ -350,7 +447,7 @@ test('repeating a confirmed Clock In can front the same block again', async () =
         isEnabled: () => true,
     });
     const action = {
-        type: 'clock-in',
+        type: 'clock-in-intent',
         source: 'user',
         taskUid: 'timing-task',
         alreadyFocused: true,

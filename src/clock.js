@@ -18,6 +18,7 @@ let lastRefreshStatus = { ok: true, error: null };
 let notice = '';
 const listeners = new Set();
 const actionListeners = new Set();
+const clockInIntentListeners = new Set();
 
 export const GRAPH_UNCERTAIN = 'Graph state could not be confirmed; no further changes were made.';
 
@@ -44,6 +45,22 @@ export function subscribe(listener) {
 export function subscribeActions(listener) {
     actionListeners.add(listener);
     return () => actionListeners.delete(listener);
+}
+
+/** Observe immediate user Clock In intent before graph confirmation begins. */
+export function subscribeClockInIntents(listener) {
+    clockInIntentListeners.add(listener);
+    return () => clockInIntentListeners.delete(listener);
+}
+
+function publishClockInIntent(intent) {
+    for (const listener of clockInIntentListeners) {
+        try {
+            listener(intent);
+        } catch (error) {
+            console.error('[roam-logbook] Clock In intent listener failed', error);
+        }
+    }
 }
 
 function publishAction(action) {
@@ -179,6 +196,7 @@ export function reset() {
     notice = '';
     listeners.clear();
     actionListeners.clear();
+    clockInIntentListeners.clear();
     resetMutationQueue();
 }
 
@@ -356,6 +374,23 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
  * @returns {Promise<{clockUid: string, taskUid: string}>}
  */
 export async function clockIn(blockUid, { now = new Date(), source = 'user' } = {}) {
+    // Sidebar navigation is a reversible response to the user's click, not a
+    // graph mutation. Publish it before the mutation queue performs drawer,
+    // CLOCK, and post-write confirmation work so the native block can begin
+    // rendering immediately. The queued action resolves the target again and
+    // remains the sole authority for whether timing actually starts.
+    let intentTaskUid = null;
+    try {
+        intentTaskUid = resolveTaskUid(blockUid);
+    } catch {
+        // The queued, graph-guarded resolution below remains authoritative and
+        // will preserve the existing uncertainty result. A failed speculative
+        // lookup must not change Clock In error semantics.
+    }
+    if (intentTaskUid) {
+        publishClockInIntent({ type: 'clock-in-intent', source, taskUid: intentTaskUid });
+    }
+
     return enqueueMutation(() =>
         withGraphGuard(async () => {
             const taskUid = resolveTaskUid(blockUid);

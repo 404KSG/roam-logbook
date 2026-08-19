@@ -734,6 +734,21 @@ const sidebarFailure = (reason, message, error) => ({
     ...(error ? { error } : {}),
 });
 
+/** Warm the native sidebar without putting its animation on the reveal path. */
+const warmOpenSidebar = sidebar => {
+    if (typeof sidebar?.open !== 'function') return;
+    try {
+        Promise.resolve(sidebar.open()).catch(error => {
+            // `addWindow` remains the authoritative open operation. A rejected
+            // warm-up must not turn a successful block reveal into a failure,
+            // but it is useful when diagnosing a host-specific API regression.
+            console.debug('[roam-logbook] sidebar warm-open failed', error);
+        });
+    } catch (error) {
+        console.debug('[roam-logbook] sidebar warm-open failed', error);
+    }
+};
+
 /** Serialize native sidebar reads/writes shared by Timing Line fronting and
  * direct task navigation, so a switch cannot race a Shift+Click into a pair
  * of duplicate addWindow calls. */
@@ -826,9 +841,12 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                 forgetSidebarWindow(sidebar, uid);
             }
 
-            await sidebar.open?.();
+            // `addWindow` opens a closed native sidebar itself. Start a
+            // best-effort warm-open for hosts that need the visibility hint,
+            // but never wait for its animation or rejection before the
+            // authoritative window read and add operation.
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-
+            warmOpenSidebar(sidebar);
             if (typeof sidebar.getWindows === 'function') {
                 const windows = await sidebar.getWindows();
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
