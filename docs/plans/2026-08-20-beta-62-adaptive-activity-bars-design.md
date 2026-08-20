@@ -17,7 +17,9 @@ The model will expose these values through the existing Activity density object.
 
 Recommended density behavior:
 
-- one to three buckets: broad bars that occupy most of each slot;
+- one bucket: a broad summary bar occupying roughly 72% of its plot, with only
+  an ultra-wide-screen safety cap;
+- two to three buckets: broad but more restrained bars within each slot;
 - seven days: bars occupy roughly half of each date slot, visibly wider than the current 42px cap;
 - 24 hours: compact bars that still fit narrow dialogs;
 - 30 days: narrow bars with the existing readability and overflow guarantees;

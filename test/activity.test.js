@@ -187,17 +187,50 @@ test('Activity All time keeps exactly 24 months monthly and switches at month 25
     assert.deepEqual(twentyFive.buckets.map(bucket => bucket.dateLabel), ['2024', '2025', '2026']);
 });
 
-test('Activity density is explicit and prioritises short-range readability', () => {
-    assert.equal(getActivityDensity('week', 'day', 7).barWidthPx, 42);
-    assert.ok(getActivityDensity('week', 'day', 7).barWidthPx > 18);
-    assert.equal(getActivityDensity('month', 'day', 30).barWidthPx, 10);
+test('Activity density exposes slot ratios and caps for sparse and dense ranges', () => {
+    assert.deepEqual(getActivityDensity('week', 'day', 7), {
+        id: 'week-42',
+        barWidthPercent: 58,
+        barMinWidthPx: 42,
+        barMaxWidthPx: 144,
+        bucketCount: 7,
+    });
+    assert.deepEqual(getActivityDensity('all', 'month', 1), {
+        id: 'all-month-30',
+        barWidthPercent: 72,
+        barMinWidthPx: 64,
+        barMaxWidthPx: 960,
+        bucketCount: 1,
+    });
+    assert.deepEqual(getActivityDensity('all', 'year', 3), {
+        id: 'all-month-30',
+        barWidthPercent: 64,
+        barMinWidthPx: 32,
+        barMaxWidthPx: 320,
+        bucketCount: 3,
+    });
     assert.deepEqual(getActivityDensity('today', 'hour', 24), {
         id: 'today-18',
-        barWidthPx: 18,
+        barWidthPercent: 52,
+        barMinWidthPx: 2,
+        barMaxWidthPx: 18,
         bucketCount: 24,
     });
-    assert.ok(getActivityDensity('all', 'month', 8).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
-    assert.ok(getActivityDensity('all', 'year', 3).barWidthPx > getActivityDensity('all', 'month', 20).barWidthPx);
+    assert.deepEqual(getActivityDensity('month', 'day', 30), {
+        id: 'month-10',
+        barWidthPercent: 68,
+        barMinWidthPx: 2,
+        barMaxWidthPx: 10,
+        bucketCount: 30,
+    });
+    assert.ok(
+        getActivityDensity('all', 'month', 8).barMaxWidthPx >
+            getActivityDensity('all', 'month', 20).barMaxWidthPx
+    );
+    assert.ok(
+        getActivityDensity('all', 'year', 4).barMaxWidthPx >
+            getActivityDensity('all', 'month', 20).barMaxWidthPx
+    );
 });
 
 test('Activity includes a running Session in its cached derived bucket without changing range semantics', () => {

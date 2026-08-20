@@ -89,19 +89,70 @@ const visibleDurationLabel = (minutes, durationFormat) => {
 
 /**
  * Explicit density contract shared by the pure model and the DOM/CSS seam.
- * Short ranges get visual weight; dense ranges keep every bucket visible.
+ * The renderer turns the percentage into a width relative to each bucket
+ * slot; the pixel bounds keep sparse and dense views readable at both ends.
  */
 export function getActivityDensity(rangeId, unit, bucketCount) {
     const count = Math.max(1, Number(bucketCount) || 1);
     if (rangeId === 'today' || unit === 'hour') {
-        return { id: 'today-18', barWidthPx: 18, bucketCount: count };
+        return {
+            id: 'today-18',
+            barWidthPercent: 52,
+            barMinWidthPx: 2,
+            barMaxWidthPx: 18,
+            bucketCount: count,
+        };
     }
-    if (rangeId === 'week') return { id: 'week-42', barWidthPx: 42, bucketCount: count };
-    if (rangeId === 'month') return { id: 'month-10', barWidthPx: 10, bucketCount: count };
-    if (unit === 'year') return { id: 'all-year-32', barWidthPx: 32, bucketCount: count };
+    if (rangeId === 'week') {
+        return {
+            id: 'week-42',
+            barWidthPercent: 58,
+            barMinWidthPx: 42,
+            barMaxWidthPx: 144,
+            bucketCount: count,
+        };
+    }
+    if (rangeId === 'month') {
+        return {
+            id: 'month-10',
+            barWidthPercent: 68,
+            barMinWidthPx: 2,
+            barMaxWidthPx: 10,
+            bucketCount: count,
+        };
+    }
+    if (count === 1) {
+        return {
+            id: 'all-month-30',
+            barWidthPercent: 72,
+            barMinWidthPx: 64,
+            barMaxWidthPx: 960,
+            bucketCount: count,
+        };
+    }
+    if (count <= 3) {
+        return {
+            id: 'all-month-30',
+            barWidthPercent: 64,
+            barMinWidthPx: 32,
+            barMaxWidthPx: 320,
+            bucketCount: count,
+        };
+    }
+    if (unit === 'year') {
+        return {
+            id: 'all-year-32',
+            barWidthPercent: 56,
+            barMinWidthPx: 18,
+            barMaxWidthPx: 72,
+            bucketCount: count,
+        };
+    }
     return {
         id: count <= 12 ? 'all-month-30' : 'all-month-18',
-        barWidthPx: count <= 12 ? 30 : 18,
+        barWidthPercent: count <= 12 ? 56 : 44,
+        barMinWidthPx: count <= 12 ? 18 : 6,
+        barMaxWidthPx: count <= 12 ? 64 : 24,
         bucketCount: count,
     };
 }

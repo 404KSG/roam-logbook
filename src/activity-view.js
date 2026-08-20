@@ -75,7 +75,9 @@ export function renderActivity(activity) {
 
     const plot = el('div', 'rlb-activity__plot');
     plot.style.setProperty('--rlb-activity-columns', String(activity.buckets.length));
-    plot.style.setProperty('--rlb-activity-bar-width', `${activity.density.barWidthPx}px`);
+    plot.style.setProperty('--rlb-activity-bar-ratio', `${activity.density.barWidthPercent}%`);
+    plot.style.setProperty('--rlb-activity-bar-min-width', `${activity.density.barMinWidthPx}px`);
+    plot.style.setProperty('--rlb-activity-bar-max-width', `${activity.density.barMaxWidthPx}px`);
     plot.dataset.activityDensity = activity.density.id;
     plot.addEventListener('keydown', event => {
         const current = event.target?.closest?.('[data-activity-bucket]');

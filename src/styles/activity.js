@@ -1,6 +1,7 @@
 export const ACTIVITY = String.raw`/* Activity is the one visual summary in the Dashboard. Keep its geometry
    deliberately bounded: values sit above each bar and the date remains below
-   it, with no secondary axis or scroll rail competing for attention. */
+   it, with no secondary axis or scroll rail competing for attention. Bar width
+   is relative to the live grid slot, with density-specific pixel bounds. */
 .rlb-dashboard .rlb-activity {
     box-sizing: border-box;
     height: 198px;
@@ -84,7 +85,11 @@ export const ACTIVITY = String.raw`/* Activity is the one visual summary in the 
 
 .rlb-activity__bar {
     display: block;
-    width: var(--rlb-activity-bar-width, 18px);
+    width: clamp(
+        var(--rlb-activity-bar-min-width, 2px),
+        var(--rlb-activity-bar-ratio, 52%),
+        var(--rlb-activity-bar-max-width, 18px)
+    );
     max-width: 100%;
     min-height: 2px;
     max-height: 100%;
