@@ -16,6 +16,7 @@ import { flattenTodayRows } from './today-todos.js';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
+const DEFAULT_STALE_HOURS = 1.5;
 
 const rowFigures = (entry, now) => {
     const elapsed = now.getTime() - entry.start.getTime();
@@ -259,7 +260,7 @@ export function buildSessionSurfaceModel({
     recentItems = [],
     now,
     windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
-    staleHours = 8,
+    staleHours = DEFAULT_STALE_HOURS,
 }) {
     const currentNow = now instanceof Date ? now : new Date(now);
     const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0
@@ -477,7 +478,7 @@ export function renderSessionSurface(root, model, options = {}) {
                         'rlb-popover__empty bp3-text-small',
                         `${sessionCount(model.staleEntries.length)} ${
                             model.staleEntries.length > 1 ? 'have' : 'has'
-                        } been open for over ${options.staleHours || 8}h — likely forgotten.`
+                        } been open for over ${options.staleHours || DEFAULT_STALE_HOURS}h — likely forgotten.`
                     )
                 );
             }

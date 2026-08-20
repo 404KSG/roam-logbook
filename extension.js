@@ -3500,7 +3500,7 @@ var DEFAULTS = {
   [SETTING_TOPBAR]: true,
   [SETTING_MULTIPLE]: false,
   [SETTING_TODO_ONLY]: true,
-  [SETTING_STALE_HOURS]: "8",
+  [SETTING_STALE_HOURS]: "1.5",
   [SETTING_POMODORO_MINUTES]: "45",
   [SETTING_TIMING_LINE_SIDEBAR]: true
 };
@@ -3543,7 +3543,7 @@ function keepTimingLineAtTopOfRightSidebar() {
 }
 function staleHours() {
   const parsed = Number(read(SETTING_STALE_HOURS));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
 }
 function pomodoroMinutes() {
   const parsed = Number(read(SETTING_POMODORO_MINUTES));
@@ -3607,6 +3607,12 @@ function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
   const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   const rounded = Number(candidate.toFixed(6));
   return String(rounded > 0 ? rounded : 45);
+}
+function normalizePositiveHours(event, fallback = staleHours()) {
+  const parsed = Number(normalizeSelected(event).trim());
+  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const rounded = Number(candidate.toFixed(6));
+  return String(rounded > 0 ? rounded : 1.5);
 }
 
 // src/dashboard-running.js
@@ -5683,10 +5689,10 @@ var SURFACE = String.raw`/* ---- popover ---- */
     align-items: center;
     column-gap: 6px;
     box-sizing: border-box;
-    height: 32px;
-    min-height: 32px;
+    height: 36px;
+    min-height: 36px;
     min-width: 0;
-    margin: 0 2px 5px;
+    margin: 0 2px 1px;
     padding: 0;
     border-bottom: 1px solid var(--rlb-surface-border-light);
 }
@@ -5707,7 +5713,7 @@ var SURFACE = String.raw`/* ---- popover ---- */
     display: flex;
     gap: 2px;
     align-items: center;
-    align-self: stretch;
+    align-self: center;
     min-width: 0;
     margin: 0;
     padding: 0;
@@ -5721,9 +5727,9 @@ var SURFACE = String.raw`/* ---- popover ---- */
     flex: 0 0 auto;
     width: auto;
     min-width: 0 !important;
-    height: 32px;
-    min-height: 32px !important;
-    max-height: 32px;
+    height: 28px;
+    min-height: 28px !important;
+    max-height: 28px;
     padding: 0 8px !important;
     border-radius: 4px;
     color: var(--rlb-muted);
@@ -7576,6 +7582,7 @@ var STYLES = [TOKENS, TOPBAR, SURFACE, DASHBOARD, ACTIVITY, TASKS, RESPONSIVE].j
 // src/session-surface.js
 var sessionCount = (count) => `${count} Session${count === 1 ? "" : "s"}`;
 var SURFACE_TITLE = "ACTIVE THREADS";
+var DEFAULT_STALE_HOURS = 1.5;
 var rowFigures = (entry, now) => {
   const elapsed = now.getTime() - entry.start.getTime();
   const total = (entry.priorMinutes || 0) + Math.floor(elapsed / 6e4);
@@ -7797,7 +7804,7 @@ function buildSessionSurfaceModel({
   recentItems = [],
   now,
   windowMinutes = ACTIVE_WORK_WINDOW_MINUTES,
-  staleHours: staleHours2 = 8
+  staleHours: staleHours2 = DEFAULT_STALE_HOURS
 }) {
   const currentNow = now instanceof Date ? now : new Date(now);
   const normalizedWindow = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Number(windowMinutes) : ACTIVE_WORK_WINDOW_MINUTES;
@@ -7999,7 +8006,7 @@ function renderSessionSurface(root, model, options = {}) {
           el(
             "div",
             "rlb-popover__empty bp3-text-small",
-            `${sessionCount(model.staleEntries.length)} ${model.staleEntries.length > 1 ? "have" : "has"} been open for over ${options.staleHours || 8}h \u2014 likely forgotten.`
+            `${sessionCount(model.staleEntries.length)} ${model.staleEntries.length > 1 ? "have" : "has"} been open for over ${options.staleHours || DEFAULT_STALE_HOURS}h \u2014 likely forgotten.`
           )
         );
       }
@@ -9741,11 +9748,14 @@ function createController({ extensionAPI: extensionAPI2 }) {
           name: "Forgotten timer warning (hours)",
           description: "How long a clock may run before it is called out as forgotten.",
           action: {
-            type: "select",
-            items: ["2", "4", "8", "12", "24"],
-            defaultValue: "8",
+            type: "input",
+            placeholder: "1.5",
+            defaultValue: "1.5",
             onChange: (event) => {
-              extensionAPI2.settings.set(SETTING_STALE_HOURS, normalizeSelected(event));
+              extensionAPI2.settings.set(
+                SETTING_STALE_HOURS,
+                normalizePositiveHours(event)
+              );
               topbar.refresh();
             }
           }

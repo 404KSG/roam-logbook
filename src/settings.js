@@ -24,7 +24,7 @@ const DEFAULTS = {
     [SETTING_TOPBAR]: true,
     [SETTING_MULTIPLE]: false,
     [SETTING_TODO_ONLY]: true,
-    [SETTING_STALE_HOURS]: '8',
+    [SETTING_STALE_HOURS]: '1.5',
     [SETTING_POMODORO_MINUTES]: '45',
     [SETTING_TIMING_LINE_SIDEBAR]: true,
 };
@@ -88,7 +88,7 @@ export function keepTimingLineAtTopOfRightSidebar() {
 
 export function staleHours() {
     const parsed = Number(read(SETTING_STALE_HOURS));
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
 }
 
 export function pomodoroMinutes() {
@@ -171,4 +171,12 @@ export function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
     const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     const rounded = Number(candidate.toFixed(6));
     return String(rounded > 0 ? rounded : 45);
+}
+
+/** Normalize a positive hour input while preserving the current safe value. */
+export function normalizePositiveHours(event, fallback = staleHours()) {
+    const parsed = Number(normalizeSelected(event).trim());
+    const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    const rounded = Number(candidate.toFixed(6));
+    return String(rounded > 0 ? rounded : 1.5);
 }

@@ -124,6 +124,19 @@ test('stale detection only flags clocks older than the threshold', () => {
     );
 });
 
+test('stale detection compares fractional hour thresholds in milliseconds', () => {
+    const cutoff = new Date(NOW.getTime() - 90 * 60_000);
+    const entries = [
+        entry({ clockUid: 'exact', start: cutoff, end: null, running: true }),
+        entry({ clockUid: 'older', start: new Date(cutoff.getTime() - 1), end: null, running: true }),
+    ];
+
+    assert.deepEqual(
+        findStaleClocks(entries, NOW, 1.5).map(e => e.clockUid),
+        ['older']
+    );
+});
+
 test('the dashboard model reports today and week totals regardless of range', () => {
     const entries = [
         entry({ clockUid: 'today', start: new Date(2026, 7, 5, 9, 0), minutes: 30 }),

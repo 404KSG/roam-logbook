@@ -104,7 +104,7 @@ test('onload mounts the always-on topbar and registers the minimal command surfa
                 true,
             ],
             ['pomodoroMinutes', 'Work-cycle duration (minutes)', 'input', '45'],
-            ['staleHours', 'Forgotten timer warning (hours)', 'select', '8'],
+            ['staleHours', 'Forgotten timer warning (hours)', 'input', '1.5'],
         ]
     );
     assert.deepEqual(
@@ -143,8 +143,9 @@ test('onload mounts the always-on topbar and registers the minimal command surfa
     assert.equal(timingLineSidebarSetting.action.defaultValue, true);
     const staleHoursSetting = settingsPanel.settings.find(setting => setting.id === 'staleHours');
     assert.equal(staleHoursSetting.name, 'Forgotten timer warning (hours)');
-    assert.deepEqual(staleHoursSetting.action.items, ['2', '4', '8', '12', '24']);
-    assert.equal(staleHoursSetting.action.defaultValue, '8');
+    assert.equal(staleHoursSetting.action.type, 'input');
+    assert.equal(staleHoursSetting.action.placeholder, '1.5');
+    assert.equal(staleHoursSetting.action.defaultValue, '1.5');
 });
 
 test('stylesheet exposes the approved dashboard shell and minimal topbar contract', () => {
@@ -206,8 +207,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
     assert.match(css, /\.rlb-surface__actions\s*\{[^}]*display: flex[^}]*gap: 2px/s);
     assert.match(css, /\.rlb-surface__icon-button\s*\{[^}]*width: var\(--rlb-surface-action-height\)[^}]*height: var\(--rlb-surface-action-height\)/s);
-    assert.match(css, /\.rlb-surface__header\s*\{[^}]*height: 32px[^}]*border-bottom: 1px solid var\(--rlb-surface-border-light\)/s);
-    assert.match(css, /\.rlb-surface__view-control\s*\{[^}]*flex: 0 0 auto[^}]*height: 32px/s);
+    assert.match(css, /\.rlb-surface__header\s*\{[^}]*height: 36px[^}]*border-bottom: 1px solid var\(--rlb-surface-border-light\)/s);
+    assert.match(css, /\.rlb-surface__view-switch\s*\{[^}]*align-self: center/s);
+    assert.match(css, /\.rlb-surface__view-control\s*\{[^}]*flex: 0 0 auto[^}]*height: 28px/s);
     assert.match(css, /\.rlb-surface__header \.rlb-surface__view-control\.is-selected\s*\{[^}]*color: var\(--rlb-text\)[^}]*background: var\(--rlb-surface-focused\)/s);
     assert.match(css, /\.rlb-surface__view-count\s*\{[^}]*min-width: 2ch[^}]*font-variant-numeric: tabular-nums/s);
     assert.match(css, /\.rlb-surface__spinner\s*\{[^}]*width: 10px[^}]*animation: rlb-surface-spin/s);
@@ -406,7 +408,7 @@ test('the shared overrun state takes priority over stale metadata', () => {
     const popover = document.querySelector('body > .rlb-popover');
     assert.equal(popover.querySelector('.rlb-popover__title').textContent, 'ACTIVE THREADS');
     assert.equal(popover.querySelector('[data-view="threads"]').textContent, 'Threads 1');
-    assert.match(popover.textContent, /1 Session has been open for over 8h/);
+    assert.match(popover.textContent, /1 Session has been open for over 1\.5h/);
     assert.doesNotMatch(popover.textContent, /clock has been open/i);
     click(topbarWidget().querySelector('button'));
 

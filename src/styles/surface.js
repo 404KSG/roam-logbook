@@ -36,10 +36,10 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     align-items: center;
     column-gap: 6px;
     box-sizing: border-box;
-    height: 32px;
-    min-height: 32px;
+    height: 36px;
+    min-height: 36px;
     min-width: 0;
-    margin: 0 2px 5px;
+    margin: 0 2px 1px;
     padding: 0;
     border-bottom: 1px solid var(--rlb-surface-border-light);
 }
@@ -60,7 +60,7 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     display: flex;
     gap: 2px;
     align-items: center;
-    align-self: stretch;
+    align-self: center;
     min-width: 0;
     margin: 0;
     padding: 0;
@@ -74,9 +74,9 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     flex: 0 0 auto;
     width: auto;
     min-width: 0 !important;
-    height: 32px;
-    min-height: 32px !important;
-    max-height: 32px;
+    height: 28px;
+    min-height: 28px !important;
+    max-height: 28px;
     padding: 0 8px !important;
     border-radius: 4px;
     color: var(--rlb-muted);

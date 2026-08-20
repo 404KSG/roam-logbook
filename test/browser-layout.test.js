@@ -611,6 +611,11 @@ test('beta.50 toolbar is one stable line across desktop, narrow, loading, error,
         const tabRects = tabs.map(rect);
         const actionRects = actionNodes.map(rect);
         const allControls = [...tabs, ...actionNodes];
+        const borderBottom = parseFloat(getComputedStyle(header).borderBottomWidth) || 0;
+        const borderTop = headerRect.bottom - borderBottom;
+        const contentCenter = (headerRect.top + borderTop) / 2;
+        const tabLabelRects = tabs.map(tab => rect(tab.querySelector('.rlb-surface__view-label')));
+        const tabCountRects = tabs.map(tab => rect(tab.querySelector('.rlb-surface__view-count')));
         const titleStyle = getComputedStyle(popover.querySelector('.rlb-popover__title'));
         return {
             popover: rect(popover),
@@ -624,14 +629,20 @@ test('beta.50 toolbar is one stable line across desktop, narrow, loading, error,
             todayCountWidth: rect(tabs[1].querySelector('.rlb-surface__view-count')).width,
             dashboardRight: rect(actionNodes.at(-1)).right,
             actionOrder: actionNodes.map(node => node.dataset.action),
-            controlTargets: allControls.map(node => rect(node).height),
+            tabTargets: tabRects.map(value => value.height),
+            actionTargets: actionRects.map(value => value.height),
+            tabBorderGap: borderTop - Math.max(...tabRects.map(value => value.bottom)),
+            tabCenterDelta: Math.max(...tabRects.map(value => Math.abs((value.top + value.height / 2) - contentCenter))),
+            actionCenterDelta: Math.max(...actionRects.map(value => Math.abs((value.top + value.height / 2) - contentCenter))),
+            labelCenterDelta: Math.max(...tabLabelRects.map((value, index) => Math.abs((value.top + value.height / 2) - (tabRects[index].top + tabRects[index].height / 2)))),
+            countCenterDelta: Math.max(...tabCountRects.map((value, index) => Math.abs((value.top + value.height / 2) - (tabRects[index].top + tabRects[index].height / 2)))),
             sameLine: allControls.every(node => {
                 const value = rect(node);
                 return value.top >= headerRect.top - .5 && value.bottom <= headerRect.bottom + .5;
             }),
             noOverlap: navRect.right <= actionRect.left + .5,
             inside: [...tabRects, ...actionRects].every(value => value.left >= headerRect.left - .5 && value.right <= headerRect.right + .5),
-            noWrap: getComputedStyle(nav).flexWrap === 'nowrap' && nav.scrollHeight <= 32.5,
+            noWrap: getComputedStyle(nav).flexWrap === 'nowrap' && nav.scrollHeight <= nav.clientHeight + .5,
             overflow: popover.scrollWidth > popover.clientWidth + .5 || header.scrollWidth > header.clientWidth + .5,
             refreshCount: popover.querySelectorAll('[data-action="refresh"]').length,
             spinnerCount: popover.querySelectorAll('.rlb-surface__spinner').length,
@@ -656,7 +667,6 @@ test('beta.50 toolbar is one stable line across desktop, narrow, loading, error,
             );
             const context = JSON.stringify({ width, state, geometry: measured[state] });
             assert.ok(Math.abs(measured[state].popover.width - width) <= .5, context);
-            assert.ok(Math.abs(measured[state].header.height - 32) <= .5, context);
             assert.equal(measured[state].sameLine, true, context);
             assert.equal(measured[state].noOverlap, true, context);
             assert.equal(measured[state].inside, true, context);
@@ -665,7 +675,13 @@ test('beta.50 toolbar is one stable line across desktop, narrow, loading, error,
             assert.equal(measured[state].refreshCount, 0, context);
             assert.equal(measured[state].hiddenTitle, true, context);
             assert.equal(measured[state].actionOrder.at(-1), 'dashboard', context);
-            assert.ok(measured[state].controlTargets.every(height => Math.abs(height - 32) <= .5), context);
+            assert.ok(measured[state].tabTargets.every(height => height < measured[state].header.height), context);
+            assert.ok(measured[state].actionTargets.every(height => height < measured[state].header.height), context);
+            assert.ok(measured[state].tabBorderGap >= 2, context);
+            assert.ok(measured[state].tabCenterDelta <= 1, context);
+            assert.ok(measured[state].actionCenterDelta <= 1, context);
+            assert.ok(measured[state].labelCenterDelta <= 1, context);
+            assert.ok(measured[state].countCenterDelta <= 1, context);
             assert.ok(measured[state].tabs.every(tab => tab.width < measured[state].header.width / 2), context);
             assert.ok(measured[state].tabFlex.every(value => value === '0 0 auto'), context);
         }

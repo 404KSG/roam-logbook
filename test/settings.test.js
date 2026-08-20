@@ -11,6 +11,7 @@ import {
     SETTING_TIMING_LINE_SIDEBAR,
     SETTING_TODO_ONLY,
     SETTING_TOPBAR,
+    normalizePositiveHours,
     setExtensionAPI,
     showTopbarWidget,
     pomodoroMinutes,
@@ -61,14 +62,36 @@ test('missing switch values use each setting default', () => {
     assert.equal(pomodoroMinutes(), 45);
 });
 
-test('unfinished-clock hours keep the existing storage key, values, and default', () => {
+test('unfinished-clock hours keep the existing storage key, values, and new default', () => {
     assert.equal(SETTING_STALE_HOURS, 'staleHours');
-    for (const value of ['2', '4', '8', '12', '24']) {
+    for (const value of ['1.5', '2', '4', '8', '12', '24']) {
         withValues({ [SETTING_STALE_HOURS]: value });
         assert.equal(staleHours(), Number(value));
     }
     setExtensionAPI({ settings: { get: () => undefined } });
-    assert.equal(staleHours(), 8);
+    assert.equal(staleHours(), 1.5);
+});
+
+test('unfinished-clock input accepts fractional hours and invalid input preserves the stored value', () => {
+    const values = new Map([[SETTING_STALE_HOURS, '8']]);
+    setExtensionAPI({
+        settings: {
+            get: key => values.get(key),
+        },
+    });
+
+    assert.equal(normalizePositiveHours({ target: { value: '1.5' } }), '1.5');
+    assert.equal(normalizePositiveHours({ target: { value: '12.3456789' } }), '12.345679');
+    const persist = event => values.set(SETTING_STALE_HOURS, normalizePositiveHours(event));
+    persist({ target: { value: 'nope' } });
+    assert.equal(values.get(SETTING_STALE_HOURS), '8');
+    persist({ target: { value: '1.5' } });
+    assert.equal(values.get(SETTING_STALE_HOURS), '1.5');
+    for (const value of ['0', '-1', '', 'not-a-number', 'Infinity']) {
+        persist({ target: { value } });
+        assert.equal(values.get(SETTING_STALE_HOURS), '1.5', value);
+    }
+    assert.equal(staleHours(), 1.5);
 });
 
 test('default-on switches are persisted only when their keys are missing', () => {

@@ -17,8 +17,8 @@ import { mutationResultNotice, presentMutationResult } from './action-result.js'
 import {
     initializeDefaultOnSwitches,
     normalizeChecked,
+    normalizePositiveHours,
     normalizePositiveMinutes,
-    normalizeSelected,
     setExtensionAPI,
     SETTING_POMODORO_MINUTES,
     SETTING_STALE_HOURS,
@@ -158,11 +158,14 @@ function createController({ extensionAPI }) {
                     name: 'Forgotten timer warning (hours)',
                     description: 'How long a clock may run before it is called out as forgotten.',
                     action: {
-                        type: 'select',
-                        items: ['2', '4', '8', '12', '24'],
-                        defaultValue: '8',
+                        type: 'input',
+                        placeholder: '1.5',
+                        defaultValue: '1.5',
                         onChange: event => {
-                            extensionAPI.settings.set(SETTING_STALE_HOURS, normalizeSelected(event));
+                            extensionAPI.settings.set(
+                                SETTING_STALE_HOURS,
+                                normalizePositiveHours(event)
+                            );
                             topbar.refresh();
                         },
                     },
