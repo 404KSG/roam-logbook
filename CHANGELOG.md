@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.62 — 2026-08-20
+
+### Adaptive Activity density
+
+- Replaces fixed Activity bar widths with slot-relative sizing, so the chart
+  uses the Dashboard width instead of leaving most of each date slot empty.
+- Makes the seven-day view visibly fuller and lets a single-bucket summary
+  occupy roughly 72% of its plot, with a safety cap only for ultra-wide views.
+- Keeps 24-hour and 30-day ranges compact, centered, keyboard-accessible, and
+  free of horizontal overflow on narrow screens.
+- Adds model and Chromium geometry coverage for single-bucket, seven-day,
+  24-hour, and 30-day layouts in both light and dark themes.
+
+No graph reads, listeners, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.61 — 2026-08-20
 
 ### Compact Today task projection

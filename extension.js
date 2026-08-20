@@ -3158,17 +3158,64 @@ var visibleDurationLabel = (minutes, durationFormat) => {
 function getActivityDensity(rangeId, unit, bucketCount) {
   const count = Math.max(1, Number(bucketCount) || 1);
   if (rangeId === "today" || unit === "hour") {
-    return { id: "today-18", barWidthPx: 18, bucketCount: count };
+    return {
+      id: "today-18",
+      barWidthPercent: 52,
+      barMinWidthPx: 2,
+      barMaxWidthPx: 18,
+      bucketCount: count
+    };
   }
-  if (rangeId === "week")
-    return { id: "week-42", barWidthPx: 42, bucketCount: count };
-  if (rangeId === "month")
-    return { id: "month-10", barWidthPx: 10, bucketCount: count };
-  if (unit === "year")
-    return { id: "all-year-32", barWidthPx: 32, bucketCount: count };
+  if (rangeId === "week") {
+    return {
+      id: "week-42",
+      barWidthPercent: 58,
+      barMinWidthPx: 42,
+      barMaxWidthPx: 144,
+      bucketCount: count
+    };
+  }
+  if (rangeId === "month") {
+    return {
+      id: "month-10",
+      barWidthPercent: 68,
+      barMinWidthPx: 2,
+      barMaxWidthPx: 10,
+      bucketCount: count
+    };
+  }
+  if (count === 1) {
+    return {
+      id: "all-month-30",
+      barWidthPercent: 72,
+      barMinWidthPx: 64,
+      barMaxWidthPx: 960,
+      bucketCount: count
+    };
+  }
+  if (count <= 3) {
+    return {
+      id: "all-month-30",
+      barWidthPercent: 64,
+      barMinWidthPx: 32,
+      barMaxWidthPx: 320,
+      bucketCount: count
+    };
+  }
+  if (unit === "year") {
+    return {
+      id: "all-year-32",
+      barWidthPercent: 56,
+      barMinWidthPx: 18,
+      barMaxWidthPx: 72,
+      bucketCount: count
+    };
+  }
   return {
     id: count <= 12 ? "all-month-30" : "all-month-18",
-    barWidthPx: count <= 12 ? 30 : 18,
+    barWidthPercent: count <= 12 ? 56 : 44,
+    barMinWidthPx: count <= 12 ? 18 : 6,
+    barMaxWidthPx: count <= 12 ? 64 : 24,
     bucketCount: count
   };
 }
@@ -3581,7 +3628,9 @@ function renderActivity(activity) {
   chart.dataset.activityBucketCount = String(activity.buckets.length);
   const plot = el("div", "rlb-activity__plot");
   plot.style.setProperty("--rlb-activity-columns", String(activity.buckets.length));
-  plot.style.setProperty("--rlb-activity-bar-width", `${activity.density.barWidthPx}px`);
+  plot.style.setProperty("--rlb-activity-bar-ratio", `${activity.density.barWidthPercent}%`);
+  plot.style.setProperty("--rlb-activity-bar-min-width", `${activity.density.barMinWidthPx}px`);
+  plot.style.setProperty("--rlb-activity-bar-max-width", `${activity.density.barMaxWidthPx}px`);
   plot.dataset.activityDensity = activity.density.id;
   plot.addEventListener("keydown", (event) => {
     const current = event.target?.closest?.("[data-activity-bucket]");
@@ -5252,7 +5301,7 @@ function createDashboard({
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.56";
+var PLUGIN_VERSION = "0.9.0-beta.62";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -7424,7 +7473,8 @@ var DASHBOARD = String.raw`/* ---- dashboard ---- */
 // src/styles/activity.js
 var ACTIVITY = String.raw`/* Activity is the one visual summary in the Dashboard. Keep its geometry
    deliberately bounded: values sit above each bar and the date remains below
-   it, with no secondary axis or scroll rail competing for attention. */
+   it, with no secondary axis or scroll rail competing for attention. Bar width
+   is relative to the live grid slot, with density-specific pixel bounds. */
 .rlb-dashboard .rlb-activity {
     box-sizing: border-box;
     height: 198px;
@@ -7508,7 +7558,11 @@ var ACTIVITY = String.raw`/* Activity is the one visual summary in the Dashboard
 
 .rlb-activity__bar {
     display: block;
-    width: var(--rlb-activity-bar-width, 18px);
+    width: clamp(
+        var(--rlb-activity-bar-min-width, 2px),
+        var(--rlb-activity-bar-ratio, 52%),
+        var(--rlb-activity-bar-max-width, 18px)
+    );
     max-width: 100%;
     min-height: 2px;
     max-height: 100%;

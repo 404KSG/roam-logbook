@@ -1,5 +1,5 @@
 /** Release and persisted-format identifiers shown in development documentation. */
-export const PLUGIN_VERSION = '0.9.0-beta.56';
+export const PLUGIN_VERSION = '0.9.0-beta.62';
 export const STATE_FORMATS = Object.freeze({
     pomodoroTargets: 1,
     pomodoroCycle: 1,
