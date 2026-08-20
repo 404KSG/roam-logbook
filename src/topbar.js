@@ -32,8 +32,8 @@ const WIDGET_ID = 'roam-logbook-topbar';
 const POPOVER_ID = 'roam-logbook-popover';
 const POPOVER_TITLE_ID = 'roam-logbook-popover-title';
 const TOPBAR_STATUS_ID = 'roam-logbook-topbar-status';
-const TOPBAR_LABEL = 'Open Roam Logbook Active Work';
-const TOPBAR_TITLE = 'Open Active Work details';
+const TOPBAR_LABEL = 'Open Task Tracker Active Threads';
+const TOPBAR_TITLE = 'Open Task Tracker details';
 const TOPBAR_SELECTOR = '.rm-topbar';
 const TOPBAR_REFRESH_MESSAGES = {
     ...REFRESH_MESSAGES.activeWork,
@@ -531,7 +531,7 @@ export function createTopbar({
             refreshState.state === 'loading'
                 ? TOPBAR_REFRESH_MESSAGES.loading
                 : refreshStatus.ok
-                  ? 'No Timing Line is active. Right-click a TODO bullet and choose Plugins → Logbook: Clock in.'
+                ? 'No Timing Line is active. Right-click a TODO bullet and choose Plugins → Task Tracker: Clock in.'
                   : 'Active Work state could not be confirmed. Retry after Roam finishes syncing.';
         options.todayNotice = todayNotice;
         renderSessionSurface(popover, model, options);

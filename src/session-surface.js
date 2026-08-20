@@ -12,7 +12,8 @@ import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
-import { compactTodayBreadcrumb, flattenTodayRows } from './today-todos.js';
+import { flattenTodayRows } from './today-todos.js';
+import { normalizeContextPath } from './context-path.js';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
@@ -29,7 +30,7 @@ const rowFigures = (entry, now) => {
 
 const fullTaskLabel = title => `Open this block: ${title}`;
 const focusRecentLabel = title => `Switch Focus to ${title}`;
-const dashboardLabel = 'Open Roam Logbook Dashboard';
+const dashboardLabel = 'Open Task Tracker Dashboard';
 const expandTodayLabel = 'Expand all Today tasks';
 const collapseTodayLabel = 'Collapse all Today tasks';
 const switchLabel = view => `Show ${view === 'today' ? 'Today tasks' : 'Active Threads'}`;
@@ -69,24 +70,47 @@ const renderTitle = (row, onOpenTask) => {
         event => onOpenTask?.(row.taskUid, event),
         // The visible text is the task title alone; the accessible name has to
         // add the action, so this is an override rather than a duplicate.
-        { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+        { ariaLabel: fullTaskLabel(title) }
     );
     return taskButton;
+};
+
+const renderContextPath = (path, onOpenTask, className = 'rlb-context-breadcrumb') => {
+    const segments = normalizeContextPath(path);
+    if (segments.length === 0) return null;
+
+    const breadcrumb = el('nav', className);
+    breadcrumb.setAttribute('aria-label', 'Context path');
+    for (const [index, segment] of segments.entries()) {
+        if (index > 0) {
+            const separator = el('span', 'rlb-context-breadcrumb__separator', '›');
+            separator.setAttribute('aria-hidden', 'true');
+            breadcrumb.appendChild(separator);
+        }
+        const label = formatDisplayTitle({
+            taskString: segment.string,
+            title: segment.title,
+            taskUid: segment.uid,
+        });
+        const link = button(
+            'bp3-button bp3-minimal rlb-context-breadcrumb__segment',
+            label,
+            event => {
+                event.stopPropagation();
+                onOpenTask?.(segment.uid, event, { context: true });
+            },
+            { ariaLabel: `Open parent block: ${label}` }
+        );
+        link.dataset.action = 'context-open';
+        link.dataset.contextUid = segment.uid;
+        breadcrumb.appendChild(link);
+    }
+    return breadcrumb;
 };
 
 const renderTodayRow = (row, options) => {
     const node = row.node;
     const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
-    // A visible child already has its parent immediately above it. Keep the
-    // breadcrumb for non-root parents only, where it labels the group and
-    // remains useful while a long task list is being scanned.
-    const breadcrumbLabels = node.ancestorPath?.length > 0 && node.children.length > 0
-        ? compactTodayBreadcrumb(
-            node.ancestorPath.map(ancestor =>
-                formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
-            )
-        )
-        : [];
     const rowNode = el('div', 'rlb-today__row');
     rowNode.dataset.taskUid = node.uid;
     rowNode.style.setProperty('--rlb-today-depth', String(row.depth));
@@ -115,16 +139,13 @@ const renderTodayRow = (row, options) => {
     }
 
     const content = el('div', 'rlb-today__content');
-    if (breadcrumbLabels.length > 0) {
-        const breadcrumb = el('div', 'rlb-today__breadcrumb', breadcrumbLabels.join(' › '));
-        breadcrumb.setAttribute('aria-hidden', 'true');
-        content.appendChild(breadcrumb);
-    }
+    const breadcrumb = renderContextPath(node.contextPath, options.onOpenTask, 'rlb-today__breadcrumb');
+    if (breadcrumb) content.appendChild(breadcrumb);
     const titleButton = button(
         'bp3-button bp3-minimal rlb-today__title',
         title,
         event => options.onOpenTask?.(node.uid, event, { today: true }),
-        { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+        { ariaLabel: fullTaskLabel(title) }
     );
     titleButton.dataset.action = 'today-open';
     content.appendChild(titleButton);
@@ -184,6 +205,11 @@ const renderRunningRow = (row, now, options) => {
     startedNode.setAttribute('aria-label', startedDetails);
     if (started.datetime) startedNode.dateTime = started.datetime;
     appendMetaNodes(meta, [primary, startedNode]);
+    const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, 'rlb-run__context');
+    if (breadcrumb) {
+        node.classList.add('rlb-run--with-context');
+        body.appendChild(breadcrumb);
+    }
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
@@ -245,6 +271,11 @@ const renderRecentRow = (row, now, options) => {
     if (ended.datetime) endedNode.dateTime = ended.datetime;
     endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
     meta.appendChild(endedNode);
+    const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, 'rlb-run__context');
+    if (breadcrumb) {
+        node.classList.add('rlb-run--with-context');
+        body.appendChild(breadcrumb);
+    }
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
@@ -290,6 +321,7 @@ export function buildSessionSurfaceModel({
         taskString: entry.taskString,
         title: entry.title,
         status: entry.status ?? null,
+        contextPath: normalizeContextPath(entry.contextPath),
         entry,
     }));
     const recentRows = recentItems.map(entry => ({
@@ -299,6 +331,7 @@ export function buildSessionSurfaceModel({
         taskString: entry.taskString,
         title: entry.title,
         status: entry.status ?? null,
+        contextPath: normalizeContextPath(entry.contextPath),
         entry,
     }));
     return {
@@ -372,7 +405,7 @@ export function renderSessionSurface(root, model, options = {}) {
     header.appendChild(title);
     if (options.onSwitchView) {
         const switcher = el('nav', 'rlb-surface__view-switch');
-        switcher.setAttribute('aria-label', 'Logbook view');
+        switcher.setAttribute('aria-label', 'Task Tracker view');
         const todayModel = options.todayModel || { count: 0 };
         const todayLoading = todayModel.loading === true || ['idle', 'loading'].includes(todayModel.status);
         const todayColdError =

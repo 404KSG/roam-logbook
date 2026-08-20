@@ -239,11 +239,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     padding: 6px 6px 7px;
 }
 
-.rlb-surface__section--focused .rlb-run:hover,
-.rlb-surface__section--focused .rlb-run:focus-within {
-    background: var(--rlb-surface-hover);
-}
-
 .rlb-surface__section--recent {
     margin-top: 1px;
 }
@@ -395,7 +390,8 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 3px;
 }
 
-.rlb-run:hover {
+.rlb-run:hover,
+.rlb-run:focus-within {
     background: rgba(167, 182, 194, 0.2);
 }
 
@@ -404,10 +400,90 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     display: contents;
 }
 
+.rlb-run__context {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 14px;
+    padding: 0 2px 1px;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb__separator {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    opacity: 0.72;
+}
+
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment {
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 16px;
+    height: auto;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 2px !important;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.2;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:hover,
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:focus-visible,
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:active {
+    color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-run--with-context .rlb-run__title {
+    grid-row: 2;
+}
+
+.rlb-run--with-context .rlb-run__meta {
+    grid-row: 3;
+}
+
+.rlb-run--with-context .rlb-run__actions {
+    grid-row: 1 / span 3;
+}
+
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 1;
     grid-row: 1;
     display: block;
+    justify-self: start;
+    width: fit-content;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -420,6 +496,8 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     line-height: 1.25;
     text-decoration: none;
     border-radius: 2px;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {
@@ -428,9 +506,12 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:hover,
-.bp3-button.bp3-minimal.rlb-run__title:focus-visible {
+.bp3-button.bp3-minimal.rlb-run__title:focus-visible,
+.bp3-button.bp3-minimal.rlb-run__title:active {
     color: var(--rlb-surface-link-hover);
     text-decoration: none;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
@@ -556,6 +637,10 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-run--inline-meta .rlb-run__actions {
     grid-row: 1;
+}
+
+.rlb-run--with-context.rlb-run--inline-meta .rlb-run__actions {
+    grid-row: 1 / span 3;
 }
 
 .rlb-run__actions .rlb-run__checkout {
@@ -706,7 +791,9 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__breadcrumb {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 2px;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
@@ -715,13 +802,49 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     font-size: 11px;
     font-weight: 500;
     line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb__segment {
+    display: inline-block !important;
+    flex: 0 1 auto;
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0 !important;
+    color: var(--rlb-muted);
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-context-breadcrumb__segment:hover,
+.rlb-context-breadcrumb__segment:focus-visible,
+.rlb-context-breadcrumb__segment:active {
+    color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-context-breadcrumb__segment:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 1px;
+}
+
+.rlb-context-breadcrumb__separator {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    opacity: 0.72;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {
     display: block !important;
-    width: 100%;
+    width: fit-content;
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
@@ -734,11 +857,15 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title:hover,
 .bp3-button.bp3-minimal.rlb-today__title:focus-visible {
     color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .rlb-today__action {

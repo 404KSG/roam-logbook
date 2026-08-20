@@ -777,7 +777,7 @@ test('Dashboard exposes one semantic overview with four metrics', () => {
     assert.ok(overview, 'Dashboard exposes a single semantic overview bar');
     assert.equal(overview.tagName, 'DL');
     assert.ok(overview.classList.contains('rlb-overview--compact'));
-    assert.equal(overview.getAttribute('aria-label'), 'Roam Logbook overview');
+    assert.equal(overview.getAttribute('aria-label'), 'Task Tracker overview');
     assert.equal(overview.querySelectorAll('.rlb-overview__item').length, 4);
     assert.equal(overview.querySelectorAll('dt').length, 4);
     assert.equal(overview.querySelectorAll('dd').length, 4);

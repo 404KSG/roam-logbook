@@ -509,7 +509,7 @@ test('Active Work toolbar keeps Dashboard rightmost and omits header Refresh', (
     assert.deepEqual(actions.map(action => action.dataset.action), ['dashboard']);
     assert.ok(dashboard.classList.contains('bp3-icon-dashboard'));
     assert.equal(dashboard.classList.contains('bp3-icon-home'), false);
-    assert.equal(dashboard.title, 'Open Roam Logbook Dashboard');
+    assert.equal(dashboard.title, 'Open Task Tracker Dashboard');
     // An icon-only button takes its accessible name from title; a
     // duplicate aria-label would only be announced twice.
     assert.ok(dashboard.title);
@@ -554,11 +554,11 @@ test('single Focused Task has no bulk footer while retaining header actions', as
     assert.equal(`${elapsed.textContent} · ${count.textContent}`, `${elapsed.textContent} · 1 Thread`);
     assert.equal(topbar.querySelector('.rlb-topbar__separator').getAttribute('aria-hidden'), 'true');
     assert.equal(count.textContent, '1 Thread');
-    assert.equal(topbar.title, 'Open Active Work details');
+    assert.equal(topbar.title, 'Open Task Tracker details');
     assert.match(statusRegion().textContent, /^1 Thread/);
     // The tooltip and the accessible name say different things here, so both
     // are set; only identical strings would be a duplicate announcement.
-    assert.equal(topbar.getAttribute('aria-label'), 'Open Roam Logbook Active Work');
+    assert.equal(topbar.getAttribute('aria-label'), 'Open Task Tracker Active Threads');
     assert.equal(
         [...count.classList].some(className =>
             className.startsWith('rlb-topbar__parallel--load-')
@@ -696,9 +696,9 @@ test('live Thread count reclassifies only the count node without duplicate DOM',
     const countNode = () => button.querySelector('.rlb-topbar__parallel');
     const timeNode = () => button.querySelector('.rlb-topbar__time');
     assert.equal(countNode().textContent, '3 Threads');
-    assert.equal(button.title, 'Open Active Work details');
+    assert.equal(button.title, 'Open Task Tracker details');
     assert.match(statusRegion().textContent, /^3 Threads/);
-    assert.equal(button.getAttribute('aria-label'), 'Open Roam Logbook Active Work');
+    assert.equal(button.getAttribute('aria-label'), 'Open Task Tracker Active Threads');
     assert.equal(
         [...countNode().classList].some(className => className.startsWith('rlb-topbar__parallel--load-')),
         false
@@ -770,8 +770,7 @@ test('running rows expose compact cycle metadata without misleading per-session 
     assert.equal(taskButton.tabIndex, 0);
     assert.equal(taskButton.classList.contains('bp3-icon-document-open'), false);
     assert.equal(row.querySelector('.bp3-icon-document-open'), null);
-    assert.match(taskButton.title, /Graph Engineering: a deliberately long task title/);
-    assert.match(taskButton.title, /Open this block/i);
+    assert.equal(taskButton.title, '');
     assert.match(taskButton.getAttribute('aria-label'), /Graph Engineering: a deliberately long task title/);
     assert.match(taskButton.getAttribute('aria-label'), /Open this block/i);
     assert.equal(row.classList.contains('rlb-run--inline-meta'), true);
@@ -1111,8 +1110,11 @@ test('Active Work labels Timing and Parallel Threads without warning banners', a
     const recentTitle = recent.querySelector('.rlb-run__title');
     // The button's visible text is the task title, so aria-label overrides it
     // to include the action rather than duplicating the tooltip for nothing.
-    assert.equal(recentTitle.title, 'Open this block: Graph Engineering: a deliberately long task title that must remain accessible');
-    assert.equal(recentTitle.getAttribute('aria-label'), recentTitle.title);
+    assert.equal(recentTitle.title, '');
+    assert.equal(
+        recentTitle.getAttribute('aria-label'),
+        'Open this block: Graph Engineering: a deliberately long task title that must remain accessible'
+    );
     const recentFocus = recent.querySelector('[data-action="focus-recent"]');
     assert.ok(recentFocus);
     assert.equal(recentFocus.title, 'Switch Focus to Graph Engineering: a deliberately long task title that must remain accessible');
@@ -1705,7 +1707,7 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
     assert.equal(document.activeElement, trigger);
 
     trigger.focus();
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
     assert.equal(document.activeElement, root.querySelector('select'));
     const dashboardDialog = root.querySelector('.rlb-dialog');
     root.querySelectorAll('select, button, .rlb-activity [tabindex]').forEach(control => control.remove());
@@ -1721,7 +1723,7 @@ test('Topbar and Dashboard expose the same injected elapsed instant', async t =>
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const topbarElapsed = topbarWidget().querySelector('.rlb-topbar__time').textContent;
 
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
     const dashboardElapsed = document.querySelector('[data-running-elapsed="true"]').textContent;
     assert.equal(dashboardElapsed, topbarElapsed);
 });

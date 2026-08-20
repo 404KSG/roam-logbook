@@ -93,7 +93,7 @@ test.afterEach(() => extension.onunload());
 test.after(() => uninstallGraph());
 
 test('DONE automatically clocks out a running Session through the lifecycle watch', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
 
     assert.equal(clock.getRunning().length, 1);
     assert.ok(graph.pullWatchCount() > 0, 'running task should have a pull watch');
@@ -110,7 +110,7 @@ test('DONE automatically clocks out a running Session through the lifecycle watc
 });
 
 test('unloading the extension removes completion pull watches', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     assert.ok(graph.pullWatchCount() > 0);
 
     extension.onunload();
@@ -119,7 +119,7 @@ test('unloading the extension removes completion pull watches', async () => {
 });
 
 test('completion retains a failed detach handle so lifecycle cleanup can be retried', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     extension.onunload();
 
     const originalRemove = graph.api.data.removePullWatch;
@@ -157,7 +157,7 @@ test('a failed old watcher detach blocks duplicate installation until cleanup su
         return originalAdd(...args);
     };
 
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     addAttempts = 0;
     extension.onunload();
     assert.equal(graph.pullWatchCount(), 1, 'the failed old watch remains installed');
@@ -204,9 +204,9 @@ test('a parent without its own Focused CLOCK is watched and leaves unrelated wor
     extension.onunload();
     extension.onload({ extensionAPI });
 
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
     assert.ok(graph.pullWatchUids().includes(PARENT.uid), 'confirmed ancestors must be watched');
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': OTHER.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': OTHER.uid });
 
     await graph.api.data.block.update({
         block: { uid: PARENT.uid, string: '{{[[DONE]]}} parent task' },
@@ -320,8 +320,8 @@ test('an explicit refresh retries the remaining DONE Session after bounded autom
     install([PARENT, CHILD, SIBLING]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': SIBLING.uid });
 
     const failedUid = clock.getRunning().find(entry => entry.taskUid === SIBLING.uid).clockUid;
     const updateCounts = new Map();
@@ -372,8 +372,8 @@ test('a malformed hierarchy component does not disable healthy completion watche
     install([PARENT, CHILD, SIBLING]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': SIBLING.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': SIBLING.uid });
 
     const originalQuery = graph.api.data.q;
     graph.api.data.q = (datalog, ...args) => {
@@ -427,7 +427,7 @@ test('an unrelated cyclic hierarchy component does not block a healthy DONE root
 });
 
 test('rapid DONE then TODO is re-read before automatic Clock Out writes', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
 
     await graph.api.data.block.update({
         block: { uid: TASK.uid, string: '{{[[DONE]]}} finish this task' },
@@ -485,7 +485,7 @@ test('automatic completion returns a structured uncertain result and writes noth
     install([PARENT, CHILD]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
     const clockUid = clock.getRunning()[0].clockUid;
     let clockUpdates = 0;
     const originalUpdate = graph.api.data.block.update;
@@ -604,7 +604,7 @@ test('Pull Watch removal without an API remains retryable', () => {
 });
 
 test('completion retries a failed Pull Watch installation on the next graph sync', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     extension.onunload();
 
     const originalAdd = graph.api.data.addPullWatch;
@@ -660,7 +660,7 @@ test('completion performs a second confirmed read after watch installation', asy
 });
 
 test('completion remains idle until a public Pull Watch update arrives', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     const watchCount = graph.pullWatchCount();
     let graphWrites = 0;
     const originalUpdate = graph.api.data.block.update;
@@ -684,7 +684,7 @@ test('completion remains idle until a public Pull Watch update arrives', async (
 });
 
 test('completion keeps a DONE event that arrives while the same auto-close is in flight', async () => {
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
     extension.onunload();
 
     const results = [];
@@ -727,7 +727,7 @@ test('an ambiguous parent hierarchy withholds the cascade and performs zero cloc
     install([PARENT, CHILD, OTHER]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
     const clockUid = clock.getRunning()[0].clockUid;
     let clockUpdates = 0;
     const originalUpdate = graph.api.data.block.update;
@@ -782,7 +782,7 @@ test('ordinary Clock Out closes the selected Focused CLOCK', async () => {
     install([PARENT, CHILD]);
     extension.onunload();
     extension.onload({ extensionAPI });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': CHILD.uid });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': CHILD.uid });
     const childClock = clock.getRunning().find(entry => entry.taskUid === CHILD.uid);
 
     assert.equal(await clock.clockOut(childClock.clockUid), true);

@@ -88,7 +88,7 @@ test('onload mounts the always-on topbar and registers the minimal command surfa
     );
     assert.equal(topbarWidget().querySelector('.bp3-icon-stopwatch'), null);
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.equal(settingsPanel.tabTitle, 'Roam Logbook');
+    assert.equal(settingsPanel.tabTitle, 'Task Tracker');
     assert.deepEqual(
         settingsPanel.settings.map(setting => [
             setting.id,
@@ -118,14 +118,14 @@ test('onload mounts the always-on topbar and registers the minimal command surfa
     assert.equal(settingsPanel.settings.some(setting => setting.id === 'showTopbarWidget'), false);
     assert.equal(settingsPanel.settings.some(setting => setting.id === 'todoBlocksOnly'), false);
     assert.deepEqual([...paletteCommands.keys()], [
-        'Logbook: Focus current block',
-        'Logbook: Clock out Timing Line',
-        'Logbook: Open dashboard',
+        'Task Tracker: Focus current block',
+        'Task Tracker: Clock out Timing Line',
+        'Task Tracker: Open dashboard',
     ]);
-    assert.equal(paletteCommands.has('Logbook: Start pomodoro on current block'), false);
+    assert.equal(paletteCommands.has('Task Tracker: Start pomodoro on current block'), false);
     assert.deepEqual(
         [...contextCommands.keys()],
-        ['Logbook: Clock in', 'Logbook: Clock out']
+        ['Task Tracker: Clock in', 'Task Tracker: Clock out']
     );
     const pomodoroSetting = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
     assert.equal(pomodoroSetting.name, 'Work-cycle duration (minutes)');
@@ -227,9 +227,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
 
 test('clock commands leave shortcut selection to Roam Hotkeys', () => {
     for (const label of [
-        'Logbook: Focus current block',
-        'Logbook: Clock out Timing Line',
-        'Logbook: Open dashboard',
+        'Task Tracker: Focus current block',
+        'Task Tracker: Clock out Timing Line',
+        'Task Tracker: Open dashboard',
     ]) {
         const spec = paletteCommandSpecs.get(label);
         assert.ok(spec, `${label} should be registered`);
@@ -239,7 +239,7 @@ test('clock commands leave shortcut selection to Roam Hotkeys', () => {
 });
 
 test('the context menu offers clock in on a TODO block only', () => {
-    const clockIn = contextCommands.get('Logbook: Clock in');
+    const clockIn = contextCommands.get('Task Tracker: Clock in');
     assert.equal(clockIn['display-conditional']({ 'block-uid': 'taskone01' }), true);
 
     graph.store.set('plain0001', { uid: 'plain0001', string: 'just a note', parent: null, order: 9 });
@@ -247,7 +247,7 @@ test('the context menu offers clock in on a TODO block only', () => {
 });
 
 test('context menu target text falls back to the host context after a graph read failure', () => {
-    const clockIn = contextCommands.get('Logbook: Clock in');
+    const clockIn = contextCommands.get('Task Tracker: Clock in');
     const originalQuery = graph.api.data.q;
     const originalPull = graph.api.data.pull;
     let blockStringReads = 0;
@@ -288,7 +288,7 @@ test('command-palette Focus starts native sidebar rendering at order 0', async (
     };
     window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
     try {
-        await paletteCommands.get('Logbook: Focus current block')();
+        await paletteCommands.get('Task Tracker: Focus current block')();
         await new Promise(resolve => setImmediate(resolve));
         assert.deepEqual(calls, [
             'open',
@@ -310,7 +310,7 @@ test('clocking in shows elapsed time and a singular Thread count in the topbar',
         addWindow: async spec => sidebarCalls.push(spec),
     };
     try {
-        await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
+        await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': 'taskone01' });
         await new Promise(resolve => setImmediate(resolve));
     } finally {
         window.roamAlphaAPI.ui.rightSidebar = previousSidebar;
@@ -336,8 +336,8 @@ test('clocking in shows elapsed time and a singular Thread count in the topbar',
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
     assert.doesNotMatch(topbarButton().textContent, /this is a test task|\/|clocks/);
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--neutral'));
-    assert.equal(topbarButton().title, 'Open Active Work details');
-    assert.equal(topbarButton().getAttribute('aria-label'), 'Open Roam Logbook Active Work');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
+    assert.equal(topbarButton().getAttribute('aria-label'), 'Open Task Tracker Active Threads');
     assert.equal(topbarStatus().textContent, '1 Thread. Timing is running.');
 });
 
@@ -359,7 +359,7 @@ test('banked task time stays available in the tooltip, not the visible topbar', 
         'banked time is derived by Active Work, not queried per tick'
     );
     assert.equal(topbarWidget().querySelector('.rlb-topbar__total'), null);
-    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
     assert.match(topbarButton().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
 });
 
@@ -424,7 +424,7 @@ test('a long task name stays in the tooltip without entering visible topbar text
 
     assert.equal(topbarWidget().querySelector('.rlb-topbar__label'), null);
     assert.match(topbarButton().textContent.trim(), /^\d+:\d{2}(?::\d{2})?\d+ Thread$/);
-    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
     assert.doesNotMatch(topbarStatus().textContent, new RegExp(longName.slice(0, 20)));
 
     graph.store.get('taskone01').string = '{{[[TODO]]}} this is a test task';
@@ -433,8 +433,8 @@ test('a long task name stays in the tooltip without entering visible topbar text
 
 test('clock in is hidden and clock out offered while the clock runs', () => {
     const context = { 'block-uid': 'taskone01' };
-    assert.equal(contextCommands.get('Logbook: Clock in')['display-conditional'](context), false);
-    assert.equal(contextCommands.get('Logbook: Clock out')['display-conditional'](context), true);
+    assert.equal(contextCommands.get('Task Tracker: Clock in')['display-conditional'](context), false);
+    assert.equal(contextCommands.get('Task Tracker: Clock out')['display-conditional'](context), true);
 });
 
 test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work set', async () => {
@@ -456,8 +456,8 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
     settingsStore.set('allowMultipleClocks', true);
     clock.refresh();
 
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'tasktwo002' });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskthree3' });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': 'tasktwo002' });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': 'taskthree3' });
     try {
         assert.equal(clock.getRunning().length, 1);
         assert.equal(clock.getRunning()[0].taskUid, 'taskthree3');
@@ -478,7 +478,7 @@ test('switching tasks keeps one Focused CLOCK and exposes the Recent Active Work
         assert.equal(topbarWidget().querySelector('.rlb-topbar__parallel--stale'), null);
         assert.equal(topbarWidget().querySelector('.rlb-dot'), null);
         assert.doesNotMatch(topbarWidget().textContent, /parallel task|third parallel task|this is a test task|clocks|\//);
-        assert.equal(topbarButton().title, 'Open Active Work details');
+        assert.equal(topbarButton().title, 'Open Task Tracker details');
         assert.equal(topbarStatus().textContent, '3 Threads. Timing is running.');
         assert.doesNotMatch(topbarStatus().textContent, /clocks running/i);
 
@@ -549,13 +549,13 @@ test('the dashboard renders totals and the task breakdown', () => {
         "Graph Engineering: How to Build AI Agent Systems That Don't Break at Scale * — complete continuation beyond eighty characters";
     graph.store.get('taskone01').string = `{{[[TODO]]}} ${fullTitle}`;
     clock.refresh();
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
 
     assert.ok(dialog().classList.contains('rlb-root--open'));
     assert.ok(dialog().classList.contains('rlb-dashboard'), 'dashboard styles have a host-scoped root');
     const shell = dialog().querySelector('.rlb-dialog');
     assert.equal(shell.getAttribute('aria-modal'), 'true');
-    assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Roam Logbook');
+    assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Task Tracker');
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').textContent,
         'Focus sessions, timing, and task rollups'
@@ -566,7 +566,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     );
     assert.equal(dialog().querySelector('.rlb-header__heading .bp3-icon'), null, 'header has no decorative icon');
     assert.equal(dialog().querySelector('select').getAttribute('aria-label'), 'Dashboard date range');
-    assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Roam Logbook overview');
+    assert.equal(dialog().querySelector('.rlb-overview').getAttribute('aria-label'), 'Task Tracker overview');
     assert.equal(dialog().querySelectorAll('.rlb-overview__item').length, 4);
     assert.equal(dialog().querySelector('[data-action="toggle-view"]'), null);
     assert.equal(dialog().querySelector('.rlb-dashboard__view-toggle'), null);
@@ -658,7 +658,7 @@ test('the task tree collapses and expands from the caret', () => {
         page: 'Test Page',
     });
 
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
 
     const taskRows = () => [...dialog().querySelectorAll('.rlb-tree__cell')].map(cell => cell.textContent);
     assert.equal(taskRows().length, 2, 'parent and sub-task both listed');
@@ -700,7 +700,7 @@ test('the task tree collapses and expands from the caret', () => {
 
 test('each task row shows its checkbox state', () => {
     graph.store.get('subtask001').string = '{{[[DONE]]}} a sub task';
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
 
     const marks = [...dialog().querySelectorAll('.rlb-tree__cell .rlb-status')];
     assert.equal(marks.length, 2, 'one per task row');
@@ -727,7 +727,7 @@ test('Escape closes the dashboard', () => {
 });
 
 test('clocking out through the palette closes the current Timing Line once', async () => {
-    await paletteCommands.get('Logbook: Clock out Timing Line')();
+    await paletteCommands.get('Task Tracker: Clock out Timing Line')();
 
     const drawer = graph.childrenOf('taskone01')[0];
     assert.match(graph.childrenOf(drawer.uid)[0].string, /\]--\[.*\] => \d+:\d\d$/);
@@ -738,29 +738,29 @@ test('clocking out through the palette closes the current Timing Line once', asy
     assert.equal(topbarWidget().querySelector('.rlb-topbar__time'), null);
     assert.ok(topbarWidget().querySelector('.bp3-icon-history'));
     assert.equal(topbarWidget().querySelector('.bp3-icon-timeline-events'), null);
-    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
     assert.equal(topbarStatus().textContent, '2 Threads. No Timing Line is active.');
 });
 
 test('legacy targets remain compatible while the shared cycle controls the topbar', async () => {
     const duration = settingsPanel.settings.find(setting => setting.id === 'pomodoroMinutes');
     duration.action.onChange({ target: { value: '45' } });
-    await contextCommands.get('Logbook: Clock in').callback({ 'block-uid': 'taskone01' });
+    await contextCommands.get('Task Tracker: Clock in').callback({ 'block-uid': 'taskone01' });
     const before = clock.getRunning()[0];
     assert.ok(before, 'a clock should be running');
     assert.equal(pomodoro.isActive(before.clockUid), true);
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45);
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
     assert.match(topbarButton().textContent.trim(), / Threads?$/);
 
     duration.action.onChange({ target: { value: '20' } });
     assert.equal(pomodoro.targetMinutes(before.clockUid), 45, 'an active Session keeps its captured target');
-    await contextCommands.get('Logbook: Clock out').callback({ 'block-uid': 'taskone01' });
+    await contextCommands.get('Task Tracker: Clock out').callback({ 'block-uid': 'taskone01' });
     const originalFocusedBlock = window.roamAlphaAPI.ui.getFocusedBlock;
     window.roamAlphaAPI.ui.getFocusedBlock = () => ({ 'block-uid': 'taskone01' });
     try {
-        await paletteCommands.get('Logbook: Focus current block')();
+        await paletteCommands.get('Task Tracker: Focus current block')();
     } finally {
         window.roamAlphaAPI.ui.getFocusedBlock = originalFocusedBlock;
     }
@@ -783,7 +783,7 @@ test('legacy targets remain compatible while the shared cycle controls the topba
     assert.equal(clock.getRunning().length, 1, 'passing the repaired target never closes the CLOCK');
     assert.ok(topbarWidget().querySelector('.rlb-topbar__time--overrun'));
     assert.equal(topbarWidget().querySelector('.rlb-topbar__target'), null);
-    assert.equal(topbarButton().title, 'Open Active Work details');
+    assert.equal(topbarButton().title, 'Open Task Tracker details');
 
     duration.action.onChange({ target: { value: '-4' } });
     assert.equal(settingsStore.get('pomodoroMinutes'), '20', 'invalid input keeps the current safe value');
@@ -799,7 +799,7 @@ test('onunload removes every trace of the extension', () => {
     const bodyStyle = 'padding-right: 4px; overflow: auto;';
     html.setAttribute('style', htmlStyle);
     body.setAttribute('style', bodyStyle);
-    paletteCommands.get('Logbook: Open dashboard')();
+    paletteCommands.get('Task Tracker: Open dashboard')();
     assert.equal(html.style.overflow, 'hidden');
     assert.equal(body.style.overflow, 'hidden');
 

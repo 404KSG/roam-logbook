@@ -21,6 +21,7 @@ import {
     validateQueryRows,
     withGraphReadIssue,
 } from './roam.js';
+import { contextPathsFromHierarchy } from './context-path.js';
 
 /*
  * `isDrawerBlock` accepts Org's historical spellings and case-insensitive
@@ -165,7 +166,17 @@ export function readAllEntries() {
 export function readDashboardSnapshot() {
     const entries = readAllEntries();
     const hierarchy = readHierarchy([...new Set(entries.map(entry => entry.taskUid))]);
-    return { entries, hierarchy };
+    const contextPaths = contextPathsFromHierarchy(
+        entries.map(entry => entry.taskUid),
+        hierarchy
+    );
+    return {
+        entries: entries.map(entry => ({
+            ...entry,
+            contextPath: contextPaths.get(entry.taskUid) || [],
+        })),
+        hierarchy,
+    };
 }
 
 // ---- hierarchy, for the dashboard's roll-up ----
@@ -250,6 +261,10 @@ const readBlockStrings = uids => {
  * @typedef {object} Hierarchy
  * @property {Record<string,string>} parentOf  block uid → its parent's uid
  * @property {Record<string,string>} stringOf  block uid → its text
+ * @property {Record<string,string>} physicalParentOf  block uid → physical parent uid
+ * @property {Record<string,string>} physicalStringOf  physical block uid → its text
+ * @property {Record<string,string>} canonicalUidOf  physical reference uid → target uid
+ * @property {Record<string,string>} canonicalStringOf  physical reference uid → target text
  * @property {Record<string,string[]>} mirrorsOf  task uid → blocks that are pure
  *   references to it, so a task referenced under another task rolls up there too
  *
@@ -262,11 +277,26 @@ const readBlockStrings = uids => {
 export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     const parentOf = {};
     const stringOf = {};
+    const physicalParentOf = {};
+    const physicalStringOf = {};
+    const canonicalUidOf = {};
+    const canonicalStringOf = {};
     const mirrorsOf = {};
     const issues = [];
     const seeds = new Set(taskUids);
 
-    if (seeds.size === 0) return { parentOf, stringOf, mirrorsOf, issues };
+    if (seeds.size === 0) {
+        return {
+            parentOf,
+            stringOf,
+            physicalParentOf,
+            physicalStringOf,
+            canonicalUidOf,
+            canonicalStringOf,
+            mirrorsOf,
+            issues,
+        };
+    }
 
     // Seed Tasks may be absent from readAllEntries. Their own status still
     // belongs in the confirmed hierarchy snapshot used by completion logic.
@@ -292,7 +322,7 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
 
     let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
     for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
-        const next = [];
+        const next = new Set();
         let parentRows;
         try {
             parentRows = validateQueryRows(
@@ -326,6 +356,13 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
             }
         }
         for (const [uid, rawParentUid, rawParentString] of parentRows) {
+            // Keep a second, physical chain for context breadcrumbs. The
+            // reporting hierarchy below may resolve a pure reference to its
+            // canonical Task; context still needs to walk through the actual
+            // mirror block and its actual Daily Note ancestors.
+            physicalParentOf[uid] = rawParentUid;
+            physicalStringOf[rawParentUid] = rawParentString;
+
             // Sub-tasks are routinely written under a `((reference))` to a task
             // rather than under the task itself — pulling a task into a daily note
             // and working beneath it. The reference stands for what it points at,
@@ -333,6 +370,12 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
             const referenced = referencedBlockUid(rawParentString);
             const parentUid = referenced || rawParentUid;
             const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
+
+            if (referenced && typeof parentString === 'string') {
+                canonicalUidOf[rawParentUid] = parentUid;
+                canonicalStringOf[rawParentUid] = parentString;
+            }
+            next.add(rawParentUid);
 
             parentOf[uid] = parentUid;
             if (referenced && typeof parentString !== 'string') {
@@ -348,9 +391,9 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
             }
             if (parentUid in stringOf) continue;
             stringOf[parentUid] = parentString;
-            next.push(parentUid);
+            next.add(parentUid);
         }
-        frontier = next;
+        frontier = [...next];
     }
 
     if (frontier.length > 0) {
@@ -401,5 +444,14 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
         }
     }
 
-    return { parentOf, stringOf, mirrorsOf, issues };
+    return {
+        parentOf,
+        stringOf,
+        physicalParentOf,
+        physicalStringOf,
+        canonicalUidOf,
+        canonicalStringOf,
+        mirrorsOf,
+        issues,
+    };
 }

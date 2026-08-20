@@ -63,6 +63,18 @@ test('clocking in creates the drawer and a running entry', async () => {
     assert.equal(clock.getRunning()[0].title, 'this is a test task');
 });
 
+test('clock refresh batches physical context metadata without changing timing state', async () => {
+    const parent = { uid: 'context-parent', string: '03 - Daily Tasks', parent: null };
+    const task = { uid: 'context-task', string: '{{[[TODO]]}} Child task', parent: parent.uid };
+    seed([parent, task]);
+
+    await clock.clockIn(task.uid, { now: AT_1558 });
+
+    const entry = clock.getEntriesSnapshot().find(item => item.taskUid === task.uid);
+    assert.deepEqual(entry.contextPath, [{ uid: parent.uid, string: parent.string }]);
+    assert.equal(clock.getRunning()[0].taskUid, task.uid);
+});
+
 test('the core Clock In path rejects plain and completed blocks without writing', async () => {
     const plain = { uid: 'plain0001', string: 'just a note', parent: null };
     const done = { uid: 'done00001', string: '{{[[DONE]]}} completed task', parent: null };

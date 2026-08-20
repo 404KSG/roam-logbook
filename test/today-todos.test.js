@@ -80,6 +80,7 @@ test('Today nodes expose root-to-parent ancestor paths and compact long breadcru
     ]);
 
     assert.deepEqual(model.nodes.find(node => node.uid === 'root-path').ancestorPath, []);
+    assert.deepEqual(model.nodes.find(node => node.uid === 'root-path').contextPath, []);
     assert.deepEqual(
         model.nodes.find(node => node.uid === 'child-path').ancestorPath.map(node => node.uid),
         ['root-path']
@@ -88,10 +89,45 @@ test('Today nodes expose root-to-parent ancestor paths and compact long breadcru
         model.nodes.find(node => node.uid === 'leaf-path').ancestorPath.map(node => node.uid),
         ['root-path', 'child-path']
     );
+    assert.deepEqual(
+        model.nodes.find(node => node.uid === 'leaf-path').contextPath.map(node => node.uid),
+        ['root-path', 'note-path', 'child-path']
+    );
     assert.deepEqual(compactTodayBreadcrumb([]), []);
     assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C']), ['A', 'B', 'C']);
     assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D']), ['A', '…', 'D']);
     assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D', 'E']), ['A', '…', 'E']);
+});
+
+test('Today context paths preserve plain, TODO, and DONE physical ancestors', () => {
+    const model = buildTodayTodoTree([
+        plain('daily-log', '[[Daily Log]]', [
+            plain('daily-section', '03 - Daily Tasks', [
+                todo('project', 'Project', [
+                    {
+                        uid: 'done-ancestor',
+                        string: '{{[[DONE]]}} Finished branch',
+                        order: 0,
+                        children: [todo('leaf', 'Leaf')],
+                    },
+                ]),
+            ]),
+        ]),
+    ]);
+
+    const project = model.nodes.find(node => node.uid === 'project');
+    const leaf = model.nodes.find(node => node.uid === 'leaf');
+    assert.deepEqual(project.contextPath.map(segment => segment.string), [
+        '[[Daily Log]]',
+        '03 - Daily Tasks',
+    ]);
+    assert.deepEqual(leaf.contextPath.map(segment => segment.string), [
+        '[[Daily Log]]',
+        '03 - Daily Tasks',
+        '{{[[TODO]]}} Project',
+        '{{[[DONE]]}} Finished branch',
+    ]);
+    assert.equal(leaf.contextPath.some(segment => segment.string === 'August 20th, 2026'), false);
 });
 
 test('collapse defaults to roots, while the current Timing Line branch is expanded', () => {

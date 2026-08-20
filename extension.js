@@ -263,12 +263,19 @@ function dateToPageTitle(date = /* @__PURE__ */ new Date()) {
   return `${value.toLocaleString("en-US", { month: "long" })} ${ordinal(value.getDate())}, ${value.getFullYear()}`;
 }
 var isNode = (value) => value && typeof value === "object" && typeof value.uid === "string";
-var makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
+var makeVisibleNode = ({
+  uid,
+  string,
+  sourceUid = uid,
+  orderPath = [],
+  contextPath = []
+}) => ({
   uid,
   string: typeof string === "string" ? string : "",
   sourceUid,
   status: "TODO",
   orderPath: [...orderPath],
+  contextPath: contextPath.map((segment) => ({ ...segment })),
   ancestorPath: [],
   children: []
 });
@@ -292,28 +299,43 @@ var buildAncestorPath = (uid, visibleByUid, parentByUid) => {
   }
   return path;
 };
+var contextSegment = (node, referenceStrings) => {
+  if (!isNode(node))
+    return null;
+  const referenceUid = referencedBlockUid(node.string);
+  const referencedString = referenceUid ? referenceStrings?.[referenceUid] : null;
+  return {
+    // A pure reference is a physical occurrence but its canonical task is
+    // the useful Roam navigation target and the stable display label.
+    uid: referenceUid || node.uid,
+    string: typeof referencedString === "string" ? referencedString : node.string,
+    ...referenceUid ? { sourceUid: node.uid } : {}
+  };
+};
+var buildContextPath = (physicalPath, referenceStrings) => (Array.isArray(physicalPath) ? physicalPath : []).map((node) => contextSegment(node, referenceStrings)).filter(Boolean);
 function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
   const outputRoots = [];
   const visibleByUid = /* @__PURE__ */ new Map();
   const parentByUid = /* @__PURE__ */ new Map();
   const occurrences = /* @__PURE__ */ new Set();
-  const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent }) => {
+  const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent, contextPath }) => {
     let visible = visibleByUid.get(uid);
     if (!visible) {
-      visible = makeVisibleNode({ uid, string, sourceUid, orderPath });
+      visible = makeVisibleNode({ uid, string, sourceUid, orderPath, contextPath });
       visibleByUid.set(uid, visible);
       parentByUid.set(uid, parent?.uid || null);
       appendTo(parent, visible, outputRoots);
     }
     return visible;
   };
-  const walk = (node, nearestVisible, orderPath) => {
+  const walk = (node, nearestVisible, orderPath, physicalPath = []) => {
     if (!isNode(node) || occurrences.has(node.uid))
       return;
     occurrences.add(node.uid);
     const rawString = typeof node.string === "string" ? node.string : "";
     const status = taskStatus(rawString);
     const referenceUid = referencedBlockUid(rawString);
+    const contextPath = buildContextPath(physicalPath, referenceStrings);
     let nextParent = nearestVisible;
     if (referenceUid) {
       const referencedString = referenceStrings?.[referenceUid];
@@ -323,7 +345,8 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
           string: referencedString,
           sourceUid: node.uid,
           orderPath,
-          parent: nearestVisible
+          parent: nearestVisible,
+          contextPath
         });
       }
     } else if (status === "TODO") {
@@ -331,11 +354,14 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
         uid: node.uid,
         string: rawString,
         orderPath,
-        parent: nearestVisible
+        parent: nearestVisible,
+        contextPath
       });
     }
     const children = Array.isArray(node.children) ? node.children : [];
-    children.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((child, index) => walk(child, nextParent, [...orderPath, index]));
+    children.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach(
+      (child, index) => walk(child, nextParent, [...orderPath, index], [...physicalPath, node])
+    );
   };
   roots.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((root, index) => walk(root, null, [index]));
   const all = [...visibleByUid.values()];
@@ -363,12 +389,6 @@ function currentTodayPath(model, taskUid) {
     current = model.parentByUid?.get(current) || null;
   }
   return path;
-}
-function compactTodayBreadcrumb(labels = []) {
-  const clean = (Array.isArray(labels) ? labels : []).filter((label) => typeof label === "string" && label.trim()).map((label) => label.trim());
-  if (clean.length <= 3)
-    return clean;
-  return [clean[0], "\u2026", clean.at(-1)];
 }
 var walkVisible = (nodes, rows, expanded, collapsed, defaultOpenPath, depth = 0) => {
   for (const node of nodes || []) {
@@ -1156,6 +1176,58 @@ async function openBlockInRightSidebar(uid) {
   }
 }
 
+// src/context-path.js
+var isUid = (value) => typeof value === "string" && value.length > 0;
+var cleanSegment = (segment) => {
+  if (!segment || typeof segment !== "object")
+    return null;
+  const uid = segment.uid;
+  const string = segment.string;
+  if (!isUid(uid) || typeof string !== "string")
+    return null;
+  return {
+    uid,
+    string,
+    ...isUid(segment.sourceUid) ? { sourceUid: segment.sourceUid } : {}
+  };
+};
+function contextPathFromHierarchy(taskUid, hierarchy = {}) {
+  if (!isUid(taskUid))
+    return [];
+  const parentOf = hierarchy?.physicalParentOf || hierarchy?.parentOf || {};
+  const stringOf = hierarchy?.physicalStringOf || hierarchy?.stringOf || {};
+  const canonicalUidOf = hierarchy?.canonicalUidOf || {};
+  const canonicalStringOf = hierarchy?.canonicalStringOf || {};
+  const path = [];
+  const seen = /* @__PURE__ */ new Set([taskUid]);
+  let current = parentOf[taskUid] || null;
+  while (isUid(current) && !seen.has(current)) {
+    seen.add(current);
+    const canonicalUid = canonicalUidOf[current] || current;
+    const segment = cleanSegment({
+      uid: canonicalUid,
+      string: canonicalStringOf[current] ?? stringOf[current],
+      ...canonicalUid !== current ? { sourceUid: current } : {}
+    });
+    if (segment)
+      path.unshift(segment);
+    current = parentOf[current] || null;
+  }
+  return path;
+}
+function contextPathsFromHierarchy(taskUids = [], hierarchy = {}) {
+  const paths = /* @__PURE__ */ new Map();
+  for (const taskUid of new Set(Array.isArray(taskUids) ? taskUids : [])) {
+    if (!isUid(taskUid))
+      continue;
+    paths.set(taskUid, contextPathFromHierarchy(taskUid, hierarchy));
+  }
+  return paths;
+}
+function normalizeContextPath(path = []) {
+  return (Array.isArray(path) ? path : []).map(cleanSegment).filter(Boolean);
+}
+
 // src/entries.js
 var DRAWER_SHAPES = [
   { prefix: "", suffix: "::" },
@@ -1245,7 +1317,17 @@ function readAllEntries() {
 function readDashboardSnapshot() {
   const entries = readAllEntries();
   const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
-  return { entries, hierarchy };
+  const contextPaths = contextPathsFromHierarchy(
+    entries.map((entry) => entry.taskUid),
+    hierarchy
+  );
+  return {
+    entries: entries.map((entry) => ({
+      ...entry,
+      contextPath: contextPaths.get(entry.taskUid) || []
+    })),
+    hierarchy
+  };
 }
 var MAX_ANCESTOR_DEPTH = 24;
 var PARENTS_QUERY = `[:find ?uid ?parent-uid ?parent-string
@@ -1315,11 +1397,25 @@ var readBlockStrings = (uids) => {
 function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   const parentOf = {};
   const stringOf = {};
+  const physicalParentOf = {};
+  const physicalStringOf = {};
+  const canonicalUidOf = {};
+  const canonicalStringOf = {};
   const mirrorsOf = {};
   const issues = [];
   const seeds = new Set(taskUids);
-  if (seeds.size === 0)
-    return { parentOf, stringOf, mirrorsOf, issues };
+  if (seeds.size === 0) {
+    return {
+      parentOf,
+      stringOf,
+      physicalParentOf,
+      physicalStringOf,
+      canonicalUidOf,
+      canonicalStringOf,
+      mirrorsOf,
+      issues
+    };
+  }
   if (includeSeedStrings)
     Object.assign(stringOf, readBlockStrings([...seeds]));
   let mirrorRows;
@@ -1340,7 +1436,7 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   }
   let frontier = [...seeds, ...Object.values(mirrorsOf).flat()];
   for (let depth = 0; depth < MAX_ANCESTOR_DEPTH && frontier.length > 0; depth += 1) {
-    const next = [];
+    const next = /* @__PURE__ */ new Set();
     let parentRows;
     try {
       parentRows = validateQueryRows(
@@ -1372,9 +1468,16 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
       }
     }
     for (const [uid, rawParentUid, rawParentString] of parentRows) {
+      physicalParentOf[uid] = rawParentUid;
+      physicalStringOf[rawParentUid] = rawParentString;
       const referenced = referencedBlockUid(rawParentString);
       const parentUid = referenced || rawParentUid;
       const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
+      if (referenced && typeof parentString === "string") {
+        canonicalUidOf[rawParentUid] = parentUid;
+        canonicalStringOf[rawParentUid] = parentString;
+      }
+      next.add(rawParentUid);
       parentOf[uid] = parentUid;
       if (referenced && typeof parentString !== "string") {
         issues.push({
@@ -1390,9 +1493,9 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
       if (parentUid in stringOf)
         continue;
       stringOf[parentUid] = parentString;
-      next.push(parentUid);
+      next.add(parentUid);
     }
-    frontier = next;
+    frontier = [...next];
   }
   if (frontier.length > 0) {
     const frontierUids = new Set(frontier);
@@ -1438,7 +1541,16 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
       current = parentOf[current];
     }
   }
-  return { parentOf, stringOf, mirrorsOf, issues };
+  return {
+    parentOf,
+    stringOf,
+    physicalParentOf,
+    physicalStringOf,
+    canonicalUidOf,
+    canonicalStringOf,
+    mirrorsOf,
+    issues
+  };
 }
 
 // src/active-work.js
@@ -1720,6 +1832,33 @@ function refresh({ entries, notify: shouldNotify = true } = {}) {
     notice = GRAPH_UNCERTAIN;
     console.error("[roam-logbook] could not refresh clocks", error);
     return running;
+  }
+  const previousContext = new Map(
+    entriesSnapshot.filter((entry) => Array.isArray(entry?.contextPath)).map((entry) => [entry.taskUid, entry.contextPath])
+  );
+  if (entries === void 0 && all.length > 0) {
+    try {
+      const hierarchy = readHierarchy([...new Set(all.map((entry) => entry.taskUid))]);
+      const contextPaths = contextPathsFromHierarchy(
+        all.map((entry) => entry.taskUid),
+        hierarchy
+      );
+      all = all.map((entry) => ({
+        ...entry,
+        contextPath: contextPaths.get(entry.taskUid) || []
+      }));
+    } catch (error) {
+      console.warn("[roam-logbook] context path lookup failed; timing remains available", error);
+      all = all.map((entry) => ({
+        ...entry,
+        contextPath: previousContext.get(entry.taskUid) || []
+      }));
+    }
+  } else {
+    all = all.map((entry) => ({
+      ...entry,
+      contextPath: Array.isArray(entry.contextPath) ? entry.contextPath : previousContext.get(entry.taskUid) || []
+    }));
   }
   entriesSnapshot = all;
   const focused = chooseFocusedEntry(entriesSnapshot);
@@ -3547,8 +3686,9 @@ var taskLink = (row, { onClose = () => {
       void openBlock(row.taskUid);
     },
     // The visible text is the task title alone, so the accessible name has
-    // to spell out the action; the tooltip repeats it for mouse users.
-    { title: accessibleName, ariaLabel: accessibleName }
+    // to spell out the action. Keep the visible control free of a duplicate
+    // native tooltip; keyboard focus and the button name are sufficient.
+    { ariaLabel: accessibleName }
   );
   link.appendChild(el("span", "rlb-task-link__text", title));
   return link;
@@ -4667,7 +4807,7 @@ function createRefreshState({
 
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
-var DASHBOARD_TITLE = "Roam Logbook";
+var DASHBOARD_TITLE = "Task Tracker";
 function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -5972,11 +6112,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
     padding: 6px 6px 7px;
 }
 
-.rlb-surface__section--focused .rlb-run:hover,
-.rlb-surface__section--focused .rlb-run:focus-within {
-    background: var(--rlb-surface-hover);
-}
-
 .rlb-surface__section--recent {
     margin-top: 1px;
 }
@@ -6128,7 +6263,8 @@ var SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 3px;
 }
 
-.rlb-run:hover {
+.rlb-run:hover,
+.rlb-run:focus-within {
     background: rgba(167, 182, 194, 0.2);
 }
 
@@ -6137,10 +6273,90 @@ var SURFACE = String.raw`/* ---- popover ---- */
     display: contents;
 }
 
+.rlb-run__context {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 14px;
+    padding: 0 2px 1px;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb__separator {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    opacity: 0.72;
+}
+
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment {
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 16px;
+    height: auto;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 2px !important;
+    overflow: hidden;
+    color: var(--rlb-muted);
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.2;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:hover,
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:focus-visible,
+.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:active {
+    color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-run--with-context .rlb-run__title {
+    grid-row: 2;
+}
+
+.rlb-run--with-context .rlb-run__meta {
+    grid-row: 3;
+}
+
+.rlb-run--with-context .rlb-run__actions {
+    grid-row: 1 / span 3;
+}
+
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 1;
     grid-row: 1;
     display: block;
+    justify-self: start;
+    width: fit-content;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -6153,6 +6369,8 @@ var SURFACE = String.raw`/* ---- popover ---- */
     line-height: 1.25;
     text-decoration: none;
     border-radius: 2px;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {
@@ -6161,9 +6379,12 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:hover,
-.bp3-button.bp3-minimal.rlb-run__title:focus-visible {
+.bp3-button.bp3-minimal.rlb-run__title:focus-visible,
+.bp3-button.bp3-minimal.rlb-run__title:active {
     color: var(--rlb-surface-link-hover);
     text-decoration: none;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title:focus-visible {
@@ -6289,6 +6510,10 @@ var SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-run--inline-meta .rlb-run__actions {
     grid-row: 1;
+}
+
+.rlb-run--with-context.rlb-run--inline-meta .rlb-run__actions {
+    grid-row: 1 / span 3;
 }
 
 .rlb-run__actions .rlb-run__checkout {
@@ -6439,7 +6664,9 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-today__breadcrumb {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 2px;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
@@ -6448,13 +6675,49 @@ var SURFACE = String.raw`/* ---- popover ---- */
     font-size: 11px;
     font-weight: 500;
     line-height: 1.2;
+    white-space: nowrap;
+}
+
+.rlb-context-breadcrumb__segment {
+    display: inline-block !important;
+    flex: 0 1 auto;
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0 !important;
+    color: var(--rlb-muted);
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: inherit;
+    text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-context-breadcrumb__segment:hover,
+.rlb-context-breadcrumb__segment:focus-visible,
+.rlb-context-breadcrumb__segment:active {
+    color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.rlb-context-breadcrumb__segment:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 1px;
+}
+
+.rlb-context-breadcrumb__separator {
+    flex: 0 0 auto;
+    color: var(--rlb-muted);
+    opacity: 0.72;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {
     display: block !important;
-    width: 100%;
+    width: fit-content;
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
@@ -6467,11 +6730,15 @@ var SURFACE = String.raw`/* ---- popover ---- */
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title:hover,
 .bp3-button.bp3-minimal.rlb-today__title:focus-visible {
     color: var(--rlb-surface-link-hover);
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .rlb-today__action {
@@ -7693,7 +7960,7 @@ var rowFigures = (entry, now) => {
 };
 var fullTaskLabel = (title) => `Open this block: ${title}`;
 var focusRecentLabel = (title) => `Switch Focus to ${title}`;
-var dashboardLabel = "Open Roam Logbook Dashboard";
+var dashboardLabel = "Open Task Tracker Dashboard";
 var expandTodayLabel = "Expand all Today tasks";
 var collapseTodayLabel = "Collapse all Today tasks";
 var switchLabel = (view) => `Show ${view === "today" ? "Today tasks" : "Active Threads"}`;
@@ -7727,18 +7994,45 @@ var renderTitle = (row, onOpenTask) => {
     (event) => onOpenTask?.(row.taskUid, event),
     // The visible text is the task title alone; the accessible name has to
     // add the action, so this is an override rather than a duplicate.
-    { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+    { ariaLabel: fullTaskLabel(title) }
   );
   return taskButton;
+};
+var renderContextPath = (path, onOpenTask, className = "rlb-context-breadcrumb") => {
+  const segments = normalizeContextPath(path);
+  if (segments.length === 0)
+    return null;
+  const breadcrumb = el("nav", className);
+  breadcrumb.setAttribute("aria-label", "Context path");
+  for (const [index, segment] of segments.entries()) {
+    if (index > 0) {
+      const separator = el("span", "rlb-context-breadcrumb__separator", "\u203A");
+      separator.setAttribute("aria-hidden", "true");
+      breadcrumb.appendChild(separator);
+    }
+    const label = formatDisplayTitle({
+      taskString: segment.string,
+      title: segment.title,
+      taskUid: segment.uid
+    });
+    const link = button(
+      "bp3-button bp3-minimal rlb-context-breadcrumb__segment",
+      label,
+      (event) => {
+        event.stopPropagation();
+        onOpenTask?.(segment.uid, event, { context: true });
+      },
+      { ariaLabel: `Open parent block: ${label}` }
+    );
+    link.dataset.action = "context-open";
+    link.dataset.contextUid = segment.uid;
+    breadcrumb.appendChild(link);
+  }
+  return breadcrumb;
 };
 var renderTodayRow = (row, options) => {
   const node = row.node;
   const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
-  const breadcrumbLabels = node.ancestorPath?.length > 0 && node.children.length > 0 ? compactTodayBreadcrumb(
-    node.ancestorPath.map(
-      (ancestor) => formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
-    )
-  ) : [];
   const rowNode = el("div", "rlb-today__row");
   rowNode.dataset.taskUid = node.uid;
   rowNode.style.setProperty("--rlb-today-depth", String(row.depth));
@@ -7765,16 +8059,14 @@ var renderTodayRow = (row, options) => {
     rail.appendChild(el("span", "rlb-today__spacer"));
   }
   const content = el("div", "rlb-today__content");
-  if (breadcrumbLabels.length > 0) {
-    const breadcrumb = el("div", "rlb-today__breadcrumb", breadcrumbLabels.join(" \u203A "));
-    breadcrumb.setAttribute("aria-hidden", "true");
+  const breadcrumb = renderContextPath(node.contextPath, options.onOpenTask, "rlb-today__breadcrumb");
+  if (breadcrumb)
     content.appendChild(breadcrumb);
-  }
   const titleButton = button(
     "bp3-button bp3-minimal rlb-today__title",
     title,
     (event) => options.onOpenTask?.(node.uid, event, { today: true }),
-    { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
+    { ariaLabel: fullTaskLabel(title) }
   );
   titleButton.dataset.action = "today-open";
   content.appendChild(titleButton);
@@ -7830,6 +8122,11 @@ var renderRunningRow = (row, now, options) => {
   if (started.datetime)
     startedNode.dateTime = started.datetime;
   appendMetaNodes(meta, [primary, startedNode]);
+  const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, "rlb-run__context");
+  if (breadcrumb) {
+    node.classList.add("rlb-run--with-context");
+    body.appendChild(breadcrumb);
+  }
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(
@@ -7887,6 +8184,11 @@ var renderRecentRow = (row, now, options) => {
     endedNode.dateTime = ended.datetime;
   endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
   meta.appendChild(endedNode);
+  const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, "rlb-run__context");
+  if (breadcrumb) {
+    node.classList.add("rlb-run--with-context");
+    body.appendChild(breadcrumb);
+  }
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   if (row.status === "DONE") {
@@ -7927,6 +8229,7 @@ function buildSessionSurfaceModel({
     taskString: entry.taskString,
     title: entry.title,
     status: entry.status ?? null,
+    contextPath: normalizeContextPath(entry.contextPath),
     entry
   }));
   const recentRows = recentItems.map((entry) => ({
@@ -7936,6 +8239,7 @@ function buildSessionSurfaceModel({
     taskString: entry.taskString,
     title: entry.title,
     status: entry.status ?? null,
+    contextPath: normalizeContextPath(entry.contextPath),
     entry
   }));
   return {
@@ -8000,7 +8304,7 @@ function renderSessionSurface(root, model, options = {}) {
   header.appendChild(title);
   if (options.onSwitchView) {
     const switcher = el("nav", "rlb-surface__view-switch");
-    switcher.setAttribute("aria-label", "Logbook view");
+    switcher.setAttribute("aria-label", "Task Tracker view");
     const todayModel = options.todayModel || { count: 0 };
     const todayLoading = todayModel.loading === true || ["idle", "loading"].includes(todayModel.status);
     const todayColdError = (todayModel.error === true || todayModel.status === "error") && todayModel.hasSnapshot !== true;
@@ -8740,8 +9044,8 @@ var WIDGET_ID = "roam-logbook-topbar";
 var POPOVER_ID = "roam-logbook-popover";
 var POPOVER_TITLE_ID = "roam-logbook-popover-title";
 var TOPBAR_STATUS_ID = "roam-logbook-topbar-status";
-var TOPBAR_LABEL = "Open Roam Logbook Active Work";
-var TOPBAR_TITLE = "Open Active Work details";
+var TOPBAR_LABEL = "Open Task Tracker Active Threads";
+var TOPBAR_TITLE = "Open Task Tracker details";
 var TOPBAR_SELECTOR2 = ".rm-topbar";
 var TOPBAR_REFRESH_MESSAGES = {
   ...REFRESH_MESSAGES.activeWork,
@@ -9189,7 +9493,7 @@ function createTopbar({
     const refreshStatus = getLastRefreshStatus();
     const options = surfaceOptions(model);
     options.openLineWindowMinutes = model.openLineWindowMinutes;
-    options.emptyMessage = refreshState.state === "loading" ? TOPBAR_REFRESH_MESSAGES.loading : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Logbook: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
+    options.emptyMessage = refreshState.state === "loading" ? TOPBAR_REFRESH_MESSAGES.loading : refreshStatus.ok ? "No Timing Line is active. Right-click a TODO bullet and choose Plugins \u2192 Task Tracker: Clock in." : "Active Work state could not be confirmed. Retry after Roam finishes syncing.";
     options.todayNotice = todayNotice;
     renderSessionSurface(popover, model, options);
     themeRuntime?.apply(popover);
@@ -9758,13 +10062,13 @@ function createTimingLineSidebarFronting({
 }
 
 // src/extension.js
-var CONTEXT_CLOCK_IN = "Logbook: Clock in";
-var CONTEXT_CLOCK_OUT = "Logbook: Clock out";
-var BRAND_NAME = "Roam Logbook";
+var CONTEXT_CLOCK_IN = "Task Tracker: Clock in";
+var CONTEXT_CLOCK_OUT = "Task Tracker: Clock out";
+var BRAND_NAME = "Task Tracker";
 var PALETTE_COMMANDS = [
-  "Logbook: Focus current block",
-  "Logbook: Clock out Timing Line",
-  "Logbook: Open dashboard"
+  "Task Tracker: Focus current block",
+  "Task Tracker: Clock out Timing Line",
+  "Task Tracker: Open dashboard"
 ];
 var RETIRED_PALETTE_COMMANDS = [
   "Logbook: Check for unfinished clocks",

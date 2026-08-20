@@ -1,5 +1,5 @@
 /**
- * Roam Logbook — org-mode clock tracking for Roam TODOs.
+ * Task Tracker — org-mode clock tracking for Roam TODOs.
  *
  * Right-click a TODO bullet to clock in; the topbar shows the live session and
  * the dashboard adds it up. Entries live in the graph as an org LOGBOOK drawer,
@@ -30,14 +30,14 @@ import { PLUGIN_VERSION } from './version.js';
 import { attachCompletionHandling } from './completion.js';
 import { createTimingLineSidebarFronting } from './timing-line-sidebar.js';
 
-const CONTEXT_CLOCK_IN = 'Logbook: Clock in';
-const CONTEXT_CLOCK_OUT = 'Logbook: Clock out';
-const BRAND_NAME = 'Roam Logbook';
+const CONTEXT_CLOCK_IN = 'Task Tracker: Clock in';
+const CONTEXT_CLOCK_OUT = 'Task Tracker: Clock out';
+const BRAND_NAME = 'Task Tracker';
 
 const PALETTE_COMMANDS = [
-    'Logbook: Focus current block',
-    'Logbook: Clock out Timing Line',
-    'Logbook: Open dashboard',
+    'Task Tracker: Focus current block',
+    'Task Tracker: Clock out Timing Line',
+    'Task Tracker: Open dashboard',
 ];
 const RETIRED_PALETTE_COMMANDS = [
     'Logbook: Check for unfinished clocks',

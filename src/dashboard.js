@@ -32,7 +32,7 @@ import { acquireDocumentScrollLock } from './scroll-lock.js';
 import { createRefreshState, REFRESH_MESSAGES } from './refresh-state.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
-const DASHBOARD_TITLE = 'Roam Logbook';
+const DASHBOARD_TITLE = 'Task Tracker';
 
 export function createDashboard({
     now: nowFn = () => new Date(),

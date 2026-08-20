@@ -63,6 +63,10 @@ test('Timing and Parallel Thread buttons expose the same bracket-preserving visi
         start: new Date('2026-08-17T10:00:00'),
         end: null,
         priorMinutes: 0,
+        contextPath: [
+            { uid: 'daily-log', string: '[[Daily Log]]' },
+            { uid: 'daily-section', string: '03 - Daily Tasks' },
+        ],
     };
     const openLine = {
         clockUid: 'clock-title-02',
@@ -74,6 +78,7 @@ test('Timing and Parallel Thread buttons expose the same bracket-preserving visi
         end: new Date('2026-08-17T10:05:00'),
         minutes: 65,
         priorMinutes: 65,
+        contextPath: [{ uid: 'project', string: '{{[[TODO]]}} Project' }],
     };
     const root = document.getElementById('surface');
     const model = buildSessionSurfaceModel({ entries: [timing], recentItems: [openLine], now });
@@ -98,6 +103,16 @@ test('Timing and Parallel Thread buttons expose the same bracket-preserving visi
     );
     assert.equal(root.querySelectorAll('.rlb-run__title a').length, 0);
     assert.ok(titles.every(node => node.tagName === 'BUTTON'));
+    assert.ok(titles.every(node => node.title === ''));
+    assert.deepEqual(
+        [...root.querySelectorAll('.rlb-run__context')].map(node =>
+            [...node.querySelectorAll('.rlb-context-breadcrumb__segment')].map(segment => segment.textContent)
+        ),
+        [
+            ['[[Daily Log]]', '03 - Daily Tasks'],
+            ['Project'],
+        ]
+    );
 
     const completed = root.querySelector('.rlb-run--recent .rlb-run__completed');
     assert.ok(completed, 'a DONE Parallel Thread exposes a completed status indicator');

@@ -53,10 +53,10 @@ test('the final bundle completes onload → clock-in → dashboard → onunload 
     try {
         extension.onload({ extensionAPI });
         assert.ok(document.querySelector('#roam-logbook-topbar'));
-        await context.get('Logbook: Clock in').callback({ 'block-uid': TASK.uid });
+        await context.get('Task Tracker: Clock in').callback({ 'block-uid': TASK.uid });
         assert.equal(document.querySelectorAll('.rlb-topbar__time').length, 1);
 
-        await palette.get('Logbook: Open dashboard')();
+        await palette.get('Task Tracker: Open dashboard')();
         assert.equal(document.querySelector('#roam-logbook-dashboard').classList.contains('rlb-root--open'), true);
         assert.ok(document.querySelector('.rlb-dialog'));
     } finally {

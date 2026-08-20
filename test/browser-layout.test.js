@@ -360,7 +360,7 @@ test('topbar remains a stable unit while Roam search expands and at narrow width
 test('idle topbar icon keeps a square hit target through focus and narrow search layout', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(
-        htmlWithLateHost(`<div class="rm-topbar" style="width:360px"><div class="rlb-topbar__layout" style="width:100%;display:flex"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Roam Logbook"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div><div class="rlb-topbar__search" style="flex:1 1 auto"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
+        htmlWithLateHost(`<div class="rm-topbar" style="width:360px"><div class="rlb-topbar__layout" style="width:100%;display:flex"><div class="rlb-nav" style="flex:0 0 72px">‹ ›</div><div class="rlb-topbar"><button class="bp3-button bp3-minimal rlb-topbar__button rlb-topbar__button--icon-only" aria-label="Task Tracker"><span class="bp3-icon bp3-icon-history rlb-topbar__icon"></span></button></div><div class="rlb-topbar__search" style="flex:1 1 auto"><input style="width:100%" aria-label="Find or create a page" /></div><div class="rlb-right" style="flex:0 0 56px">?</div></div></div>`),
         `(() => {
             const button = document.querySelector('.rlb-topbar__button');
             const icon = document.querySelector('.rlb-topbar__icon');
@@ -426,7 +426,7 @@ test('Started date and time stay on one baseline-aligned compact line', async t 
 
 test('dashboard overview stays four-column desktop without a secondary view', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="rlb-header__title">Roam Logbook</h2></div><select aria-label="Dashboard date range"><option>Last 7 days</option></select></header><div class="rlb-summary"><dl class="rlb-overview rlb-overview--compact" aria-label="Roam Logbook overview"><div class="rlb-overview__item"><dt class="rlb-overview__label">Today</dt><dd class="rlb-overview__value">2h 17m</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Last 7 days</dt><dd class="rlb-overview__value">13h 47m</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Sessions</dt><dd class="rlb-overview__value">7</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Tasks tracked</dt><dd class="rlb-overview__value">6</dd></div></dl></div><div class="rlb-body"><section class="rlb-dashboard-section rlb-by-task"><table class="rlb-table"><tbody><tr><td>Reading</td><td>2</td><td>1h</td><td>1h</td></tr></tbody></table></section></div></div></div>`;
+    const markup = `<div class="rlb-root rlb-root--open rlb-dashboard"><div class="rlb-dialog" style="width:960px"><header class="rlb-header bp3-dialog-header"><div class="rlb-header__heading"><h2 class="rlb-header__title">Task Tracker</h2></div><select aria-label="Dashboard date range"><option>Last 7 days</option></select></header><div class="rlb-summary"><dl class="rlb-overview rlb-overview--compact" aria-label="Task Tracker overview"><div class="rlb-overview__item"><dt class="rlb-overview__label">Today</dt><dd class="rlb-overview__value">2h 17m</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Last 7 days</dt><dd class="rlb-overview__value">13h 47m</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Sessions</dt><dd class="rlb-overview__value">7</dd></div><div class="rlb-overview__item"><dt class="rlb-overview__label">Tasks tracked</dt><dd class="rlb-overview__value">6</dd></div></dl></div><div class="rlb-body"><section class="rlb-dashboard-section rlb-by-task"><table class="rlb-table"><tbody><tr><td>Reading</td><td>2</td><td>1h</td><td>1h</td></tr></tbody></table></section></div></div></div>`;
     const geometry = await withChromium(
         htmlWithLateHost(markup),
         `(() => {
@@ -592,7 +592,7 @@ test('beta.50 toolbar is one stable line across desktop, narrow, loading, error,
                 </nav>
                 <div class="rlb-surface__actions">
                     ${expandable ? '<button class="bp3-button bp3-minimal bp3-small bp3-icon-expand-all rlb-surface__icon-button rlb-today__control" data-action="today-toggle-all" title="Expand all Today tasks" aria-label="Expand all Today tasks"></button>' : ''}
-                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button>
+                    <button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Task Tracker Dashboard" aria-label="Open Task Tracker Dashboard"></button>
                 </div>
             </header>
             <div class="rlb-surface__list">${error ? '<div class="rlb-surface__inline-status" role="alert"><span>Couldn’t update</span><span> · </span><button class="bp3-button bp3-minimal bp3-small rlb-surface__retry">Retry</button></div>' : ''}</div>
@@ -856,7 +856,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                     <button class="bp3-button bp3-minimal rlb-surface__view-control is-selected" data-view="threads" aria-pressed="true"><span>Threads</span> <span class="rlb-surface__view-count">2</span></button>
                     <button class="bp3-button bp3-minimal rlb-surface__view-control" data-view="today" aria-pressed="false"><span>Today</span> <span class="rlb-surface__view-count">12</span></button>
                 </nav>
-                <div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Roam Logbook Dashboard" aria-label="Open Roam Logbook Dashboard"></button></div>
+                <div class="rlb-surface__actions"><button class="bp3-button bp3-minimal bp3-small bp3-icon-dashboard rlb-surface__icon-button" data-action="dashboard" title="Open Task Tracker Dashboard" aria-label="Open Task Tracker Dashboard"></button></div>
             </header>
             <div class="rlb-surface__list" role="group" aria-label="Active Threads">
                 <section class="rlb-surface__section rlb-surface__section--focused" aria-label="TIMING">
@@ -1429,7 +1429,7 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
             <div id="background"></div>
             <div class="rlb-root rlb-root--open rlb-dashboard" aria-hidden="false">
                 <div class="rlb-dialog" role="dialog" aria-modal="true" aria-labelledby="dashboard-title" style="height:680px">
-                    <header class="rlb-header bp3-dialog-header"><h2 id="dashboard-title" class="rlb-header__title">Roam Logbook</h2></header>
+                    <header class="rlb-header bp3-dialog-header"><h2 id="dashboard-title" class="rlb-header__title">Task Tracker</h2></header>
                     <div class="rlb-summary"><div class="rlb-overview"><div class="rlb-overview__item">Summary</div></div></div>
                     <div class="rlb-body rlb-body__scroll"><div style="height:1400px">Long dashboard content</div></div>
                 </div>

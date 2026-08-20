@@ -75,8 +75,9 @@ export const taskLink = (row, { onClose = () => {} } = {}) => {
             void openBlock(row.taskUid);
         },
         // The visible text is the task title alone, so the accessible name has
-        // to spell out the action; the tooltip repeats it for mouse users.
-        { title: accessibleName, ariaLabel: accessibleName }
+        // to spell out the action. Keep the visible control free of a duplicate
+        // native tooltip; keyboard focus and the button name are sufficient.
+        { ariaLabel: accessibleName }
     );
     link.appendChild(el('span', 'rlb-task-link__text', title));
     return link;

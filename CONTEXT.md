@@ -1,6 +1,6 @@
-# Roam Logbook
+# Task Tracker
 
-The Roam Logbook context names the work units and time intervals that make up a
+The Task Tracker context names the work units and time intervals that make up a
 graph-backed work log. These terms keep the graph record, pause/resume behavior,
 and dashboard reporting consistent.
 

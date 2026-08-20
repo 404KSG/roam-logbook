@@ -121,7 +121,7 @@ test.after(() => uninstallGraph());
 
 test('Clock out Timing Line ends the running clock even when no editor block is focused', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const callback = paletteCommands.get('Logbook: Clock out Timing Line');
+    const callback = paletteCommands.get('Task Tracker: Clock out Timing Line');
 
     await callback();
 
@@ -138,7 +138,7 @@ test('context menu does not offer Clock In on a direct DONE Task', async () => {
         block: { uid: TASK.uid, string: '{{[[DONE]]}} already finished' },
     });
 
-    const command = contextCommands.get('Logbook: Clock in');
+    const command = contextCommands.get('Task Tracker: Clock in');
     assert.equal(command['display-conditional']({ 'block-uid': TASK.uid }), false);
 });
 
@@ -151,7 +151,7 @@ test('single Focused surface omits the bulk Clock Out All action', async () => {
 
 test('Clock out Timing Line writes on the first invocation without confirmation', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = paletteCommands.get('Logbook: Clock out Timing Line');
+    const command = paletteCommands.get('Task Tracker: Clock out Timing Line');
 
     await command();
 
@@ -164,7 +164,7 @@ test('Command Palette reports a partial Clock Out All and retains the failed Ses
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
     seedOpenClock(OTHER.uid, 'action-legacy-other');
     clock.refresh();
-    const command = paletteCommands.get('Logbook: Clock out Timing Line');
+    const command = paletteCommands.get('Task Tracker: Clock out Timing Line');
     toasts.length = 0;
 
     const originalUpdate = graph.api.data.block.update;
@@ -217,7 +217,7 @@ test('the public batch close helper uses the shared partial presenter contract',
 
 test('Command Palette presents an uncertain Timing Line result once and preserves success silence', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = paletteCommands.get('Logbook: Clock out Timing Line');
+    const command = paletteCommands.get('Task Tracker: Clock out Timing Line');
     const restore = failNextPostWriteReads();
     try {
         await command();
@@ -238,7 +238,7 @@ test('Command Palette presents an uncertain Timing Line result once and preserve
 
 test('context menu presents an uncertain mutation result without continuing to write', async () => {
     await clock.clockIn(TASK.uid, { now: new Date('2026-08-15T09:00:00') });
-    const command = contextCommands.get('Logbook: Clock out');
+    const command = contextCommands.get('Task Tracker: Clock out');
     const restore = failNextPostWriteReads();
     try {
         await command.callback({ 'block-uid': TASK.uid });
@@ -266,15 +266,15 @@ test('topbar per-session action presents an uncertain mutation result', async ()
 
 test('hot reload keeps only the three current Command Palette actions', () => {
     assert.deepEqual([...paletteCommands.keys()], [
-        'Logbook: Focus current block',
-        'Logbook: Clock out Timing Line',
-        'Logbook: Open dashboard',
+        'Task Tracker: Focus current block',
+        'Task Tracker: Clock out Timing Line',
+        'Task Tracker: Open dashboard',
     ]);
     extension.onunload();
     extension.onload({ extensionAPI });
     assert.deepEqual([...paletteCommands.keys()], [
-        'Logbook: Focus current block',
-        'Logbook: Clock out Timing Line',
-        'Logbook: Open dashboard',
+        'Task Tracker: Focus current block',
+        'Task Tracker: Clock out Timing Line',
+        'Task Tracker: Open dashboard',
     ]);
 });
