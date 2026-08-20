@@ -23,7 +23,6 @@ import {
     filterByRange,
     getRange,
     RANGES,
-    summariseSessionMetrics,
 } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
@@ -33,6 +32,117 @@ import { createRefreshState, REFRESH_MESSAGES } from './refresh-state.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Task Tracker';
+
+const localDayKey = date =>
+    `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+const liveMetricBoundaryKey = (rangeId, date) => `${rangeId}:${localDayKey(date)}`;
+
+const runningEntries = entries =>
+    entries.filter(entry => entry?.start && entry.running);
+
+const minutesFor = (entries, now) =>
+    entries.reduce((sum, entry) => sum + entryMinutes(entry, now), 0);
+
+const fixedMinutesFor = (entries, now) =>
+    entries.reduce((sum, entry) => sum + (entry.running ? 0 : entryMinutes(entry, now)), 0);
+
+const countSessions = entries => entries.filter(entry => entry?.start).length;
+
+const countTasks = entries => {
+    const taskUids = new Set();
+    for (const entry of entries) {
+        if (entry?.start) taskUids.add(entry.taskUid);
+    }
+    return taskUids.size;
+};
+
+/**
+ * Keep the Dashboard's live headline metrics cheap after the initial render.
+ *
+ * `buildDashboard` has already paid the full-history aggregation cost. The
+ * headline totals therefore cache that model result after removing the
+ * current running contribution. Subsequent ticks only evaluate the running
+ * entries. A local day boundary rebuilds the fixed portions from the same
+ * snapshot so Today and rolling ranges keep their date semantics without a
+ * graph read.
+ */
+export function createDashboardLiveMetricCache({
+    entries = [],
+    model = null,
+    rangeId = 'week',
+    now = new Date(),
+} = {}) {
+    const snapshotEntries = Array.isArray(entries) ? entries : [];
+    const modelEntries = Array.isArray(model?.entries)
+        ? model.entries
+        : filterByRange(snapshotEntries, rangeId, now);
+    const sessions = Number.isFinite(model?.sessionMetrics?.sessions)
+        ? model.sessionMetrics.sessions
+        : modelEntries.filter(entry => entry?.start).length;
+    const tasks = Array.isArray(model?.tasks) ? model.tasks.length : 0;
+
+    const buildState = (at, useModelTotals = false) => {
+        const selected = useModelTotals
+            ? modelEntries
+            : filterByRange(snapshotEntries, rangeId, at);
+        const today = filterByRange(snapshotEntries, 'today', at);
+        const selectedRunning = runningEntries(selected);
+        const todayRunning = runningEntries(today);
+        const selectedTotal =
+            useModelTotals && Number.isFinite(model?.totalMinutes)
+                ? model.totalMinutes
+                : fixedMinutesFor(selected, at) + minutesFor(selectedRunning, at);
+        const todayTotal =
+            useModelTotals && Number.isFinite(model?.todayMinutes)
+                ? model.todayMinutes
+                : fixedMinutesFor(today, at) + minutesFor(todayRunning, at);
+
+        return {
+            selectedFixedMinutes: Math.max(
+                0,
+                selectedTotal - minutesFor(selectedRunning, at)
+            ),
+            todayFixedMinutes: Math.max(0, todayTotal - minutesFor(todayRunning, at)),
+            selectedRunning,
+            todayRunning,
+            ...(useModelTotals
+                ? {
+                      sessions,
+                      tasks,
+                  }
+                : {
+                      sessions: countSessions(selected),
+                      tasks: countTasks(selected),
+                  }),
+        };
+    };
+
+    let boundary = liveMetricBoundaryKey(rangeId, now);
+    let state = buildState(now, true);
+    let rebuildCount = 1;
+
+    return {
+        read(at) {
+            const nextBoundary = liveMetricBoundaryKey(rangeId, at);
+            if (nextBoundary !== boundary) {
+                state = buildState(at);
+                boundary = nextBoundary;
+                rebuildCount += 1;
+            }
+            return {
+                todayMinutes: state.todayFixedMinutes + minutesFor(state.todayRunning, at),
+                selectedMinutes:
+                    state.selectedFixedMinutes + minutesFor(state.selectedRunning, at),
+                sessions: state.sessions,
+                tasks: state.tasks,
+            };
+        },
+        getRebuildCount() {
+            return rebuildCount;
+        },
+    };
+}
 
 export function createDashboard({
     now: nowFn = () => new Date(),
@@ -53,6 +163,7 @@ export function createDashboard({
     let refreshAlertNode = null;
     let lastSnapshot = null;
     let lastModel = null;
+    let liveMetricCache = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
     let focusInFlight = null;
@@ -105,16 +216,18 @@ export function createDashboard({
 
     const updateLiveMetricNodes = now => {
         if (!lastModel) return;
-        const metrics = summariseSessionMetrics(lastModel.entries, now);
-        const todayMinutes = filterByRange(lastSnapshot?.entries || [], 'today', now).reduce(
-            (sum, entry) => sum + entryMinutes(entry, now),
-            0
-        );
+        const metrics =
+            liveMetricCache?.read(now) || {
+                todayMinutes: lastModel.todayMinutes,
+                selectedMinutes: lastModel.totalMinutes,
+                sessions: lastModel.sessionMetrics?.sessions || 0,
+                tasks: lastModel.tasks.length,
+            };
         const values = {
-            today: formatMinutesHuman(todayMinutes),
-            selected: formatMinutesHuman(metrics.focusMinutes),
+            today: formatMinutesHuman(metrics.todayMinutes),
+            selected: formatMinutesHuman(metrics.selectedMinutes),
             sessions: String(metrics.sessions),
-            tasks: String(lastModel.tasks.length),
+            tasks: String(metrics.tasks),
         };
         for (const node of bodyNode?.querySelectorAll('[data-live-metric]') || []) {
             const value = values[node.dataset.liveMetric];
@@ -242,6 +355,7 @@ export function createDashboard({
                         ...(issueRows.length > 0 ? [dataIssuesSection(issueRows)] : [])
                     );
                     lastModel = null;
+                    liveMetricCache = null;
                     lastTransientIssues = transientIssues;
                     lastRefreshNotice = '';
                     return { ok: false, reason: 'no-snapshot' };
@@ -261,6 +375,12 @@ export function createDashboard({
         clock.refresh({ entries, notify: false });
         lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
         lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
+        liveMetricCache = createDashboardLiveMetricCache({
+            entries,
+            model: lastModel,
+            rangeId,
+            now,
+        });
         lastTransientIssues = transientIssues;
         lastRefreshNotice = refreshNotice;
         paintDashboard(now);
@@ -326,6 +446,7 @@ export function createDashboard({
         const request = act(() =>
             clock.clockIn(taskUid, {
                 source: 'active-work-switch',
+                trustedNavigationTaskUid: taskUid,
                 ...(typeof scheduleMutationStartFn === 'function'
                     ? { scheduleMutationStartFn }
                     : {}),
@@ -526,6 +647,7 @@ export function createDashboard({
             bodyNode = null;
             activityNode = null;
             lastModel = null;
+            liveMetricCache = null;
             refreshRuntime.dispose();
             focusTrap.deactivate();
             focusInFlight = null;

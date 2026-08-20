@@ -190,6 +190,116 @@ test('an accepted sidebar intent yields before graph writes and keeps the click 
     }
 });
 
+test('a trusted navigation UID publishes before speculative graph reads while mutation stays authoritative', async () => {
+    const graph = seed([TASK]);
+    const scheduler = createManualMutationScheduler();
+    const intents = [];
+    const baselineQueries = graph.queryLog().length;
+    const baselinePulls = graph.pullCount();
+    const unsubscribe = clock.subscribeClockInIntents(intent => {
+        intents.push(intent);
+        return true;
+    });
+    try {
+        const pending = clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            source: 'active-work-switch',
+            trustedNavigationTaskUid: TASK.uid,
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+
+        assert.deepEqual(intents, [
+            {
+                type: 'clock-in-intent',
+                source: 'active-work-switch',
+                taskUid: TASK.uid,
+            },
+        ]);
+        assert.equal(
+            graph.queryLog().length,
+            baselineQueries,
+            'trusted navigation publishes before any speculative graph read'
+        );
+        assert.equal(graph.pullCount(), baselinePulls, 'trusted navigation does not pull before the yield');
+        assert.equal(graph.childrenOf(TASK.uid).length, 0, 'the graph is untouched before the yield');
+
+        await Promise.resolve();
+        assert.equal(scheduler.size, 1);
+        scheduler.runNext();
+        const result = await pending;
+        assert.equal(result.taskUid, TASK.uid);
+        assert.deepEqual(clockLinesOf(graph, TASK.uid), ['CLOCK: [2026-08-05 Wed 15:58]']);
+        assert.ok(graph.queryLog().length > baselineQueries, 'queued mutation still reads the graph');
+        assert.ok(graph.pullCount() > baselinePulls, 'queued mutation still confirms the graph');
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('a trusted navigation UID cannot bypass authoritative TODO validation', async () => {
+    const plain = { uid: 'plain-hint', string: 'just a note', parent: null };
+    const graph = seed([TASK, plain]);
+    const intents = [];
+    const unsubscribe = clock.subscribeClockInIntents(intent => {
+        intents.push(intent);
+        return false;
+    });
+    try {
+        await assert.rejects(
+            () => clock.clockIn(plain.uid, {
+                now: AT_1558,
+                source: 'active-work-switch',
+                trustedNavigationTaskUid: TASK.uid,
+            }),
+            error => error?.code === 'todo-only'
+        );
+        assert.deepEqual(intents, [
+            {
+                type: 'clock-in-intent',
+                source: 'active-work-switch',
+                taskUid: TASK.uid,
+            },
+        ]);
+        assert.equal(graph.childrenOf(TASK.uid).length, 0);
+        assert.equal(graph.childrenOf(plain.uid).length, 0);
+        assert.equal(clock.getRunning().length, 0);
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('paths without a trusted hint keep reference resolution before navigation intent', async () => {
+    const graph = seed([TASK, { uid: 'mirror-hint', string: '((taskone01))', parent: null }]);
+    const intents = [];
+    const baselinePulls = graph.pullCount();
+    let pullsAtIntent = null;
+    const unsubscribe = clock.subscribeClockInIntents(intent => {
+        pullsAtIntent = graph.pullCount();
+        intents.push(intent);
+        return false;
+    });
+    try {
+        const result = await clock.clockIn('mirror-hint', {
+            now: AT_1558,
+            source: 'user',
+        });
+
+        assert.equal(result.taskUid, TASK.uid);
+        assert.ok(pullsAtIntent > baselinePulls);
+        assert.deepEqual(intents, [
+            {
+                type: 'clock-in-intent',
+                source: 'user',
+                taskUid: TASK.uid,
+            },
+        ]);
+        assert.equal(drawerOf(graph, TASK.uid).string, 'LOGBOOK::');
+        assert.equal(drawerOf(graph, 'mirror-hint'), undefined);
+    } finally {
+        unsubscribe();
+    }
+});
+
 test('deferred Clock Ins remain serial and later mutations cannot pass the first one', async () => {
     const graph = seed([TASK, OTHER]);
     const scheduler = createManualMutationScheduler();

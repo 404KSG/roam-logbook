@@ -565,13 +565,31 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     padding: 10px 20px 24px;
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* Keep the dashboard natively scrollable without exposing a second visual
+       rail or changing the content width when the overflow threshold flips. */
+    scrollbar-gutter: stable;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
+}
+
+.rlb-body::-webkit-scrollbar,
+.rlb-body__scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-dashboard-section {
     margin: 0;
     padding: 0;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.rlb-dashboard-section::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-dashboard-section + .rlb-dashboard-section {

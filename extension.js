@@ -1485,61 +1485,111 @@ var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (i
 function chooseFocusedEntry(entries = []) {
   return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).sort(compareNewest)[0] || null;
 }
-function buildActiveWork(entries = [], {
-  now = Date.now(),
-  windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
-} = {}) {
-  const snapshot = Array.isArray(entries) ? entries : [];
-  const nowMs = instantOf(now) ?? Date.now();
-  const normalizedWindow = normalizeWindowMinutes(windowMinutes);
-  const windowMs = normalizedWindow * 6e4;
+var buildInvariantIndex = (snapshot) => {
   const focusedEntry = chooseFocusedEntry(snapshot);
   const completedMinutesByTask = /* @__PURE__ */ new Map();
-  for (const entry of snapshot) {
-    if (!entry || entry.running || !entry.taskUid)
+  const recentCandidates = [];
+  for (let sourceIndex = 0; sourceIndex < snapshot.length; sourceIndex += 1) {
+    const entry = snapshot[sourceIndex];
+    if (!entry || entry.running)
       continue;
-    completedMinutesByTask.set(
-      entry.taskUid,
-      (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
-    );
-  }
-  const recentByTask = /* @__PURE__ */ new Map();
-  for (const candidate of snapshot) {
-    if (!candidate || candidate.running || candidate.taskUid === focusedEntry?.taskUid)
-      continue;
-    const endedAt = instantOf(candidate.end);
+    if (entry.taskUid) {
+      completedMinutesByTask.set(
+        entry.taskUid,
+        (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
+      );
+    }
+    const endedAt = instantOf(entry.end);
     if (endedAt === null)
       continue;
-    const age = nowMs - endedAt;
-    if (age < 0 || age >= windowMs)
-      continue;
-    const previous = recentByTask.get(candidate.taskUid);
-    if (!previous || endedAt > instantOf(previous.end))
-      recentByTask.set(candidate.taskUid, candidate);
+    recentCandidates.push({ entry, endedAt, sourceIndex });
   }
-  const recent = [...recentByTask.values()].sort(
-    (left, right) => (instantOf(right.end) ?? -Infinity) - (instantOf(left.end) ?? -Infinity)
+  recentCandidates.sort(
+    (left, right) => (right.endedAt ?? -Infinity) - (left.endedAt ?? -Infinity) || left.sourceIndex - right.sourceIndex
   );
-  const focused = focusedEntry ? {
-    ...focusedEntry,
-    priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
-    activeKind: "focused"
-  } : null;
-  const recentItems = recent.map((item) => ({
-    ...item,
-    priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
-    remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
-    activeKind: "recent"
-  }));
-  const allItems = [focused, ...recentItems].filter(Boolean);
-  const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
   return {
-    focused,
-    recent: recentItems,
-    items: uniqueItems,
-    count: uniqueItems.length,
-    windowMinutes: normalizedWindow
+    focusedEntry,
+    completedMinutesByTask,
+    recentCandidates
   };
+};
+function createActiveWorkDeriver() {
+  const snapshotIndexes = /* @__PURE__ */ new WeakMap();
+  let snapshotBuilds = 0;
+  const getSnapshotIndex = (snapshot) => {
+    const cached = snapshotIndexes.get(snapshot);
+    if (cached)
+      return cached;
+    const index = buildInvariantIndex(snapshot);
+    snapshotIndexes.set(snapshot, index);
+    snapshotBuilds += 1;
+    return index;
+  };
+  const build = (entries = [], {
+    now = Date.now(),
+    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
+  } = {}) => {
+    const snapshot = Array.isArray(entries) ? entries : [];
+    const nowMs = instantOf(now) ?? Date.now();
+    const normalizedWindow = normalizeWindowMinutes(windowMinutes);
+    const windowMs = normalizedWindow * 6e4;
+    const {
+      focusedEntry,
+      completedMinutesByTask,
+      recentCandidates
+    } = getSnapshotIndex(snapshot);
+    const recentByTask = /* @__PURE__ */ new Map();
+    const firstEligibleIndexByTask = /* @__PURE__ */ new Map();
+    for (const candidate of recentCandidates) {
+      const age = nowMs - candidate.endedAt;
+      if (age < 0)
+        continue;
+      if (age >= windowMs)
+        break;
+      if (candidate.entry.taskUid === focusedEntry?.taskUid)
+        continue;
+      const taskUid = candidate.entry.taskUid;
+      const firstEligibleIndex = firstEligibleIndexByTask.get(taskUid);
+      if (firstEligibleIndex === void 0 || candidate.sourceIndex < firstEligibleIndex) {
+        firstEligibleIndexByTask.set(taskUid, candidate.sourceIndex);
+      }
+      const previous = recentByTask.get(taskUid);
+      if (!previous || candidate.endedAt > previous.endedAt) {
+        recentByTask.set(taskUid, candidate);
+      }
+    }
+    const recent = [...recentByTask.values()].sort(
+      (left, right) => right.endedAt - left.endedAt || firstEligibleIndexByTask.get(left.entry.taskUid) - firstEligibleIndexByTask.get(right.entry.taskUid)
+    ).map((candidate) => candidate.entry);
+    const focused = focusedEntry ? {
+      ...focusedEntry,
+      priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
+      activeKind: "focused"
+    } : null;
+    const recentItems = recent.map((item) => ({
+      ...item,
+      priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
+      remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
+      activeKind: "recent"
+    }));
+    const allItems = [focused, ...recentItems].filter(Boolean);
+    const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
+    return {
+      focused,
+      recent: recentItems,
+      items: uniqueItems,
+      count: uniqueItems.length,
+      windowMinutes: normalizedWindow
+    };
+  };
+  return {
+    build,
+    getCacheStats: () => ({ snapshotBuilds })
+  };
+}
+var defaultDeriver = createActiveWorkDeriver();
+function buildActiveWork(entries = [], options = {}) {
+  return defaultDeriver.build(entries, options);
 }
 
 // src/mutations.js
@@ -1917,12 +1967,18 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
 async function clockIn(blockUid, {
   now = /* @__PURE__ */ new Date(),
   source = "user",
-  scheduleMutationStartFn = scheduleMutationStart
+  scheduleMutationStartFn = scheduleMutationStart,
+  // Internal Active Work surfaces already hold the canonical task UID.
+  // This hint is navigation-only: the queued mutation still resolves
+  // blockUid again before it reads or writes the graph.
+  trustedNavigationTaskUid = null
 } = {}) {
-  let intentTaskUid = null;
-  try {
-    intentTaskUid = resolveTaskUid(blockUid);
-  } catch {
+  let intentTaskUid = typeof trustedNavigationTaskUid === "string" && trustedNavigationTaskUid ? trustedNavigationTaskUid : null;
+  if (!intentTaskUid) {
+    try {
+      intentTaskUid = resolveTaskUid(blockUid);
+    } catch {
+    }
   }
   const hasSidebarIntent = intentTaskUid && publishClockInIntent({ type: "clock-in-intent", source, taskUid: intentTaskUid });
   const mutation = () => withGraphGuard(async () => {
@@ -2236,8 +2292,8 @@ async function clockOutCompletedTask(taskUid, {
     try {
       return await withGraphGuard(async () => {
         const entries = readAllEntries();
-        const runningEntries = entries.filter((entry) => entry.running);
-        const taskUids = [...new Set([taskUid, ...runningEntries.map((entry) => entry.taskUid)].filter(Boolean))];
+        const runningEntries2 = entries.filter((entry) => entry.running);
+        const taskUids = [...new Set([taskUid, ...runningEntries2.map((entry) => entry.taskUid)].filter(Boolean))];
         const hierarchy = readHierarchy(taskUids);
         const relevantHierarchyIssues = hierarchy.issues.filter(
           (issue) => hierarchyIssueAffectsTask(issue, taskUid, hierarchy.parentOf)
@@ -4689,6 +4745,77 @@ function createRefreshState({
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Task Tracker";
+var localDayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+var liveMetricBoundaryKey = (rangeId, date) => `${rangeId}:${localDayKey(date)}`;
+var runningEntries = (entries) => entries.filter((entry) => entry?.start && entry.running);
+var minutesFor = (entries, now) => entries.reduce((sum, entry) => sum + entryMinutes(entry, now), 0);
+var fixedMinutesFor = (entries, now) => entries.reduce((sum, entry) => sum + (entry.running ? 0 : entryMinutes(entry, now)), 0);
+var countSessions = (entries) => entries.filter((entry) => entry?.start).length;
+var countTasks = (entries) => {
+  const taskUids = /* @__PURE__ */ new Set();
+  for (const entry of entries) {
+    if (entry?.start)
+      taskUids.add(entry.taskUid);
+  }
+  return taskUids.size;
+};
+function createDashboardLiveMetricCache({
+  entries = [],
+  model = null,
+  rangeId = "week",
+  now = /* @__PURE__ */ new Date()
+} = {}) {
+  const snapshotEntries = Array.isArray(entries) ? entries : [];
+  const modelEntries = Array.isArray(model?.entries) ? model.entries : filterByRange(snapshotEntries, rangeId, now);
+  const sessions = Number.isFinite(model?.sessionMetrics?.sessions) ? model.sessionMetrics.sessions : modelEntries.filter((entry) => entry?.start).length;
+  const tasks = Array.isArray(model?.tasks) ? model.tasks.length : 0;
+  const buildState = (at, useModelTotals = false) => {
+    const selected = useModelTotals ? modelEntries : filterByRange(snapshotEntries, rangeId, at);
+    const today = filterByRange(snapshotEntries, "today", at);
+    const selectedRunning = runningEntries(selected);
+    const todayRunning = runningEntries(today);
+    const selectedTotal = useModelTotals && Number.isFinite(model?.totalMinutes) ? model.totalMinutes : fixedMinutesFor(selected, at) + minutesFor(selectedRunning, at);
+    const todayTotal = useModelTotals && Number.isFinite(model?.todayMinutes) ? model.todayMinutes : fixedMinutesFor(today, at) + minutesFor(todayRunning, at);
+    return {
+      selectedFixedMinutes: Math.max(
+        0,
+        selectedTotal - minutesFor(selectedRunning, at)
+      ),
+      todayFixedMinutes: Math.max(0, todayTotal - minutesFor(todayRunning, at)),
+      selectedRunning,
+      todayRunning,
+      ...useModelTotals ? {
+        sessions,
+        tasks
+      } : {
+        sessions: countSessions(selected),
+        tasks: countTasks(selected)
+      }
+    };
+  };
+  let boundary = liveMetricBoundaryKey(rangeId, now);
+  let state = buildState(now, true);
+  let rebuildCount = 1;
+  return {
+    read(at) {
+      const nextBoundary = liveMetricBoundaryKey(rangeId, at);
+      if (nextBoundary !== boundary) {
+        state = buildState(at);
+        boundary = nextBoundary;
+        rebuildCount += 1;
+      }
+      return {
+        todayMinutes: state.todayFixedMinutes + minutesFor(state.todayRunning, at),
+        selectedMinutes: state.selectedFixedMinutes + minutesFor(state.selectedRunning, at),
+        sessions: state.sessions,
+        tasks: state.tasks
+      };
+    },
+    getRebuildCount() {
+      return rebuildCount;
+    }
+  };
+}
 function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
@@ -4708,6 +4835,7 @@ function createDashboard({
   let refreshAlertNode = null;
   let lastSnapshot = null;
   let lastModel = null;
+  let liveMetricCache = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
   let focusInFlight = null;
@@ -4754,16 +4882,17 @@ function createDashboard({
   const updateLiveMetricNodes = (now) => {
     if (!lastModel)
       return;
-    const metrics = summariseSessionMetrics(lastModel.entries, now);
-    const todayMinutes = filterByRange(lastSnapshot?.entries || [], "today", now).reduce(
-      (sum, entry) => sum + entryMinutes(entry, now),
-      0
-    );
+    const metrics = liveMetricCache?.read(now) || {
+      todayMinutes: lastModel.todayMinutes,
+      selectedMinutes: lastModel.totalMinutes,
+      sessions: lastModel.sessionMetrics?.sessions || 0,
+      tasks: lastModel.tasks.length
+    };
     const values = {
-      today: formatMinutesHuman(todayMinutes),
-      selected: formatMinutesHuman(metrics.focusMinutes),
+      today: formatMinutesHuman(metrics.todayMinutes),
+      selected: formatMinutesHuman(metrics.selectedMinutes),
       sessions: String(metrics.sessions),
-      tasks: String(lastModel.tasks.length)
+      tasks: String(metrics.tasks)
     };
     for (const node of bodyNode?.querySelectorAll("[data-live-metric]") || []) {
       const value = values[node.dataset.liveMetric];
@@ -4892,6 +5021,7 @@ function createDashboard({
             ...issueRows.length > 0 ? [dataIssuesSection(issueRows)] : []
           );
           lastModel = null;
+          liveMetricCache = null;
           lastTransientIssues = transientIssues;
           lastRefreshNotice = "";
           return { ok: false, reason: "no-snapshot" };
@@ -4909,6 +5039,12 @@ function createDashboard({
     refresh({ entries, notify: false });
     lastModel = buildDashboard(entries, { now, rangeId, hierarchy });
     lastModel.activity = buildActivity(lastModel.entries, { now, rangeId });
+    liveMetricCache = createDashboardLiveMetricCache({
+      entries,
+      model: lastModel,
+      rangeId,
+      now
+    });
     lastTransientIssues = transientIssues;
     lastRefreshNotice = refreshNotice;
     paintDashboard(now);
@@ -4968,6 +5104,7 @@ function createDashboard({
     const request = act(
       () => clockIn(taskUid, {
         source: "active-work-switch",
+        trustedNavigationTaskUid: taskUid,
         ...typeof scheduleMutationStartFn === "function" ? { scheduleMutationStartFn } : {}
       })
     );
@@ -5158,6 +5295,7 @@ function createDashboard({
       bodyNode = null;
       activityNode = null;
       lastModel = null;
+      liveMetricCache = null;
       refreshRuntime.dispose();
       focusTrap.deactivate();
       focusInFlight = null;
@@ -5472,7 +5610,17 @@ var TOKENS = String.raw`.rlb-topbar {
 .rlb-popover,
 .rlb-root {
     --rlb-surface-action-height: 32px;
-    --rlb-surface-action-inset: 12px;
+    /* The timing rail sits inside a 1px card frame, 3px card padding, and
+       6px row padding. Header actions use the same calculated edge so the
+       Dashboard control and the rightmost timing control share one rail. */
+    --rlb-surface-section-border-width: 1px;
+    --rlb-surface-section-padding: 3px;
+    --rlb-surface-row-inline-padding: 6px;
+    --rlb-surface-action-inset: calc(
+        var(--rlb-surface-section-border-width) +
+        var(--rlb-surface-section-padding) +
+        var(--rlb-surface-row-inline-padding)
+    );
     --rlb-surface-title-size: 10px;
     --rlb-surface-task-size: 13px;
     --rlb-surface-meta-size: 11px;
@@ -5766,11 +5914,19 @@ var SURFACE = String.raw`/* ---- popover ---- */
     overflow-y: auto;
     /* Reserve the classic scrollbar's width without painting a permanent
        scrollbar rail. This keeps the popover content from shifting when a
-       Today tree crosses the overflow threshold. */
+       Today tree crosses the overflow threshold while retaining native wheel,
+       trackpad, touch, and keyboard scrolling. */
     scrollbar-gutter: stable;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     padding: 8px;
     text-align: left;
     cursor: default;
+}
+
+.rlb-popover::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-popover__title {
@@ -5807,7 +5963,9 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-surface__header > .rlb-surface__actions {
-    margin: 0;
+    /* The header lives one level above the focused card. This calculated
+       inset lands its final button edge on the card's timing rail below. */
+    margin: 0 var(--rlb-surface-action-inset) 0 0;
 }
 
 .rlb-surface__view-switch {
@@ -5980,8 +6138,8 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-surface__section--focused {
     margin-top: 6px;
     margin-bottom: 6px;
-    padding: 3px;
-    border: 1px solid var(--rlb-surface-border);
+    padding: var(--rlb-surface-section-padding);
+    border: var(--rlb-surface-section-border-width) solid var(--rlb-surface-border);
     border-radius: 6px;
     background: var(--rlb-surface-focused);
 }
@@ -6141,7 +6299,7 @@ var SURFACE = String.raw`/* ---- popover ---- */
     align-items: start;
     grid-auto-rows: minmax(0, auto);
     gap: 5px;
-    padding: var(--rlb-surface-row-padding, 5px) 6px;
+    padding: var(--rlb-surface-row-padding, 5px) var(--rlb-surface-row-inline-padding);
     border-radius: 3px;
 }
 
@@ -7162,13 +7320,31 @@ var DASHBOARD = String.raw`/* ---- dashboard ---- */
     padding: 10px 20px 24px;
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* Keep the dashboard natively scrollable without exposing a second visual
+       rail or changing the content width when the overflow threshold flips. */
+    scrollbar-gutter: stable;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
+}
+
+.rlb-body::-webkit-scrollbar,
+.rlb-body__scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-dashboard-section {
     margin: 0;
     padding: 0;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.rlb-dashboard-section::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-dashboard-section + .rlb-dashboard-section {
@@ -9163,7 +9339,10 @@ function createTopbar({
         todayCollapsed = allExpanded ? new Set(expandable.map((node) => node.uid)) : /* @__PURE__ */ new Set();
         renderSurfaces();
       },
-      onStartToday: (taskUid) => void run(() => clockIn(taskUid, { source: "active-work-switch" })),
+      onStartToday: (taskUid) => void run(() => clockIn(taskUid, {
+        source: "active-work-switch",
+        trustedNavigationTaskUid: taskUid
+      })),
       onOpenTask: (taskUid, event) => {
         if (event?.shiftKey) {
           event.preventDefault();
@@ -9185,7 +9364,10 @@ function createTopbar({
         closePopover({ restoreFocus: false });
         void openBlock(taskUid);
       },
-      onFocusRecent: (entry) => void run(() => clockIn(entry.taskUid, { source: "active-work-switch" })),
+      onFocusRecent: (entry) => void run(() => clockIn(entry.taskUid, {
+        source: "active-work-switch",
+        trustedNavigationTaskUid: entry.taskUid
+      })),
       onCheckOut: (entry) => run(() => clockOut(entry.clockUid)),
       onDiscard: (entry) => {
         if (!confirmation?.arm(`discard:${entry.clockUid}`, scope)) {

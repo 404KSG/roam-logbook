@@ -1,7 +1,7 @@
 {
   "name": "roam-logbook",
-  "version": "0.9.0-beta.54",
-  "description": "Task Tracker for Roam Research TODOs with Org-mode-compatible LOGBOOK / CLOCK records",
+  "version": "0.9.0-beta.55",
+  "description": "Single-focus task and time tracking for Roam Research",
   "type": "module",
   "main": "extension.js",
   "scripts": {

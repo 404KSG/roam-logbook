@@ -1,9 +1,9 @@
 # Task Tracker – 404KSG
 
-Current package version: **0.9.0-beta.54**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.55**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
-Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
+Single-focus task and time tracking for Roam Research, with Org-compatible LOGBOOK / CLOCK records.
 
 This is an MIT-licensed fork of [forrestchang/roam-logbook](https://github.com/forrestchang/roam-logbook). It preserves the original LOGBOOK/CLOCK workflow and reporting behavior while refining the topbar and dashboard presentation.
 
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.54 opens a closed native right sidebar before adding or re-fronting the selected Timing Line, while preserving the single-focus CLOCK model and the lean compact work surfaces; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.55 starts native right-sidebar navigation immediately from trusted internal task actions, caches snapshot-invariant Active Work and Dashboard metrics, aligns the Thread action rail, and hides visual scrollbars without disabling scrolling; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,

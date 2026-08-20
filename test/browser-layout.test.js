@@ -900,6 +900,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             const focusedActions = focused.querySelector('.rlb-run__actions');
             const focusedActionsRect = rect(focusedActions);
             const focusedActionRects = [...focusedActions.children].map(rect);
+            const dashboardRect = rect(headerActions.querySelector('[data-action="dashboard"]'));
             const focusedRect = rect(focused);
             const recentMeta = recent.querySelector('.rlb-run__recent-meta');
             const openLinesLabel = recentSection.querySelector('.rlb-surface__section-label');
@@ -956,6 +957,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                 headerActionCount: headerActions.children.length,
                 headerTitleBeforeActions: rect(header.querySelector('.rlb-popover__title')).right <= rect(headerActions).left + .5,
                 headerActionsInside: headerActionRects.every(item => item.left >= rect(surface).left && item.right <= rect(surface).right + .5),
+                actionRailRightDelta: Math.abs(dashboardRect.right - focusedActionsRect.right),
                 actionWidths: [...headerActionRects, ...focusedActionRects].map(item => item.width),
                 headerTimingGap: rect(focusedSection).top - Math.max(...headerActionRects.map(item => item.bottom)),
                 footerHeights: footerRects.map(item => item.height),
@@ -1029,6 +1031,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.headerActionCount, 1, context);
             assert.equal(geometry.headerTitleBeforeActions, true, context);
             assert.equal(geometry.headerActionsInside, true, context);
+            assert.ok(geometry.actionRailRightDelta <= 0.5, context);
             assert.ok(geometry.actionWidths.every(width => Math.abs(width - 32) <= 0.5), context);
             assert.ok(geometry.headerTimingGap >= 9, context);
             assert.ok(geometry.footerHeightDelta <= 1, context);
@@ -1318,7 +1321,7 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
     }
 });
 
-test('Active Threads popover reserves scrollbar space before Today starts overflowing', async t => {
+test('Active Threads popover hides its scrollbar without losing stable native scrolling', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
 
     const geometry = await withChromium(
@@ -1360,10 +1363,19 @@ test('Active Threads popover reserves scrollbar space before Today starts overfl
                 list.appendChild(row);
             }
             const after = measure();
+            const scrollbarStyle = getComputedStyle(popover, '::-webkit-scrollbar');
+            const beforeScrollTop = popover.scrollTop;
+            popover.scrollTop = 24;
             return {
                 gutter: getComputedStyle(popover).scrollbarGutter,
+                overflowY: getComputedStyle(popover).overflowY,
+                scrollbarWidth: getComputedStyle(popover).scrollbarWidth,
+                webkitScrollbarWidth: scrollbarStyle.width,
+                webkitScrollbarHeight: scrollbarStyle.height,
                 before,
                 after,
+                beforeScrollTop,
+                afterScrollTop: popover.scrollTop,
                 widthDelta: Math.abs(after.listWidth - before.listWidth),
                 leftDelta: Math.abs(after.listLeft - before.listLeft),
                 rightDelta: Math.abs(after.listRight - before.listRight),
@@ -1373,8 +1385,14 @@ test('Active Threads popover reserves scrollbar space before Today starts overfl
 
     if (process.env.RLB_LAYOUT_DIAGNOSTICS) t.diagnostic(JSON.stringify(geometry));
     assert.match(geometry.gutter, /stable/, JSON.stringify(geometry));
+    assert.equal(geometry.overflowY, 'auto', JSON.stringify(geometry));
+    assert.equal(geometry.scrollbarWidth, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.webkitScrollbarWidth, '0px', JSON.stringify(geometry));
+    assert.equal(geometry.webkitScrollbarHeight, '0px', JSON.stringify(geometry));
     assert.equal(geometry.before.overflowing, false, JSON.stringify(geometry));
     assert.equal(geometry.after.overflowing, true, JSON.stringify(geometry));
+    assert.equal(geometry.beforeScrollTop, 0, JSON.stringify(geometry));
+    assert.equal(geometry.afterScrollTop, 24, JSON.stringify(geometry));
     assert.equal(geometry.after.popoverClientWidth, geometry.before.popoverClientWidth, JSON.stringify(geometry));
     assert.ok(geometry.widthDelta <= 1, JSON.stringify(geometry));
     assert.ok(geometry.leftDelta <= 1, JSON.stringify(geometry));
@@ -1448,6 +1466,7 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
             const rootStyle = getComputedStyle(root);
             const dialogStyle = getComputedStyle(dialog);
             const bodyStyle = getComputedStyle(body);
+            const bodyScrollbarStyle = getComputedStyle(body, '::-webkit-scrollbar');
             return {
                 before, afterHeader, afterBody,
                 rootPosition: rootStyle.position,
@@ -1457,6 +1476,10 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
                 dialogOverflow: dialogStyle.overflow,
                 bodyOverflow: bodyStyle.overflowY,
                 bodyOverscroll: bodyStyle.overscrollBehavior,
+                bodyScrollbarGutter: bodyStyle.scrollbarGutter,
+                bodyScrollbarWidth: bodyStyle.scrollbarWidth,
+                bodyWebkitScrollbarWidth: bodyScrollbarStyle.width,
+                bodyWebkitScrollbarHeight: bodyScrollbarStyle.height,
                 a11y: {
                     role: dialog.getAttribute('role'),
                     modal: dialog.getAttribute('aria-modal'),
@@ -1478,6 +1501,10 @@ test('Dashboard overlay keeps background and dialog chrome fixed while body cont
     assert.equal(geometry.dialogOverflow, 'hidden', JSON.stringify(geometry));
     assert.equal(geometry.bodyOverflow, 'auto', JSON.stringify(geometry));
     assert.equal(geometry.bodyOverscroll, 'contain', JSON.stringify(geometry));
+    assert.match(geometry.bodyScrollbarGutter, /stable/, JSON.stringify(geometry));
+    assert.equal(geometry.bodyScrollbarWidth, 'none', JSON.stringify(geometry));
+    assert.equal(geometry.bodyWebkitScrollbarWidth, '0px', JSON.stringify(geometry));
+    assert.equal(geometry.bodyWebkitScrollbarHeight, '0px', JSON.stringify(geometry));
     assert.deepEqual(geometry.a11y, {
         role: 'dialog',
         modal: 'true',

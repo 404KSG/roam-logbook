@@ -22,7 +22,10 @@ const extensionAPI = {
 const clock = await import('../src/clock.js');
 const { setExtensionAPI } = await import('../src/settings.js');
 const { createTopbar } = await import('../src/topbar.js');
-const { createDashboard } = await import('../src/dashboard.js');
+const {
+    createDashboard,
+    createDashboardLiveMetricCache,
+} = await import('../src/dashboard.js');
 const { readDashboardSnapshot } = await import('../src/entries.js');
 const { buildDashboard } = await import('../src/stats.js');
 
@@ -326,6 +329,119 @@ test('Today Activity splits a running Session across local hours without another
     assert.match(hourNine.getAttribute('aria-label'), /30m.*1 Session/);
 
     dashboard.destroy();
+});
+
+test('Dashboard live metric cache preserves truncation while avoiding history work on each tick', () => {
+    const now = new Date('2026-08-15T09:00:59');
+    const older = {
+        uid: 'metric-older',
+        start: new Date('2026-08-14T07:00:00'),
+        running: false,
+        effectiveMinutes: 11,
+    };
+    const closed = {
+        uid: 'metric-closed',
+        start: new Date('2026-08-15T08:00:00'),
+        running: false,
+        effectiveMinutes: 30,
+    };
+    const running = {
+        uid: 'metric-running',
+        start: new Date('2026-08-15T08:30:00'),
+        running: true,
+    };
+    let historyOperations = 0;
+    const entries = new Proxy([older, closed, running], {
+        get(target, property, receiver) {
+            if (['filter', 'map', 'sort', 'reduce', 'length'].includes(property)) {
+                historyOperations += 1;
+            }
+            return Reflect.get(target, property, receiver);
+        },
+    });
+    const cache = createDashboardLiveMetricCache({
+        entries,
+        model: {
+            entries: [older, closed, running],
+            totalMinutes: 71,
+            todayMinutes: 60,
+            sessionMetrics: { sessions: 3 },
+            tasks: [{ taskUid: 'metric-task-1' }, { taskUid: 'metric-task-2' }],
+        },
+        rangeId: 'week',
+        now,
+    });
+    const operationsAfterBuild = historyOperations;
+
+    assert.deepEqual(cache.read(now), {
+        todayMinutes: 60,
+        selectedMinutes: 71,
+        sessions: 3,
+        tasks: 2,
+    });
+
+    const nextMinute = new Date('2026-08-15T09:01:00');
+    assert.deepEqual(cache.read(nextMinute), {
+        todayMinutes: 61,
+        selectedMinutes: 72,
+        sessions: 3,
+        tasks: 2,
+    });
+    for (let index = 0; index < 1000; index += 1) cache.read(nextMinute);
+
+    assert.equal(cache.getRebuildCount(), 1, 'ordinary ticks reuse the fixed totals');
+    assert.equal(
+        historyOperations,
+        operationsAfterBuild,
+        'ordinary ticks do not filter, map, sort, or reduce the snapshot'
+    );
+});
+
+test('Dashboard live metric cache rebuilds at a local day boundary without a graph read', () => {
+    const now = new Date('2026-08-15T23:59:59');
+    const closed = {
+        uid: 'boundary-closed',
+        taskUid: 'boundary-task-closed',
+        start: new Date('2026-08-15T08:00:00'),
+        running: false,
+        effectiveMinutes: 15,
+    };
+    const running = {
+        uid: 'boundary-running',
+        taskUid: 'boundary-task-running',
+        start: new Date('2026-08-15T23:59:30'),
+        running: true,
+    };
+    const entries = [closed, running];
+    const cache = createDashboardLiveMetricCache({
+        entries,
+        model: {
+            entries,
+            totalMinutes: 15,
+            todayMinutes: 15,
+            sessionMetrics: { sessions: 2 },
+            tasks: [
+                { taskUid: 'boundary-task-closed' },
+                { taskUid: 'boundary-task-running' },
+            ],
+        },
+        rangeId: 'today',
+        now,
+    });
+
+    assert.deepEqual(cache.read(now), {
+        todayMinutes: 15,
+        selectedMinutes: 15,
+        sessions: 2,
+        tasks: 2,
+    });
+    assert.deepEqual(cache.read(new Date('2026-08-16T00:00:59')), {
+        todayMinutes: 0,
+        selectedMinutes: 0,
+        sessions: 0,
+        tasks: 0,
+    });
+    assert.equal(cache.getRebuildCount(), 2, 'the date boundary rebuilds once');
 });
 
 test('1000 and 10000 CLOCK snapshots keep graph query count fixed and render linearly', () => {

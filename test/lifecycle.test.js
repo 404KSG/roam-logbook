@@ -156,7 +156,7 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /height: min\(860px, calc\(100vh - 32px\)\)/);
     assert.match(css, /\.rlb-root\s*\{[^}]*position: fixed[^}]*inset: 0[^}]*overflow: hidden[^}]*overscroll-behavior: none/s);
     assert.match(css, /\.rlb-dialog\s*\{[^}]*display: flex[^}]*flex-direction: column[^}]*min-height: 0[^}]*overflow: hidden/s);
-    assert.match(css, /\.rlb-body,\s*\.rlb-body__scroll\s*\{[^}]*min-height: 0[^}]*max-height: none[^}]*overflow-y: auto[^}]*overscroll-behavior: contain/s);
+    assert.match(css, /\.rlb-body,\s*\.rlb-body__scroll\s*\{[^}]*min-height: 0[^}]*max-height: none[^}]*overflow-y: auto[^}]*overscroll-behavior: contain[^}]*scrollbar-gutter: stable[^}]*scrollbar-width: none/s);
     assert.match(css, /--rlb-surface-link:\s*#316a9f/);
     assert.match(css, /--rlb-session-running:\s*#7eb794/);
     assert.doesNotMatch(css, /#2d72d2|rgba\(45, 114, 210/);
@@ -179,6 +179,9 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.match(css, /\.rlb-dashboard \.rlb-activity\s*\{/);
     assert.doesNotMatch(css, /rlb-analytics|dashboard__view-toggle|toggle-view/);
     assert.match(css, /\.rlb-body__scroll[^}]*overflow-y: auto/s);
+    assert.match(css, /\.rlb-body::-webkit-scrollbar,\s*\.rlb-body__scroll::-webkit-scrollbar\s*\{[^}]*width: 0[^}]*height: 0/s);
+    assert.match(css, /\.rlb-dashboard-section\s*\{[^}]*scrollbar-width: none[^}]*-ms-overflow-style: none/s);
+    assert.match(css, /\.rlb-dashboard-section::-webkit-scrollbar\s*\{[^}]*width: 0[^}]*height: 0/s);
     assert.match(css, /\.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.bp3-dark \.rlb-root[^}]*--rlb-surface:/s);
     assert.match(css, /\.rlb-topbar__time[^}]*font-size: 14px/s);
@@ -205,8 +208,12 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     }
     assert.doesNotMatch(css, /\.rlb-topbar__button--running\s*{/);
     assert.doesNotMatch(css, /\.rlb-topbar__button--overrun\s*{/);
+    assert.match(css, /--rlb-surface-action-inset:\s*calc\(/s);
     assert.match(css, /\.rlb-surface__actions\s*\{[^}]*display: flex[^}]*gap: 2px/s);
+    assert.match(css, /\.rlb-surface__header > \.rlb-surface__actions\s*\{[^}]*margin: 0 var\(--rlb-surface-action-inset\) 0 0/s);
     assert.match(css, /\.rlb-surface__icon-button\s*\{[^}]*width: var\(--rlb-surface-action-height\)[^}]*height: var\(--rlb-surface-action-height\)/s);
+    assert.match(css, /\.rlb-popover\s*\{[^}]*overflow-y: auto[^}]*scrollbar-gutter: stable[^}]*scrollbar-width: none/s);
+    assert.match(css, /\.rlb-popover::-webkit-scrollbar\s*\{[^}]*width: 0[^}]*height: 0/s);
     assert.match(css, /\.rlb-surface__header\s*\{[^}]*height: 36px[^}]*border-bottom: 1px solid var\(--rlb-surface-border-light\)/s);
     assert.match(css, /\.rlb-surface__view-switch\s*\{[^}]*align-self: center/s);
     assert.match(css, /\.rlb-surface__view-control\s*\{[^}]*flex: 0 0 auto[^}]*height: 28px/s);
@@ -217,7 +224,7 @@ test('stylesheet exposes the approved dashboard shell and minimal topbar contrac
     assert.doesNotMatch(css, /rlb-popover__footer|footer--empty|footer--single-running/);
     assert.doesNotMatch(css, /rlb-surface__refresh(?:-cell|--loading|-status)/);
     const focusedSectionRule = css.match(/\.rlb-surface__section--focused\s*{([^}]*)}/)?.[1] ?? '';
-    assert.match(focusedSectionRule, /border:\s*1px solid var\(--rlb-surface-border\)/);
+    assert.match(focusedSectionRule, /border:\s*var\(--rlb-surface-section-border-width\) solid var\(--rlb-surface-border\)/);
     assert.match(focusedSectionRule, /border-radius:\s*6px/);
     assert.doesNotMatch(focusedSectionRule, /border-left/);
     assert.doesNotMatch(css, /\.rlb-surface__section--focused\.rlb-surface__section--overrun\s*{/);

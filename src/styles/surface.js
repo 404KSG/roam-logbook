@@ -12,11 +12,19 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     overflow-y: auto;
     /* Reserve the classic scrollbar's width without painting a permanent
        scrollbar rail. This keeps the popover content from shifting when a
-       Today tree crosses the overflow threshold. */
+       Today tree crosses the overflow threshold while retaining native wheel,
+       trackpad, touch, and keyboard scrolling. */
     scrollbar-gutter: stable;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     padding: 8px;
     text-align: left;
     cursor: default;
+}
+
+.rlb-popover::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 
 .rlb-popover__title {
@@ -53,7 +61,9 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-surface__header > .rlb-surface__actions {
-    margin: 0;
+    /* The header lives one level above the focused card. This calculated
+       inset lands its final button edge on the card's timing rail below. */
+    margin: 0 var(--rlb-surface-action-inset) 0 0;
 }
 
 .rlb-surface__view-switch {
@@ -226,8 +236,8 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 .rlb-surface__section--focused {
     margin-top: 6px;
     margin-bottom: 6px;
-    padding: 3px;
-    border: 1px solid var(--rlb-surface-border);
+    padding: var(--rlb-surface-section-padding);
+    border: var(--rlb-surface-section-border-width) solid var(--rlb-surface-border);
     border-radius: 6px;
     background: var(--rlb-surface-focused);
 }
@@ -387,7 +397,7 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     align-items: start;
     grid-auto-rows: minmax(0, auto);
     gap: 5px;
-    padding: var(--rlb-surface-row-padding, 5px) 6px;
+    padding: var(--rlb-surface-row-padding, 5px) var(--rlb-surface-row-inline-padding);
     border-radius: 3px;
 }
 

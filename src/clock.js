@@ -385,6 +385,10 @@ export async function clockIn(
         now = new Date(),
         source = 'user',
         scheduleMutationStartFn = scheduleMutationStart,
+        // Internal Active Work surfaces already hold the canonical task UID.
+        // This hint is navigation-only: the queued mutation still resolves
+        // blockUid again before it reads or writes the graph.
+        trustedNavigationTaskUid = null,
     } = {}
 ) {
     // Sidebar navigation is a reversible response to the user's click, not a
@@ -392,13 +396,17 @@ export async function clockIn(
     // CLOCK, and post-write confirmation work so the native block can begin
     // rendering immediately. The queued action resolves the target again and
     // remains the sole authority for whether timing actually starts.
-    let intentTaskUid = null;
-    try {
-        intentTaskUid = resolveTaskUid(blockUid);
-    } catch {
-        // The queued, graph-guarded resolution below remains authoritative and
-        // will preserve the existing uncertainty result. A failed speculative
-        // lookup must not change Clock In error semantics.
+    let intentTaskUid = typeof trustedNavigationTaskUid === 'string' && trustedNavigationTaskUid
+        ? trustedNavigationTaskUid
+        : null;
+    if (!intentTaskUid) {
+        try {
+            intentTaskUid = resolveTaskUid(blockUid);
+        } catch {
+            // The queued, graph-guarded resolution below remains authoritative
+            // and will preserve the existing uncertainty result. A failed
+            // speculative lookup must not change Clock In error semantics.
+        }
     }
     const hasSidebarIntent =
         intentTaskUid &&

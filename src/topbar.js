@@ -473,7 +473,10 @@ export function createTopbar({
                     : new Set();
                 renderSurfaces();
             },
-            onStartToday: taskUid => void run(() => clock.clockIn(taskUid, { source: 'active-work-switch' })),
+            onStartToday: taskUid => void run(() => clock.clockIn(taskUid, {
+                source: 'active-work-switch',
+                trustedNavigationTaskUid: taskUid,
+            })),
             onOpenTask: (taskUid, event) => {
                 if (event?.shiftKey) {
                     event.preventDefault();
@@ -495,7 +498,10 @@ export function createTopbar({
                 closePopover({ restoreFocus: false });
                 void openBlock(taskUid);
             },
-            onFocusRecent: entry => void run(() => clock.clockIn(entry.taskUid, { source: 'active-work-switch' })),
+            onFocusRecent: entry => void run(() => clock.clockIn(entry.taskUid, {
+                source: 'active-work-switch',
+                trustedNavigationTaskUid: entry.taskUid,
+            })),
             onCheckOut: entry => run(() => clock.clockOut(entry.clockUid)),
             onDiscard: entry => {
                 if (!confirmation?.arm(`discard:${entry.clockUid}`, scope)) {

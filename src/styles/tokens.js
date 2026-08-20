@@ -11,7 +11,17 @@ export const TOKENS = String.raw`.rlb-topbar {
 .rlb-popover,
 .rlb-root {
     --rlb-surface-action-height: 32px;
-    --rlb-surface-action-inset: 12px;
+    /* The timing rail sits inside a 1px card frame, 3px card padding, and
+       6px row padding. Header actions use the same calculated edge so the
+       Dashboard control and the rightmost timing control share one rail. */
+    --rlb-surface-section-border-width: 1px;
+    --rlb-surface-section-padding: 3px;
+    --rlb-surface-row-inline-padding: 6px;
+    --rlb-surface-action-inset: calc(
+        var(--rlb-surface-section-border-width) +
+        var(--rlb-surface-section-padding) +
+        var(--rlb-surface-row-inline-padding)
+    );
     --rlb-surface-title-size: 10px;
     --rlb-surface-task-size: 13px;
     --rlb-surface-meta-size: 11px;
