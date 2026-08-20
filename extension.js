@@ -917,59 +917,86 @@ function readDailyNoteTree(pageTitle, {
       throw boundedReadError("Daily note returned blocks from more than one page.");
     }
     const pageUid = rows[0][0];
-    const referencedUids = /* @__PURE__ */ new Set();
-    const nodes = /* @__PURE__ */ new Map();
-    const parentByUid = /* @__PURE__ */ new Map();
+    const records = /* @__PURE__ */ new Map();
+    const childrenByUid = /* @__PURE__ */ new Map();
     for (const [, uid, string, order, parentUid] of rows) {
-      if (nodes.has(uid)) {
+      if (records.has(uid)) {
         throw boundedReadError("Daily note returned a duplicate block.");
       }
-      nodes.set(uid, { uid, string, order, children: [] });
-      parentByUid.set(uid, parentUid);
-      const reference = referencedBlockUid(string);
-      if (reference)
-        referencedUids.add(reference);
+      records.set(uid, { uid, string, order, parentUid });
+      childrenByUid.set(uid, []);
     }
-    const rootNodes = [];
-    for (const node of nodes.values()) {
-      const parentUid = parentByUid.get(node.uid);
+    const rootUids = [];
+    for (const record of records.values()) {
+      const parentUid = record.parentUid;
       if (parentUid === pageUid) {
-        rootNodes.push(node);
+        rootUids.push(record.uid);
         continue;
       }
-      const parent = nodes.get(parentUid);
-      if (!parent) {
+      const children = childrenByUid.get(parentUid);
+      if (!children) {
         throw boundedReadError("Daily note returned a block outside its page tree.");
       }
-      parent.children.push(node);
+      children.push(record.uid);
     }
-    for (const node of nodes.values()) {
-      node.children.sort((a, b) => a.order - b.order);
-    }
-    rootNodes.sort((a, b) => a.order - b.order);
     const visiting = /* @__PURE__ */ new Set();
     const visited = /* @__PURE__ */ new Set();
-    const validateTree = (node, depth) => {
+    const validateTree = (uid, depth) => {
       if (depth > depthLimit) {
         throw boundedReadError(
           `Today's Daily Note exceeds the safe ${depthLimit}-level read limit.`
         );
       }
-      if (visiting.has(node.uid)) {
+      if (visiting.has(uid)) {
         throw boundedReadError("Daily note returned a cyclic block tree.");
       }
-      if (visited.has(node.uid))
+      if (visited.has(uid))
         return;
-      visiting.add(node.uid);
-      node.children.forEach((child) => validateTree(child, depth + 1));
-      visiting.delete(node.uid);
-      visited.add(node.uid);
+      visiting.add(uid);
+      childrenByUid.get(uid).forEach((childUid) => validateTree(childUid, depth + 1));
+      visiting.delete(uid);
+      visited.add(uid);
     };
-    rootNodes.forEach((root) => validateTree(root, 0));
-    if (visited.size !== nodes.size) {
+    rootUids.forEach((rootUid) => validateTree(rootUid, 0));
+    if (visited.size !== records.size) {
       throw boundedReadError("Daily note returned an unreachable block tree.");
     }
-    const roots = rootNodes;
+    const keepUids = /* @__PURE__ */ new Set();
+    for (const record of records.values()) {
+      if (taskStatus(record.string) === "TODO" || referencedBlockUid(record.string)) {
+        let current = record.uid;
+        while (current !== pageUid) {
+          keepUids.add(current);
+          current = records.get(current).parentUid;
+        }
+      }
+    }
+    if (keepUids.size === 0) {
+      return { ok: true, pageUid, roots: [], referenceStrings: {} };
+    }
+    const nodes = /* @__PURE__ */ new Map();
+    for (const uid of keepUids) {
+      const record = records.get(uid);
+      nodes.set(uid, { uid, string: record.string, order: record.order, children: [] });
+    }
+    const roots = [];
+    const referencedUids = /* @__PURE__ */ new Set();
+    for (const uid of keepUids) {
+      const node = nodes.get(uid);
+      const parentUid = records.get(uid).parentUid;
+      if (parentUid === pageUid) {
+        roots.push(node);
+      } else {
+        nodes.get(parentUid).children.push(node);
+      }
+      const reference = referencedBlockUid(node.string);
+      if (reference)
+        referencedUids.add(reference);
+    }
+    roots.sort((left, right) => left.order - right.order);
+    for (const node of nodes.values()) {
+      node.children.sort((left, right) => left.order - right.order);
+    }
     let referenceStrings = {};
     try {
       referenceStrings = readReferencedBlockStrings([...referencedUids]);

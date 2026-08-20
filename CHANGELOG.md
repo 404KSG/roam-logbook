@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0-beta.61 — 2026-08-20
+
+### Compact Today task projection
+
+- Keeps Today on one complete page query while projecting only unfinished
+  TODOs, bare task references, and the physical ancestors required to preserve
+  their hierarchy.
+- Drops standalone DONE branches, LOGBOOK/CLOCK history, ordinary notes, and
+  unrelated descendants before allocating and sorting the nested Today tree.
+- Preserves DONE ancestors with unfinished descendants, plain intermediary
+  blocks, block-reference resolution, Roam order, and all complete-page safety
+  validation.
+- Extends the 509-block regression so 499 irrelevant siblings are proven not to
+  reach the downstream task model, without adding per-block reads or queries.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.60 — 2026-08-20
 
 ### Reliable Today reads for large Daily Notes

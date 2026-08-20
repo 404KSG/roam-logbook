@@ -542,14 +542,12 @@ export function readDailyNoteTree(
         }
         const pageUid = rows[0][0];
         const records = new Map();
-        const parentByUid = new Map();
         const childrenByUid = new Map();
         for (const [, uid, string, order, parentUid] of rows) {
             if (records.has(uid)) {
                 throw boundedReadError('Daily note returned a duplicate block.');
             }
             records.set(uid, { uid, string, order, parentUid });
-            parentByUid.set(uid, parentUid);
             childrenByUid.set(uid, []);
         }
 
@@ -566,33 +564,9 @@ export function readDailyNoteTree(
             }
             children.push(record.uid);
         }
-        const compareUidsByOrder = (leftUid, rightUid) =>
-            records.get(leftUid).order - records.get(rightUid).order;
-        rootUids.sort(compareUidsByOrder);
-        for (const children of childrenByUid.values()) {
-            children.sort(compareUidsByOrder);
-        }
-
-        // Validate parent chains independently of the rooted walk so a cycle
-        // disconnected from the page root is still reported as a cycle rather
-        // than being misclassified as an unreachable tree.
-        for (const uid of records.keys()) {
-            const chain = new Set();
-            let current = uid;
-            while (current !== pageUid) {
-                if (chain.has(current)) {
-                    throw boundedReadError('Daily note returned a cyclic block tree.');
-                }
-                chain.add(current);
-                const parentUid = parentByUid.get(current);
-                if (!parentUid) {
-                    throw boundedReadError('Daily note returned a block outside its page tree.');
-                }
-                current = parentUid;
-            }
-        }
-
-        // Walk the complete validated structure for depth and reachability.
+        // Walk the complete structure once for depth, cycles, and reachability.
+        // Ordering is irrelevant to validation, so sorting is deferred until
+        // after relevance projection and touches only retained nodes.
         const visiting = new Set();
         const visited = new Set();
         const validateTree = (uid, depth) => {
@@ -625,7 +599,7 @@ export function readDailyNoteTree(
                 let current = record.uid;
                 while (current !== pageUid) {
                     keepUids.add(current);
-                    current = parentByUid.get(current);
+                    current = records.get(current).parentUid;
                 }
             }
         }
@@ -645,7 +619,7 @@ export function readDailyNoteTree(
         const referencedUids = new Set();
         for (const uid of keepUids) {
             const node = nodes.get(uid);
-            const parentUid = parentByUid.get(uid);
+            const parentUid = records.get(uid).parentUid;
             if (parentUid === pageUid) {
                 roots.push(node);
             } else {
