@@ -868,6 +868,11 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     box-shadow: none !important;
 }
 
+.bp3-button.bp3-minimal.rlb-today__title:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+
 .rlb-today__action {
     box-sizing: border-box;
     display: inline-flex;

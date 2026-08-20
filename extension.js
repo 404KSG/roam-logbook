@@ -1447,16 +1447,20 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     } catch (error) {
       throw withGraphReadIssue(error, { source: "parent", affectedUids: frontier });
     }
-    const referencedTargets = parentRows.map(([, , rawParentString]) => referencedBlockUid(rawParentString)).filter(Boolean);
+    const frontierSet = new Set(frontier);
+    const relevantParentRows = parentRows.filter(([uid]) => frontierSet.has(uid));
+    const referencedTargets = relevantParentRows.map(([, , rawParentString]) => referencedBlockUid(rawParentString)).filter(Boolean);
     const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
     const parentChoices = /* @__PURE__ */ new Map();
-    for (const [uid, rawParentUid] of parentRows) {
+    for (const [uid, rawParentUid] of relevantParentRows) {
       const choices = parentChoices.get(uid) || /* @__PURE__ */ new Set();
       choices.add(rawParentUid);
       parentChoices.set(uid, choices);
     }
+    const ambiguousParentUids = /* @__PURE__ */ new Set();
     for (const [uid, choices] of parentChoices) {
       if (choices.size > 1) {
+        ambiguousParentUids.add(uid);
         issues.push({
           code: "ambiguous-parent",
           taskUid: uid,
@@ -1467,9 +1471,11 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
         });
       }
     }
-    for (const [uid, rawParentUid, rawParentString] of parentRows) {
-      physicalParentOf[uid] = rawParentUid;
-      physicalStringOf[rawParentUid] = rawParentString;
+    for (const [uid, rawParentUid, rawParentString] of relevantParentRows) {
+      if (!ambiguousParentUids.has(uid)) {
+        physicalParentOf[uid] = rawParentUid;
+        physicalStringOf[rawParentUid] = rawParentString;
+      }
       const referenced = referencedBlockUid(rawParentString);
       const parentUid = referenced || rawParentUid;
       const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
@@ -3695,7 +3701,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.50";
+var PLUGIN_VERSION = "0.9.0-beta.51";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -4304,7 +4310,7 @@ function readRoamPageLinkPalette(documentRef = document) {
   } else if (host?.appendChild && documentRef?.createElement) {
     const probe = documentRef.createElement("span");
     probe.className = "rm-page-ref rm-page-ref--link rm-page-ref-link-color";
-    probe.textContent = "Roam Logbook palette probe";
+    probe.textContent = "Task Tracker palette probe";
     probe.setAttribute("aria-hidden", "true");
     probe.setAttribute("data-rlb-palette-probe", "true");
     probe.style.cssText = "position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;visibility:hidden;pointer-events:none;contain:strict;";
@@ -6739,6 +6745,11 @@ var SURFACE = String.raw`/* ---- popover ---- */
     color: var(--rlb-surface-link-hover);
     background: transparent !important;
     box-shadow: none !important;
+}
+
+.bp3-button.bp3-minimal.rlb-today__title:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
 }
 
 .rlb-today__action {

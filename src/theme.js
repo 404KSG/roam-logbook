@@ -196,7 +196,7 @@ export function readRoamPageLinkPalette(documentRef = document) {
     } else if (host?.appendChild && documentRef?.createElement) {
         const probe = documentRef.createElement('span');
         probe.className = 'rm-page-ref rm-page-ref--link rm-page-ref-link-color';
-        probe.textContent = 'Roam Logbook palette probe';
+        probe.textContent = 'Task Tracker palette probe';
         probe.setAttribute('aria-hidden', 'true');
         probe.setAttribute('data-rlb-palette-probe', 'true');
         probe.style.cssText =

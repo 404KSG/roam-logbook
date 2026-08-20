@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import {
     buildTodayTodoTree,
-    compactTodayBreadcrumb,
     currentTodayPath,
     dateToPageTitle,
     flattenTodayRows,
@@ -70,7 +69,7 @@ test('bare references provide unfinished task context without showing the mirror
     assert.equal(model.nodes.some(node => node.uid === 'mirror-1'), false);
 });
 
-test('Today nodes expose root-to-parent ancestor paths and compact long breadcrumbs deterministically', () => {
+test('Today nodes expose root-to-parent hierarchy and complete physical context paths', () => {
     const model = buildTodayTodoTree([
         todo('root-path', 'Root', [
             plain('note-path', 'context', [
@@ -93,10 +92,6 @@ test('Today nodes expose root-to-parent ancestor paths and compact long breadcru
         model.nodes.find(node => node.uid === 'leaf-path').contextPath.map(node => node.uid),
         ['root-path', 'note-path', 'child-path']
     );
-    assert.deepEqual(compactTodayBreadcrumb([]), []);
-    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C']), ['A', 'B', 'C']);
-    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D']), ['A', '…', 'D']);
-    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D', 'E']), ['A', '…', 'E']);
 });
 
 test('Today context paths preserve plain, TODO, and DONE physical ancestors', () => {

@@ -333,18 +333,25 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
         } catch (error) {
             throw withGraphReadIssue(error, { source: 'parent', affectedUids: frontier });
         }
-        const referencedTargets = parentRows
+        // The query contract binds ?uid to this frontier. Ignore any row that
+        // violates that contract so a stale or malformed adapter result cannot
+        // overwrite ancestry resolved in an earlier depth.
+        const frontierSet = new Set(frontier);
+        const relevantParentRows = parentRows.filter(([uid]) => frontierSet.has(uid));
+        const referencedTargets = relevantParentRows
             .map(([, , rawParentString]) => referencedBlockUid(rawParentString))
             .filter(Boolean);
         const referencedStrings = readBlockStrings([...new Set(referencedTargets)]);
         const parentChoices = new Map();
-        for (const [uid, rawParentUid] of parentRows) {
+        for (const [uid, rawParentUid] of relevantParentRows) {
             const choices = parentChoices.get(uid) || new Set();
             choices.add(rawParentUid);
             parentChoices.set(uid, choices);
         }
+        const ambiguousParentUids = new Set();
         for (const [uid, choices] of parentChoices) {
             if (choices.size > 1) {
+                ambiguousParentUids.add(uid);
                 issues.push({
                     code: 'ambiguous-parent',
                     taskUid: uid,
@@ -355,13 +362,18 @@ export function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
                 });
             }
         }
-        for (const [uid, rawParentUid, rawParentString] of parentRows) {
+        for (const [uid, rawParentUid, rawParentString] of relevantParentRows) {
             // Keep a second, physical chain for context breadcrumbs. The
             // reporting hierarchy below may resolve a pure reference to its
             // canonical Task; context still needs to walk through the actual
             // mirror block and its actual Daily Note ancestors.
-            physicalParentOf[uid] = rawParentUid;
-            physicalStringOf[rawParentUid] = rawParentString;
+            // A malformed graph can report more than one physical parent. A
+            // breadcrumb is optional context, so suppress that uncertain edge
+            // instead of displaying whichever query row happened to be last.
+            if (!ambiguousParentUids.has(uid)) {
+                physicalParentOf[uid] = rawParentUid;
+                physicalStringOf[rawParentUid] = rawParentString;
+            }
 
             // Sub-tasks are routinely written under a `((reference))` to a task
             // rather than under the task itself — pulling a task into a daily note

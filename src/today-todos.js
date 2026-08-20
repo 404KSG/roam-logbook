@@ -182,15 +182,6 @@ export function currentTodayPath(model, taskUid) {
     return path;
 }
 
-/** Keep the first and nearest parent when a breadcrumb has more than three layers. */
-export function compactTodayBreadcrumb(labels = []) {
-    const clean = (Array.isArray(labels) ? labels : [])
-        .filter(label => typeof label === 'string' && label.trim())
-        .map(label => label.trim());
-    if (clean.length <= 3) return clean;
-    return [clean[0], '…', clean.at(-1)];
-}
-
 const walkVisible = (nodes, rows, expanded, collapsed, defaultOpenPath, depth = 0) => {
     for (const node of nodes || []) {
         const pathDefaultOpen = defaultOpenPath?.has(node.uid);

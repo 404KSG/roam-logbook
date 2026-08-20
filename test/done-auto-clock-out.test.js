@@ -75,6 +75,7 @@ const refreshSeededClocks = () => clock.refresh();
 install([TASK]);
 const extension = (await import('../src/extension.js')).default;
 const clock = await import('../src/clock.js');
+const { readHierarchy } = await import('../src/entries.js');
 const roam = await import('../src/roam.js');
 
 test.beforeEach(() => {
@@ -384,6 +385,12 @@ test('a malformed hierarchy component does not disable healthy completion watche
         return rows;
     };
     try {
+        const hierarchy = readHierarchy([CHILD.uid]);
+        assert.equal(
+            hierarchy.physicalParentOf[CHILD.uid],
+            undefined,
+            'an ambiguous physical parent suppresses the optional context path'
+        );
         await graph.api.data.block.update({
             block: { uid: SIBLING.uid, string: '{{[[DONE]]}} sibling task' },
         });

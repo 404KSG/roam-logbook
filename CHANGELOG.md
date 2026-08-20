@@ -1,9 +1,25 @@
 # Changelog
 
-## Unreleased — review hardening pass
+## 0.9.0-beta.51 — 2026-08-20
 
 A full-codebase review pass. No graph format change and no migration; existing
 LOGBOOK data, settings, and running CLOCKs are read exactly as before.
+
+### Task Tracker identity and context
+
+- Renamed every current user-facing extension surface to **Task Tracker** while
+  preserving the package identifier, settings keys, internal CSS namespace,
+  upstream attribution, and existing `LOGBOOK:` / `CLOCK:` graph records.
+- Added a context path distinct from task hierarchy. Today, the Timing Line,
+  and Parallel Threads now show every confirmed ancestor block inside the
+  enclosing page, including plain, TODO, and DONE ancestors, while excluding
+  the page title and task itself. Breadcrumb segments retain ordinary and
+  Shift-click navigation and never logically compact the stored path.
+- Kept context lookup outside the one-second timer tick, reused the loaded
+  Daily Note tree for Today, and made uncertain graph ancestry non-fatal.
+- Simplified task interaction paint to one subtle row-level hover/focus surface;
+  title buttons remain transparent, native title tooltips are removed, and
+  explicit keyboard focus rings remain visible.
 
 ### Data integrity
 
