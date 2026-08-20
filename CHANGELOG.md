@@ -1,5 +1,79 @@
 # Changelog
 
+## Unreleased — review hardening pass
+
+A full-codebase review pass. No graph format change and no migration; existing
+LOGBOOK data, settings, and running CLOCKs are read exactly as before.
+
+### Data integrity
+
+- A Clock In that switches tasks no longer reports a generic failure when the
+  new CLOCK cannot be created after the old one was closed. It returns a
+  structured partial result naming the closed CLOCKs, so "the previous session
+  ended but the new one did not start" is visible and retryable.
+- The post-write refresh now confirms the intended change actually landed: a
+  closed CLOCK must read back as not running, and a new CLOCK must exist. A
+  write silently dropped by Roam is reported as uncertain instead of success.
+- A retry set is scoped to the CLOCKs the action asked for, instead of every
+  running CLOCK in the graph.
+- Discard validates the entry before deleting a block, and reports a structured
+  uncertain state if drawer cleanup fails after the delete succeeded.
+- DONE watch events that arrive while an auto clock-out is in flight are queued
+  instead of dropped.
+- A malformed `=> H:MM` audit value is a non-fatal data issue: the timestamps
+  stay authoritative and that session's time is no longer excluded from every
+  total.
+- Timestamps in the DST spring-forward gap hour parse instead of returning null,
+  so a session recorded in another timezone keeps its time.
+- Filtering the By Task tree recomputes visible totals, so a parent no longer
+  shows a total its visible children cannot account for.
+
+### Performance
+
+- Entry discovery binds a finite set of drawer spellings so Roam can use the
+  `:block/string` index, replacing a predicate scan over every block in the
+  graph. Single-entity reads use `data.pull`/`pull_many` and snapshot reads
+  prefer `data.fast.q`, each with the previous query path as fallback.
+- The predicate fallback that silently missed `:LOGBOOK:` drawers is gone.
+- The topbar computes Active Work once per tick rather than twice, and banked
+  minutes are aggregated once instead of in two places.
+- Closing several sessions performs one confirmation read instead of one full
+  graph read per session.
+- `theme.js` watches root attributes and the discovered topbar instead of the
+  whole document, and no longer forces layout or style recalculation inside a
+  MutationObserver callback.
+- The boot-time host observer gives up with a warning instead of watching
+  `document.body` forever when Roam's topbar cannot be found.
+
+### Roam host safety
+
+- The plugin no longer sets `container-type` or `display` on Roam's own
+  navigation host. That containment made the host the containing block for
+  Roam's fixed and absolute descendants, which could misplace Roam's own
+  overlays.
+- The page-link colour probe is no longer inserted into React-owned block text,
+  and its result is cached per theme signature.
+
+### Accessibility
+
+- Dialogs mark the rest of the app `inert`, so a screen reader cannot browse
+  behind an open popover or dashboard.
+- The topbar button keeps a stable accessible name; per-second timing detail
+  moved to a polite live region instead of rewriting the button's label.
+- `title` is no longer copied into an identical `aria-label`, which made
+  assistive tech announce the same string twice. Buttons whose visible text
+  cannot carry the full meaning still set an explicit label.
+- Activity bars use a roving tabindex instead of one tab stop per bar, refresh
+  status uses fixed-role live regions, and small muted text meets an 11px floor.
+
+### Maintenance
+
+- `styles.js` is split into `src/styles/`, and the topbar and dashboard are
+  split into focused modules. Focus trapping, refresh state, and discard
+  confirmation are shared rather than duplicated.
+- `verify:bundle` runs before the tests, so a stale bundle fails fast; eslint
+  covers `scripts/*.mjs`; `build.js` rejects a valueless `--outfile`.
+
 ## 0.9.0-beta.50 — 2026-08-19
 
 - Replaced the visible Active Threads title plus full-width view switch with one
