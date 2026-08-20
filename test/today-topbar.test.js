@@ -151,6 +151,119 @@ test('Today is lazy/cacheable, stays in the popover, and the ticker never reads 
     assert.deepEqual(intervalDelays, [1000], 'view switches and retries add no polling interval');
 });
 
+test('Today chevrons and bulk collapse override the Timing Line default without leaking across branches', async t => {
+    const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.MutationObserver = dom.window.MutationObserver;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    installGraph([
+        {
+            uid: 'old-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Old root',
+        },
+        {
+            uid: 'old-child',
+            page: 'August 19th, 2026',
+            parent: 'old-root',
+            order: 0,
+            string: '{{[[TODO]]}} Old child',
+        },
+        {
+            uid: 'new-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 1,
+            string: '{{[[TODO]]}} New root',
+        },
+        {
+            uid: 'new-child',
+            page: 'August 19th, 2026',
+            parent: 'new-root',
+            order: 0,
+            string: '{{[[TODO]]}} New child',
+        },
+    ]);
+    const clock = await import('../src/clock.js');
+    const { createTopbar } = await import('../src/topbar.js');
+    clock.reset();
+    const topbar = createTopbar({
+        now: () => new Date('2026-08-19T10:00:00'),
+        setIntervalFn: () => 1,
+        clearIntervalFn: () => {},
+    });
+    topbar.mount();
+    t.after(() => {
+        topbar.unmount();
+        clock.reset();
+        uninstallGraph();
+        dom.window.close();
+        delete globalThis.document;
+        delete globalThis.window;
+        delete globalThis.MutationObserver;
+        delete globalThis.HTMLElement;
+    });
+
+    const trigger = document.querySelector('#roam-logbook-topbar button');
+    trigger.click();
+    const popover = document.querySelector('body > .rlb-popover');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    popover.querySelector('[data-view="today"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    const rowUids = () => [...popover.querySelectorAll('.rlb-today__row')].map(row => row.dataset.taskUid);
+    assert.deepEqual(rowUids(), ['old-root', 'new-root']);
+
+    await clock.clockIn('old-child', { now: new Date('2026-08-19T10:00:00') });
+    assert.deepEqual(rowUids(), ['old-root', 'old-child', 'new-root']);
+    assert.ok(popover.querySelector('[data-task-uid="old-child"] .rlb-today__timing'));
+
+    popover.querySelector('[data-task-uid="old-root"] [data-action="today-toggle"]').click();
+    assert.deepEqual(rowUids(), ['old-root', 'new-root']);
+    assert.equal(
+        popover.querySelector('[data-task-uid="old-root"]').getAttribute('aria-expanded'),
+        'false'
+    );
+
+    await clock.clockIn('new-child', { now: new Date('2026-08-19T10:01:00') });
+    assert.deepEqual(rowUids(), ['old-root', 'new-root', 'new-child']);
+    assert.ok(popover.querySelector('[data-task-uid="new-child"] .rlb-today__timing'));
+    assert.equal(
+        popover.querySelector('[data-task-uid="old-root"] [data-action="today-toggle"]')?.title,
+        'Expand sub-tasks'
+    );
+
+    let bulk = popover.querySelector('[data-action="today-toggle-all"]');
+    assert.equal(bulk.title, 'Expand all Today tasks');
+    bulk.click();
+    assert.deepEqual(rowUids(), ['old-root', 'old-child', 'new-root', 'new-child']);
+
+    bulk = popover.querySelector('[data-action="today-toggle-all"]');
+    bulk.click();
+    assert.deepEqual(rowUids(), ['old-root', 'new-root']);
+    assert.equal(
+        popover.querySelector('[data-action="today-toggle-all"]').title,
+        'Expand all Today tasks'
+    );
+    assert.equal(popover.querySelector('[data-task-uid="new-child"]'), null);
+
+    trigger.click();
+    assert.equal(document.querySelector('body > .rlb-popover'), null);
+    trigger.click();
+    const reopened = document.querySelector('body > .rlb-popover');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    reopened.querySelector('[data-view="today"]').click();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.deepEqual(
+        [...reopened.querySelectorAll('.rlb-today__row')].map(row => row.dataset.taskUid),
+        ['old-root', 'new-root', 'new-child'],
+        'closing the popover resets the session-only collapse state'
+    );
+});
+
 test('a failed first Today read shows compact Retry and recovers without a header refresh', async t => {
     const dom = new JSDOM('<!doctype html><html><body><div class="rm-topbar"></div></body></html>');
     globalThis.window = dom.window;

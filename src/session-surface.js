@@ -77,11 +77,16 @@ const renderTitle = (row, onOpenTask) => {
 const renderTodayRow = (row, options) => {
     const node = row.node;
     const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
-    const breadcrumbLabels = compactTodayBreadcrumb(
-        (node.ancestorPath || []).map(ancestor =>
-            formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
+    // A visible child already has its parent immediately above it. Keep the
+    // breadcrumb for non-root parents only, where it labels the group and
+    // remains useful while a long task list is being scanned.
+    const breadcrumbLabels = node.ancestorPath?.length > 0 && node.children.length > 0
+        ? compactTodayBreadcrumb(
+            node.ancestorPath.map(ancestor =>
+                formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
+            )
         )
-    );
+        : [];
     const rowNode = el('div', 'rlb-today__row');
     rowNode.dataset.taskUid = node.uid;
     rowNode.style.setProperty('--rlb-today-depth', String(row.depth));

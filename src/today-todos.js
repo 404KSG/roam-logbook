@@ -161,20 +161,25 @@ export function compactTodayBreadcrumb(labels = []) {
     return [clean[0], '…', clean.at(-1)];
 }
 
-const walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
+const walkVisible = (nodes, rows, expanded, collapsed, defaultOpenPath, depth = 0) => {
     for (const node of nodes || []) {
-        const forced = forcedPath?.has(node.uid);
-        const isExpanded = node.children.length > 0 && (forced || expanded?.has(node.uid));
+        const pathDefaultOpen = defaultOpenPath?.has(node.uid);
+        const isExpanded = node.children.length > 0 && (
+            expanded?.has(node.uid) || (pathDefaultOpen && !collapsed?.has(node.uid))
+        );
         rows.push({ node, depth, expanded: isExpanded });
-        if (isExpanded) walkVisible(node.children, rows, expanded, forcedPath, depth + 1);
+        if (isExpanded) walkVisible(node.children, rows, expanded, collapsed, defaultOpenPath, depth + 1);
     }
     return rows;
 };
 
-/** Return the rows visible under the current collapse state. */
-export function flattenTodayRows(model, { expanded = new Set(), currentPath = new Set() } = {}) {
+/** Return the rows visible under the current session's collapse state. */
+export function flattenTodayRows(
+    model,
+    { expanded = new Set(), collapsed = new Set(), currentPath = new Set() } = {}
+) {
     if (!model) return [];
-    return walkVisible(model.roots, [], expanded, currentPath);
+    return walkVisible(model.roots, [], expanded, collapsed, currentPath);
 }
 
 export const todayTodoStatus = string => (isTaskBlock(string) ? taskStatus(string) : null);

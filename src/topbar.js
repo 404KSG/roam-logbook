@@ -145,6 +145,7 @@ export function createTopbar({
     let todayStatus = 'idle';
     let todayNotice = '';
     let todayExpanded = new Set();
+    let todayCollapsed = new Set();
     let todayRequestToken = 0;
     let todayInFlight = null;
     const layoutHosts = new Set();
@@ -168,6 +169,7 @@ export function createTopbar({
         todayStatus = 'idle';
         todayNotice = '';
         todayExpanded = new Set();
+        todayCollapsed = new Set();
         todayRequestToken += 1;
         todayInFlight = null;
     };
@@ -237,6 +239,7 @@ export function createTopbar({
         const currentUid = clock.getActiveWork(nowDate()).focused?.taskUid || null;
         return flattenTodayRows(model, {
             expanded: todayExpanded,
+            collapsed: todayCollapsed,
             currentPath: currentTodayPath(model, currentUid),
         });
     };
@@ -425,6 +428,7 @@ export function createTopbar({
             view: surfaceView,
             todayModel: today,
             todayExpanded,
+            todayCollapsed,
             todayRows: todayRows(today),
             currentTaskUid: clock.getActiveWork(nowDate()).focused?.taskUid || null,
             onSwitchView: view => {
@@ -440,10 +444,19 @@ export function createTopbar({
                 }
             },
             onToggleToday: uid => {
-                const next = new Set(todayExpanded);
-                if (next.has(uid)) next.delete(uid);
-                else next.add(uid);
-                todayExpanded = next;
+                const current = todayRows(today).find(row => row.node.uid === uid);
+                if (!current) return;
+                const nextExpanded = new Set(todayExpanded);
+                const nextCollapsed = new Set(todayCollapsed);
+                if (current.expanded) {
+                    nextExpanded.delete(uid);
+                    nextCollapsed.add(uid);
+                } else {
+                    nextExpanded.add(uid);
+                    nextCollapsed.delete(uid);
+                }
+                todayExpanded = nextExpanded;
+                todayCollapsed = nextCollapsed;
                 renderSurfaces();
             },
             onToggleAllToday: () => {
@@ -452,11 +465,12 @@ export function createTopbar({
                 const allExpanded = expandable.length > 0 &&
                     renderedExpandable.length === expandable.length &&
                     renderedExpandable.every(row => row.expanded);
-                // Clearing the set still lets flattenTodayRows() keep the
-                // Timing Line ancestor path forcibly visible after Collapse all.
                 todayExpanded = allExpanded
                     ? new Set()
                     : new Set(expandable.map(node => node.uid));
+                todayCollapsed = allExpanded
+                    ? new Set(expandable.map(node => node.uid))
+                    : new Set();
                 renderSurfaces();
             },
             onStartToday: taskUid => void run(() => clock.clockIn(taskUid, { source: 'active-work-switch' })),

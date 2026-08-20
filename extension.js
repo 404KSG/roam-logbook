@@ -370,20 +370,20 @@ function compactTodayBreadcrumb(labels = []) {
     return clean;
   return [clean[0], "\u2026", clean.at(-1)];
 }
-var walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
+var walkVisible = (nodes, rows, expanded, collapsed, defaultOpenPath, depth = 0) => {
   for (const node of nodes || []) {
-    const forced = forcedPath?.has(node.uid);
-    const isExpanded = node.children.length > 0 && (forced || expanded?.has(node.uid));
+    const pathDefaultOpen = defaultOpenPath?.has(node.uid);
+    const isExpanded = node.children.length > 0 && (expanded?.has(node.uid) || pathDefaultOpen && !collapsed?.has(node.uid));
     rows.push({ node, depth, expanded: isExpanded });
     if (isExpanded)
-      walkVisible(node.children, rows, expanded, forcedPath, depth + 1);
+      walkVisible(node.children, rows, expanded, collapsed, defaultOpenPath, depth + 1);
   }
   return rows;
 };
-function flattenTodayRows(model, { expanded = /* @__PURE__ */ new Set(), currentPath = /* @__PURE__ */ new Set() } = {}) {
+function flattenTodayRows(model, { expanded = /* @__PURE__ */ new Set(), collapsed = /* @__PURE__ */ new Set(), currentPath = /* @__PURE__ */ new Set() } = {}) {
   if (!model)
     return [];
-  return walkVisible(model.roots, [], expanded, currentPath);
+  return walkVisible(model.roots, [], expanded, collapsed, currentPath);
 }
 
 // src/roam.js
@@ -7734,11 +7734,11 @@ var renderTitle = (row, onOpenTask) => {
 var renderTodayRow = (row, options) => {
   const node = row.node;
   const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
-  const breadcrumbLabels = compactTodayBreadcrumb(
-    (node.ancestorPath || []).map(
+  const breadcrumbLabels = node.ancestorPath?.length > 0 && node.children.length > 0 ? compactTodayBreadcrumb(
+    node.ancestorPath.map(
       (ancestor) => formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
     )
-  );
+  ) : [];
   const rowNode = el("div", "rlb-today__row");
   rowNode.dataset.taskUid = node.uid;
   rowNode.style.setProperty("--rlb-today-depth", String(row.depth));
@@ -8835,6 +8835,7 @@ function createTopbar({
   let todayStatus = "idle";
   let todayNotice = "";
   let todayExpanded = /* @__PURE__ */ new Set();
+  let todayCollapsed = /* @__PURE__ */ new Set();
   let todayRequestToken = 0;
   let todayInFlight = null;
   const layoutHosts = /* @__PURE__ */ new Set();
@@ -8854,6 +8855,7 @@ function createTopbar({
     todayStatus = "idle";
     todayNotice = "";
     todayExpanded = /* @__PURE__ */ new Set();
+    todayCollapsed = /* @__PURE__ */ new Set();
     todayRequestToken += 1;
     todayInFlight = null;
   };
@@ -8921,6 +8923,7 @@ function createTopbar({
     const currentUid = getActiveWork(nowDate()).focused?.taskUid || null;
     return flattenTodayRows(model, {
       expanded: todayExpanded,
+      collapsed: todayCollapsed,
       currentPath: currentTodayPath(model, currentUid)
     });
   };
@@ -9094,6 +9097,7 @@ function createTopbar({
       view: surfaceView,
       todayModel: today,
       todayExpanded,
+      todayCollapsed,
       todayRows: todayRows(today),
       currentTaskUid: getActiveWork(nowDate()).focused?.taskUid || null,
       onSwitchView: (view) => {
@@ -9107,12 +9111,20 @@ function createTopbar({
         }
       },
       onToggleToday: (uid) => {
-        const next = new Set(todayExpanded);
-        if (next.has(uid))
-          next.delete(uid);
-        else
-          next.add(uid);
-        todayExpanded = next;
+        const current = todayRows(today).find((row) => row.node.uid === uid);
+        if (!current)
+          return;
+        const nextExpanded = new Set(todayExpanded);
+        const nextCollapsed = new Set(todayCollapsed);
+        if (current.expanded) {
+          nextExpanded.delete(uid);
+          nextCollapsed.add(uid);
+        } else {
+          nextExpanded.add(uid);
+          nextCollapsed.delete(uid);
+        }
+        todayExpanded = nextExpanded;
+        todayCollapsed = nextCollapsed;
         renderSurfaces();
       },
       onToggleAllToday: () => {
@@ -9120,6 +9132,7 @@ function createTopbar({
         const renderedExpandable = todayRows(today).filter((row) => row?.node?.children?.length > 0);
         const allExpanded = expandable.length > 0 && renderedExpandable.length === expandable.length && renderedExpandable.every((row) => row.expanded);
         todayExpanded = allExpanded ? /* @__PURE__ */ new Set() : new Set(expandable.map((node) => node.uid));
+        todayCollapsed = allExpanded ? new Set(expandable.map((node) => node.uid)) : /* @__PURE__ */ new Set();
         renderSurfaces();
       },
       onStartToday: (taskUid) => void run(() => clockIn(taskUid, { source: "active-work-switch" })),

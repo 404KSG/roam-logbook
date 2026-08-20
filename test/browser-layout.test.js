@@ -1055,12 +1055,12 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
                         </div>
                     </div>
-                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
+                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem" aria-expanded="false">
                         <div class="rlb-today__rail">
-                            <span class="rlb-today__spacer"></span>
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Parent"></button>
                             <div class="rlb-today__content">
                                 <div class="rlb-today__breadcrumb" aria-hidden="true">A very long project › B › … › Immediate parent</div>
-                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child that must keep a usable title region</button>
+                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested parent that must keep a usable title region</button>
                             </div>
                         </div>
                         <div class="rlb-today__action">
@@ -1199,12 +1199,12 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
                         </div>
                     </div>
-                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
+                    <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem" aria-expanded="false">
                         <div class="rlb-today__rail">
-                            <span class="rlb-today__spacer"></span>
+                            <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Parent"></button>
                             <div class="rlb-today__content">
                                 <div class="rlb-today__breadcrumb" aria-hidden="true">Project › … › Parent</div>
-                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child with a fixed action rail</button>
+                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested parent with a fixed action rail</button>
                             </div>
                         </div>
                         <div class="rlb-today__action">

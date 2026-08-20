@@ -231,17 +231,28 @@ test('Today breadcrumbs render above titles with formatted reference parents and
         targetRow.querySelector('.rlb-today__breadcrumb')?.textContent,
         '[[Project Page]] #[[Area]]'
     );
-    const breadcrumb = childRow.querySelector('.rlb-today__breadcrumb');
+    assert.equal(childRow.querySelector('.rlb-today__breadcrumb'), null);
     const title = childRow.querySelector('.rlb-today__title');
-    assert.equal(
-        breadcrumb?.textContent,
-        '[[Project Page]] #[[Area]] › [[Referenced Page]] #[[Subtask]]'
-    );
-    assert.equal(breadcrumb?.getAttribute('aria-hidden'), 'true');
-    assert.equal(breadcrumb?.nextElementSibling, title);
     assert.equal(title?.textContent, 'Child');
     assert.equal(title?.getAttribute('aria-label'), 'Open this block: Child');
     assert.equal(childRow.textContent.includes('{{[[TODO]]}}'), false);
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            view: 'today',
+            todayModel: model,
+            todayRows: flattenTodayRows(model, { expanded: new Set(['root-breadcrumb']) }),
+            onOpenTask: () => {},
+            onStartToday: () => {},
+        }
+    );
+    const collapsedTargetRow = root.querySelector('[data-task-uid="target-breadcrumb"]');
+    const collapsedBreadcrumb = collapsedTargetRow.querySelector('.rlb-today__breadcrumb');
+    assert.equal(collapsedTargetRow.getAttribute('aria-expanded'), 'false');
+    assert.equal(collapsedBreadcrumb?.textContent, '[[Project Page]] #[[Area]]');
+    assert.equal(collapsedBreadcrumb?.getAttribute('aria-hidden'), 'true');
 
     unmount(dom);
 });

@@ -110,6 +110,34 @@ test('collapse defaults to roots, while the current Timing Line branch is expand
     );
 });
 
+test('explicit collapse overrides the current Timing Line default and stays keyed to the node', () => {
+    const model = buildTodayTodoTree([
+        todo('old-root', 'Old root', [todo('old-child', 'Old child')]),
+        todo('new-root', 'New root', [todo('new-child', 'New child')], 1),
+    ]);
+    const oldPath = currentTodayPath(model, 'old-child');
+    const newPath = currentTodayPath(model, 'new-child');
+    const collapsed = new Set(['old-root']);
+
+    assert.deepEqual(
+        flattenTodayRows(model, { currentPath: oldPath }).map(row => row.node.uid),
+        ['old-root', 'old-child', 'new-root']
+    );
+    assert.deepEqual(
+        flattenTodayRows(model, { currentPath: oldPath, collapsed }).map(row => row.node.uid),
+        ['old-root', 'new-root']
+    );
+    assert.deepEqual(
+        flattenTodayRows(model, { currentPath: newPath, collapsed }).map(row => row.node.uid),
+        ['old-root', 'new-root', 'new-child']
+    );
+    assert.deepEqual(
+        flattenTodayRows(model, { currentPath: oldPath, collapsed }).map(row => row.node.uid),
+        ['old-root', 'new-root'],
+        'switching back keeps the user collapse on the old branch'
+    );
+});
+
 test('Daily Notes title uses Roam local English ordinal formatting', () => {
     assert.equal(dateToPageTitle(new Date('2026-08-01T12:00:00')), 'August 1st, 2026');
     assert.equal(dateToPageTitle(new Date('2026-08-12T12:00:00')), 'August 12th, 2026');
