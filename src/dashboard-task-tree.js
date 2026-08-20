@@ -8,7 +8,7 @@ const countDescendants = node =>
 
 export function tasksSection(
     tree,
-    { taskView, collapsedByFilter, taskLink, statusMark, taskTimingAction }
+    { taskView, collapsedByFilter, taskLink, taskTimingAction }
 ) {
     const section = el('section', 'rlb-dashboard-section rlb-dashboard-panel rlb-by-task');
     section.setAttribute('aria-labelledby', 'roam-logbook-by-task-title');
@@ -192,8 +192,6 @@ export function tasksSection(
                 leading.appendChild(el('span', 'rlb-tree__toggle rlb-tree__toggle--empty'));
             }
 
-            const mark = statusMark(node.status);
-            if (mark) leading.appendChild(mark);
             if (node.status === 'DONE') row.classList.add('rlb-row--done');
             if (node.context) row.classList.add('rlb-row--context');
             content.appendChild(taskLink(node));

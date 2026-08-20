@@ -3776,16 +3776,6 @@ var headerRow = (columns, { sortBy = null, direction = "desc", onSort = null } =
   thead.appendChild(row);
   return thead;
 };
-var statusMark = (status) => {
-  if (!status)
-    return null;
-  const done = status === "DONE";
-  const mark = el("span", `rlb-status rlb-status--${done ? "done" : "todo"}`);
-  mark.title = done ? "DONE" : "TODO";
-  mark.setAttribute("role", "img");
-  mark.setAttribute("aria-label", done ? "Done" : "To do");
-  return mark;
-};
 var taskLink = (row, { onClose = () => {
 } } = {}) => {
   const title = formatDisplayTitle(row);
@@ -3814,7 +3804,7 @@ var taskLink = (row, { onClose = () => {
 
 // src/dashboard-task-tree.js
 var countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
-function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, statusMark: statusMark2, taskTimingAction }) {
+function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, taskTimingAction }) {
   const section = el("section", "rlb-dashboard-section rlb-dashboard-panel rlb-by-task");
   section.setAttribute("aria-labelledby", "roam-logbook-by-task-title");
   const heading = el("div", "rlb-section__heading rlb-panel__header");
@@ -3981,9 +3971,6 @@ function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, 
       } else {
         leading.appendChild(el("span", "rlb-tree__toggle rlb-tree__toggle--empty"));
       }
-      const mark = statusMark2(node.status);
-      if (mark)
-        leading.appendChild(mark);
       if (node.status === "DONE")
         row.classList.add("rlb-row--done");
       if (node.context)
@@ -4906,7 +4893,6 @@ function createDashboard({
         taskView,
         collapsedByFilter,
         taskLink: renderTaskLink,
-        statusMark,
         taskTimingAction
       })
     );
@@ -5031,6 +5017,16 @@ function createDashboard({
     );
   };
   const taskTimingAction = (node) => {
+    if (node.status === "DONE") {
+      const completed = el(
+        "span",
+        "bp3-icon bp3-icon-tick-circle rlb-task-action rlb-task-action--completed"
+      );
+      completed.title = "Completed";
+      completed.setAttribute("role", "img");
+      completed.setAttribute("aria-label", "Completed");
+      return completed;
+    }
     if (node.running) {
       const timing = el(
         "span",
@@ -6981,6 +6977,16 @@ var DASHBOARD = String.raw`/* ---- dashboard ---- */
     margin: 0;
 }
 
+.rlb-task-action--completed {
+    display: inline-flex;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.rlb-task-action--completed::before {
+    margin: 0;
+}
+
 .rlb-section__heading {
     display: flex;
     align-items: center;
@@ -7013,38 +7019,6 @@ var DASHBOARD = String.raw`/* ---- dashboard ---- */
 
 .rlb-tree__toggle--empty {
     display: block;
-}
-
-/* Task status, drawn in CSS rather than Blueprint's icon font so it cannot
-   silently render as a blank box if an icon name is wrong. */
-.rlb-status {
-    flex: 0 0 auto;
-    align-self: center;
-    box-sizing: border-box;
-    width: 13px;
-    height: 13px;
-    border: 1.5px solid currentColor;
-    border-radius: 2px;
-    opacity: 0.4;
-    position: relative;
-}
-
-.rlb-status--done {
-    background: #0f9960;
-    border-color: #0f9960;
-    opacity: 1;
-}
-
-.rlb-status--done::after {
-    content: '';
-    position: absolute;
-    left: 4px;
-    top: 1px;
-    width: 3px;
-    height: 6px;
-    border: solid #ffffff;
-    border-width: 0 1.5px 1.5px 0;
-    transform: rotate(45deg);
 }
 
 .rlb-row--done .rlb-task-link {

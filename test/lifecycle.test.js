@@ -692,13 +692,25 @@ test('the task tree collapses and expands from the caret', () => {
     assert.equal(taskRows().length, 2, 'expanding brings it back');
 });
 
-test('each task row shows its checkbox state', () => {
+test('Dashboard task rows use action semantics instead of checkbox state marks', () => {
     graph.store.get('subtask001').string = '{{[[DONE]]}} a sub task';
     paletteCommands.get('Task Tracker: Open dashboard')();
 
-    const marks = [...dialog().querySelectorAll('.rlb-tree__cell .rlb-status')];
-    assert.equal(marks.length, 2, 'one per task row');
-    assert.deepEqual(marks.map(mark => mark.getAttribute('aria-label')), ['To do', 'Done']);
+    const taskTable = dialog().querySelector('.rlb-task-table');
+    assert.equal(
+        taskTable.querySelectorAll('.rlb-status').length,
+        0,
+        'task rows no longer duplicate TODO/DONE as checkbox marks'
+    );
+    const completed = taskTable.querySelector('tr.rlb-row--done .rlb-task-action--completed');
+    assert.ok(completed);
+    assert.ok(completed.classList.contains('bp3-icon-tick-circle'));
+    assert.equal(completed.tagName, 'SPAN');
+    assert.equal(completed.title, 'Completed');
+    assert.equal(completed.getAttribute('role'), 'img');
+    assert.equal(completed.getAttribute('aria-label'), 'Completed');
+    assert.equal(completed.closest('button'), null);
+    assert.equal(taskTable.querySelector('tr.rlb-row--done .rlb-task-action--play'), null);
     // The finished row is dimmed rather than hidden.
     assert.equal(dialog().querySelectorAll('tr.rlb-row--done').length, 1);
 });

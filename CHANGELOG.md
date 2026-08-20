@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0-beta.59 — 2026-08-20
+
+### Unified Dashboard task status actions
+
+- Removes the duplicate TODO/DONE checkbox marks from the Dashboard By Task
+  rows while keeping the left-side tree caret and title alignment unchanged.
+- Keeps unfinished TODO rows actionable with Play or Currently timing, and
+  gives DONE rows the same non-interactive gray `bp3-icon-tick-circle`
+  `Completed` icon used by Active Threads.
+- Removes the retired checkbox renderer and its Dashboard-only CSS.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.58 — 2026-08-20
 
 ### Faster native switching and an analysis-only Dashboard

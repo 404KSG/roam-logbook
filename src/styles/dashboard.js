@@ -173,6 +173,16 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     margin: 0;
 }
 
+.rlb-task-action--completed {
+    display: inline-flex;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.rlb-task-action--completed::before {
+    margin: 0;
+}
+
 .rlb-section__heading {
     display: flex;
     align-items: center;
@@ -205,38 +215,6 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
 
 .rlb-tree__toggle--empty {
     display: block;
-}
-
-/* Task status, drawn in CSS rather than Blueprint's icon font so it cannot
-   silently render as a blank box if an icon name is wrong. */
-.rlb-status {
-    flex: 0 0 auto;
-    align-self: center;
-    box-sizing: border-box;
-    width: 13px;
-    height: 13px;
-    border: 1.5px solid currentColor;
-    border-radius: 2px;
-    opacity: 0.4;
-    position: relative;
-}
-
-.rlb-status--done {
-    background: #0f9960;
-    border-color: #0f9960;
-    opacity: 1;
-}
-
-.rlb-status--done::after {
-    content: '';
-    position: absolute;
-    left: 4px;
-    top: 1px;
-    width: 3px;
-    height: 6px;
-    border: solid #ffffff;
-    border-width: 0 1.5px 1.5px 0;
-    transform: rotate(45deg);
 }
 
 .rlb-row--done .rlb-task-link {

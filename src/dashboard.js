@@ -13,7 +13,7 @@ import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
 import { createFocusTrap } from './focus-trap.js';
 import { dataIssuesSection, issueRow } from './dashboard-issues.js';
-import { statusMark, taskLink as renderTaskLinkBase } from './dashboard-table.js';
+import { taskLink as renderTaskLinkBase } from './dashboard-table.js';
 import { tasksSection as renderTasksSection } from './dashboard-task-tree.js';
 import {
     buildDashboard,
@@ -294,7 +294,6 @@ export function createDashboard({
                 taskView,
                 collapsedByFilter,
                 taskLink: renderTaskLink,
-                statusMark,
                 taskTimingAction,
             })
         );
@@ -428,6 +427,16 @@ export function createDashboard({
     };
 
     const taskTimingAction = node => {
+        if (node.status === 'DONE') {
+            const completed = el(
+                'span',
+                'bp3-icon bp3-icon-tick-circle rlb-task-action rlb-task-action--completed'
+            );
+            completed.title = 'Completed';
+            completed.setAttribute('role', 'img');
+            completed.setAttribute('aria-label', 'Completed');
+            return completed;
+        }
         if (node.running) {
             const timing = el(
                 'span',

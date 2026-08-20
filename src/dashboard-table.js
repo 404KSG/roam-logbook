@@ -47,17 +47,6 @@ export const headerRow = (
     return thead;
 };
 
-/** A checkbox drawn in CSS, so it does not depend on Blueprint's icon font. */
-export const statusMark = status => {
-    if (!status) return null;
-    const done = status === 'DONE';
-    const mark = el('span', `rlb-status rlb-status--${done ? 'done' : 'todo'}`);
-    mark.title = done ? 'DONE' : 'TODO';
-    mark.setAttribute('role', 'img');
-    mark.setAttribute('aria-label', done ? 'Done' : 'To do');
-    return mark;
-};
-
 export const taskLink = (row, { onClose = () => {} } = {}) => {
     const title = formatDisplayTitle(row);
     const accessibleName = `Open this block: ${title}`;

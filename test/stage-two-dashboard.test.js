@@ -379,6 +379,13 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         assert.ok(focusedRow);
         assert.ok(doneRow);
 
+        const taskTable = document.querySelector('.rlb-task-table');
+        assert.equal(
+            taskTable.querySelectorAll('.rlb-status').length,
+            0,
+            'Dashboard rows do not duplicate the task status as checkbox marks'
+        );
+
         const play = idleRow.querySelector('[data-action="start-timing"]');
         assert.ok(play);
         assert.equal(play.tagName, 'BUTTON');
@@ -403,6 +410,16 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         assert.equal(focusedRow.querySelector('[data-action="start-timing"]'), null);
         assert.equal(doneRow.querySelector('[data-action="start-timing"]'), null);
         assert.equal(doneRow.querySelector('.rlb-task-action--timing'), null);
+
+        const completed = doneRow.querySelector('.rlb-task-action--completed');
+        assert.ok(completed, 'completed Tasks expose the same completion icon as Active Threads');
+        assert.ok(completed.classList.contains('bp3-icon-tick-circle'));
+        assert.equal(completed.tagName, 'SPAN');
+        assert.equal(completed.title, 'Completed');
+        assert.equal(completed.getAttribute('role'), 'img');
+        assert.equal(completed.getAttribute('aria-label'), 'Completed');
+        assert.equal(completed.closest('button'), null, 'the completion icon is not interactive');
+        assert.equal(doneRow.querySelector('.rlb-task-action--play'), null);
 
         const overlay = document.querySelector('.rlb-root');
         const dialog = overlay.querySelector('.rlb-dialog');
