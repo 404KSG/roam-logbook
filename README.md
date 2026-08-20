@@ -1,6 +1,6 @@
 # Task Tracker – 404KSG
 
-Current package version: **0.9.0-beta.56**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.57**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Single-focus task and time tracking for Roam Research, with Org-compatible LOGBOOK / CLOCK records.

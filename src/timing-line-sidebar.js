@@ -29,11 +29,22 @@ export function createTimingLineSidebarFronting({
     onNotice = () => {},
 } = {}) {
     let latestIntent = 0;
-    let queue = Promise.resolve();
+    const inFlight = new Set();
     let disposed = false;
 
-    const isCurrent = intent =>
-        !disposed && intent === latestIntent && Boolean(isEnabled());
+    const isFrontingEnabled = () => {
+        try {
+            return Boolean(isEnabled());
+        } catch (error) {
+            console.debug('[roam-logbook] sidebar setting check failed', error);
+            return false;
+        }
+    };
+
+    const isCurrent = intent => {
+        if (disposed || intent !== latestIntent) return false;
+        return isFrontingEnabled();
+    };
 
     const runIntent = async (action, intent) => {
         if (!isCurrent(intent)) {
@@ -43,6 +54,7 @@ export function createTimingLineSidebarFronting({
         try {
             result = await frontBlock(action.taskUid, {
                 isCurrent: () => isCurrent(intent),
+                preferExisting: action.source === 'active-work-switch',
             });
         } catch (error) {
             result = {
@@ -53,29 +65,41 @@ export function createTimingLineSidebarFronting({
             };
         }
         if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
-            onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+            try {
+                onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+            } catch (error) {
+                // A removed or host-owned notice surface cannot reject the
+                // detached navigation request or poison later switches.
+                console.debug('[roam-logbook] sidebar notice failed', error);
+            }
         }
         return result;
     };
 
     const handleAction = action => {
-        if (disposed || !isTimingLineFrontIntent(action) || !isEnabled()) return false;
+        if (disposed || !isTimingLineFrontIntent(action) || !isFrontingEnabled()) return false;
         const intent = ++latestIntent;
 
-        // A resolved queue plus catch().then() used to spend two microtasks
-        // before the first native sidebar request. One continuation is enough
-        // to preserve serialized/latest-intent behavior, including recovery
-        // after an unexpected prior rejection.
-        queue = queue.then(
-            () => runIntent(action, intent),
-            () => runIntent(action, intent)
-        );
+        // Every accepted intent receives its own one-microtask launch. The
+        // adapter keeps authoritative window mutations serialized, while its
+        // reversible preview lane lets the latest task become visible without
+        // waiting for an older native operation to settle.
+        const request = Promise.resolve().then(() => runIntent(action, intent));
+        inFlight.add(request);
+        const release = () => inFlight.delete(request);
+        void request.then(release, release);
         return true;
+    };
+
+    const whenIdle = async () => {
+        while (inFlight.size > 0) {
+            await Promise.allSettled([...inFlight]);
+        }
     };
 
     return {
         handleAction,
-        whenIdle: () => queue,
+        whenIdle,
         dispose() {
             disposed = true;
             latestIntent += 1;

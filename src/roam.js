@@ -8,6 +8,7 @@
 
 import { referencedBlockUid } from './org.js';
 import { dateToPageTitle } from './today-todos.js';
+import { ACTIVE_WORK_WINDOW_MS } from './active-work.js';
 
 export class GraphReadError extends Error {
     constructor(message, { cause, issue } = {}) {
@@ -681,7 +682,7 @@ const sidebarOperationQueues = new WeakMap();
 // authority, while a recently closed window is recovered through the fallback
 // path below instead of being treated as permanently present.
 const knownSidebarBlockWindows = new WeakMap();
-const SIDEBAR_WINDOW_CACHE_TTL_MS = 30_000;
+const SIDEBAR_WINDOW_CACHE_TTL_MS = ACTIVE_WORK_WINDOW_MS;
 
 const sidebarWindowCache = sidebar => {
     let cache = knownSidebarBlockWindows.get(sidebar);
@@ -813,7 +814,10 @@ const revealExistingBlockWindow = async (
  * asynchronous native reads. This adapter never closes, pins, removes, focuses,
  * or reorders an unrelated window.
  */
-export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
+export async function frontBlockInRightSidebar(
+    uid,
+    { isCurrent = () => true, preferExisting = false } = {}
+) {
     if (typeof uid !== 'string' || uid.length === 0) {
         return sidebarFailure('missing-uid', 'This Timing Line has no block UID.');
     }
@@ -826,14 +830,30 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
         );
     }
 
+    if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+
+    // Start the reversible host work before entering the authoritative queue.
+    // A rapid newer switch can therefore reveal an existing native window even
+    // while an older get/add operation is still unresolved. The queued pass
+    // below remains responsible for dedupe and final ordering.
+    const hadPendingOperation = sidebarOperationQueues.has(sidebar);
+    const recentlyKnown = hasRecentlyKnownSidebarWindow(sidebar, uid);
+    const shouldPreview =
+        typeof sidebar.setWindowOrder === 'function' &&
+        (hadPendingOperation || recentlyKnown || preferExisting);
+    const sidebarOpen = openSidebarForIntent(sidebar);
+    let previewPromise = null;
+    if (shouldPreview) {
+        previewPromise = revealExistingBlockWindow(sidebar, uid, {
+            isCurrent,
+            requireOrder: true,
+            unavailableMessage: 'Roam could not move the Timing Line sidebar window to the top.',
+        }).catch(error => ({ ok: false, previewFailed: true, error }));
+    }
+
     try {
         return await runSidebarOperation(sidebar, async () => {
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-            // Roam's native calls are the fast path. Opening the sidebar is a
-            // concurrent visibility hint; it must not gate addWindow or the
-            // existing-window reveal. Every failure below can await this same
-            // caught promise before making one authoritative retry.
-            const sidebarOpen = openSidebarForIntent(sidebar);
 
             const findExisting = windows =>
                 Array.isArray(windows)
@@ -866,37 +886,43 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                 return sidebar.getWindows();
             };
 
-            // A successful authoritative read followed by a successful reveal
-            // is the common path while switching between recently used Timing
-            // Lines. Native calls are still serialized by runSidebarOperation,
-            // and any rejection invalidates the hint and immediately falls
-            // through to Roam's authoritative window list for close/recovery
-            // handling.
-            if (
-                hasRecentlyKnownSidebarWindow(sidebar, uid) &&
-                typeof sidebar.setWindowOrder === 'function'
-            ) {
-                if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-                try {
-                    const visibility = await revealExistingBlockWindow(sidebar, uid, {
-                        isCurrent,
-                        requireOrder: true,
-                        unavailableMessage:
-                            'Roam could not move the Timing Line sidebar window to the top.',
-                    });
-                    if (visibility.ok) {
-                        return { ok: true, deduped: true, reordered: visibility.reordered };
-                    }
-                    if (visibility.skipped) return visibility;
-                } catch {
-                    // The user may have closed the cached native window. Drop
-                    // the hint and let one authoritative read decide whether to
-                    // reuse the window or add exactly one replacement.
+            let previewSettled = false;
+            let previewResult = null;
+            const settlePreview = async () => {
+                // Do not race native sidebar work with a timeout. Roam does
+                // not expose cancellation here, so advancing the authority
+                // queue early could let an older host call reorder the
+                // sidebar after the newest intent was reconciled.
+                if (!previewSettled && previewPromise) {
+                    previewResult = await previewPromise;
+                    previewSettled = true;
                 }
-                forgetSidebarWindow(sidebar, uid);
-                await sidebarOpen;
-                if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-            }
+                return previewResult;
+            };
+
+            const revealConfirmedWindow = async windows => {
+                const existing = findExisting(windows);
+                if (!existing) return null;
+
+                const preview = await settlePreview();
+                if (!isCurrent() || preview?.skipped) {
+                    return { ok: false, skipped: true, reason: 'superseded' };
+                }
+                // A successful native preview is the fastest path when no
+                // older sidebar operation can still land out of order. When
+                // there is older work, fall through to the authoritative
+                // reveal below so the newest intent always finishes last.
+                if (preview?.ok && !hadPendingOperation) {
+                    rememberSidebarWindows(sidebar, windows);
+                    rememberSidebarWindow(sidebar, uid);
+                    return {
+                        ok: true,
+                        deduped: true,
+                        reordered: preview.reordered,
+                    };
+                }
+                return revealAuthoritative(windows);
+            };
 
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
             if (typeof sidebar.getWindows === 'function') {
@@ -913,7 +939,7 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
                 let revealed;
                 try {
-                    revealed = await revealAuthoritative(windows);
+                    revealed = await revealConfirmedWindow(windows);
                 } catch {
                     // The list can already contain the target while Roam still
                     // rejects the reveal call during its sidebar animation.
@@ -922,10 +948,33 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                     const retryWindows = await readAfterOpen();
                     if (retryWindows?.skipped) return retryWindows;
                     if (retryWindows !== null) {
-                        revealed = await revealAuthoritative(retryWindows);
+                        revealed = await revealConfirmedWindow(retryWindows);
                     }
                 }
                 if (revealed) return revealed;
+
+                const preview = await settlePreview();
+                if (!isCurrent() || preview?.skipped) {
+                    return { ok: false, skipped: true, reason: 'superseded' };
+                }
+                if (preview?.previewFailed || recentlyKnown) {
+                    // A manually closed native window invalidates only the
+                    // local hint. The authoritative empty list below decides
+                    // whether exactly one replacement should be added.
+                    forgetSidebarWindow(sidebar, uid);
+                }
+
+                if (preview?.ok) {
+                    // A successful preview and an empty list can occur while
+                    // Roam is opening. Re-read once after the open barrier
+                    // before adding so the preview cannot create a duplicate.
+                    const retryWindows = await readAfterOpen();
+                    if (retryWindows?.skipped) return retryWindows;
+                    if (retryWindows !== null) {
+                        const retryRevealed = await revealConfirmedWindow(retryWindows);
+                        if (retryRevealed) return retryRevealed;
+                    }
+                }
 
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
                 try {
@@ -950,13 +999,54 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
             }
 
             // Older Roam builds have no authoritative window list. Reuse the
-            // existing best-effort dedupe marker and include order 0 on first open.
+            // existing best-effort dedupe marker and include order 0 on first
+            // open. Settle the preview before completing this queued pass: a
+            // newer queued intent can then perform the final reveal/add after
+            // any stale native side effect has landed.
+            const preview = await settlePreview();
+            if (!isCurrent() || preview?.skipped) {
+                return { ok: false, skipped: true, reason: 'superseded' };
+            }
             let requested = requestedSidebarBlocks.get(sidebar);
             if (!requested) {
                 requested = new Set();
                 requestedSidebarBlocks.set(sidebar, requested);
             }
-            if (requested.has(uid)) return { ok: true, deduped: true };
+            const wasRequested = requested.has(uid);
+            if (preview?.ok) {
+                if (hadPendingOperation) {
+                    const visibility = await revealExistingBlockWindow(sidebar, uid, {
+                        isCurrent,
+                        requireOrder: true,
+                        unavailableMessage:
+                            'Roam could not move the Timing Line sidebar window to the top.',
+                    });
+                    if (visibility.ok === false) return visibility;
+                    requested.add(uid);
+                    rememberSidebarWindow(sidebar, uid);
+                    return {
+                        ok: true,
+                        deduped: true,
+                        reordered: visibility.reordered,
+                    };
+                }
+                // Legacy Roam cannot provide an authoritative list. A
+                // successful native reveal is the strongest available proof
+                // that the window survived a reload, so retain the dedupe
+                // marker instead of adding a duplicate.
+                requested.add(uid);
+                rememberSidebarWindow(sidebar, uid);
+                return { ok: true, deduped: true, reordered: preview.reordered === true };
+            }
+            if (preview?.previewFailed && wasRequested) {
+                // A previously requested legacy window may have been closed
+                // manually. A failed reveal invalidates only that local hint;
+                // addWindow below recreates it once.
+                requested.delete(uid);
+                forgetSidebarWindow(sidebar, uid);
+            } else if (wasRequested) {
+                return { ok: true, deduped: true };
+            }
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
 
             try {

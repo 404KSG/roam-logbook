@@ -387,6 +387,137 @@ function flattenTodayRows(model, { expanded = /* @__PURE__ */ new Set(), collaps
   return walkVisible(model.roots, [], expanded, collapsed, currentPath);
 }
 
+// src/active-work.js
+var ACTIVE_WORK_WINDOW_MINUTES = 45;
+var ACTIVE_WORK_WINDOW_MS = ACTIVE_WORK_WINDOW_MINUTES * 6e4;
+var instantOf = (value) => {
+  if (value instanceof Date)
+    return value.getTime();
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+var normalizeWindowMinutes = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : ACTIVE_WORK_WINDOW_MINUTES;
+function openLineMinutesLeft(entry, now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) {
+  const endedAt = instantOf(entry?.end);
+  const nowMs = instantOf(now) ?? Date.now();
+  if (endedAt === null)
+    return 0;
+  const remainingMs = normalizeWindowMinutes(windowMinutes) * 6e4 - (nowMs - endedAt);
+  if (remainingMs <= 0)
+    return 0;
+  return Math.max(1, Math.ceil(remainingMs / 6e4));
+}
+var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
+function chooseFocusedEntry(entries = []) {
+  return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).sort(compareNewest)[0] || null;
+}
+var buildInvariantIndex = (snapshot) => {
+  const focusedEntry = chooseFocusedEntry(snapshot);
+  const completedMinutesByTask = /* @__PURE__ */ new Map();
+  const recentCandidates = [];
+  for (let sourceIndex = 0; sourceIndex < snapshot.length; sourceIndex += 1) {
+    const entry = snapshot[sourceIndex];
+    if (!entry || entry.running)
+      continue;
+    if (entry.taskUid) {
+      completedMinutesByTask.set(
+        entry.taskUid,
+        (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
+      );
+    }
+    const endedAt = instantOf(entry.end);
+    if (endedAt === null)
+      continue;
+    recentCandidates.push({ entry, endedAt, sourceIndex });
+  }
+  recentCandidates.sort(
+    (left, right) => (right.endedAt ?? -Infinity) - (left.endedAt ?? -Infinity) || left.sourceIndex - right.sourceIndex
+  );
+  return {
+    focusedEntry,
+    completedMinutesByTask,
+    recentCandidates
+  };
+};
+function createActiveWorkDeriver() {
+  const snapshotIndexes = /* @__PURE__ */ new WeakMap();
+  let snapshotBuilds = 0;
+  const getSnapshotIndex = (snapshot) => {
+    const cached = snapshotIndexes.get(snapshot);
+    if (cached)
+      return cached;
+    const index = buildInvariantIndex(snapshot);
+    snapshotIndexes.set(snapshot, index);
+    snapshotBuilds += 1;
+    return index;
+  };
+  const build = (entries = [], {
+    now = Date.now(),
+    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
+  } = {}) => {
+    const snapshot = Array.isArray(entries) ? entries : [];
+    const nowMs = instantOf(now) ?? Date.now();
+    const normalizedWindow = normalizeWindowMinutes(windowMinutes);
+    const windowMs = normalizedWindow * 6e4;
+    const {
+      focusedEntry,
+      completedMinutesByTask,
+      recentCandidates
+    } = getSnapshotIndex(snapshot);
+    const recentByTask = /* @__PURE__ */ new Map();
+    const firstEligibleIndexByTask = /* @__PURE__ */ new Map();
+    for (const candidate of recentCandidates) {
+      const age = nowMs - candidate.endedAt;
+      if (age < 0)
+        continue;
+      if (age >= windowMs)
+        break;
+      if (candidate.entry.taskUid === focusedEntry?.taskUid)
+        continue;
+      const taskUid = candidate.entry.taskUid;
+      const firstEligibleIndex = firstEligibleIndexByTask.get(taskUid);
+      if (firstEligibleIndex === void 0 || candidate.sourceIndex < firstEligibleIndex) {
+        firstEligibleIndexByTask.set(taskUid, candidate.sourceIndex);
+      }
+      const previous = recentByTask.get(taskUid);
+      if (!previous || candidate.endedAt > previous.endedAt) {
+        recentByTask.set(taskUid, candidate);
+      }
+    }
+    const recent = [...recentByTask.values()].sort(
+      (left, right) => right.endedAt - left.endedAt || firstEligibleIndexByTask.get(left.entry.taskUid) - firstEligibleIndexByTask.get(right.entry.taskUid)
+    ).map((candidate) => candidate.entry);
+    const focused = focusedEntry ? {
+      ...focusedEntry,
+      priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
+      activeKind: "focused"
+    } : null;
+    const recentItems = recent.map((item) => ({
+      ...item,
+      priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
+      remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
+      activeKind: "recent"
+    }));
+    const allItems = [focused, ...recentItems].filter(Boolean);
+    const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
+    return {
+      focused,
+      recent: recentItems,
+      items: uniqueItems,
+      count: uniqueItems.length,
+      windowMinutes: normalizedWindow
+    };
+  };
+  return {
+    build,
+    getCacheStats: () => ({ snapshotBuilds })
+  };
+}
+var defaultDeriver = createActiveWorkDeriver();
+function buildActiveWork(entries = [], options = {}) {
+  return defaultDeriver.build(entries, options);
+}
+
 // src/roam.js
 var GraphReadError = class extends Error {
   constructor(message, { cause, issue } = {}) {
@@ -917,7 +1048,7 @@ async function openBlock(uid) {
 var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
 var sidebarOperationQueues = /* @__PURE__ */ new WeakMap();
 var knownSidebarBlockWindows = /* @__PURE__ */ new WeakMap();
-var SIDEBAR_WINDOW_CACHE_TTL_MS = 3e4;
+var SIDEBAR_WINDOW_CACHE_TTL_MS = ACTIVE_WORK_WINDOW_MS;
 var sidebarWindowCache = (sidebar) => {
   let cache = knownSidebarBlockWindows.get(sidebar);
   if (!cache) {
@@ -1015,7 +1146,7 @@ var revealExistingBlockWindow = async (sidebar, uid, { isCurrent = () => true, r
   }
   return { ok: true, reordered };
 };
-async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
+async function frontBlockInRightSidebar(uid, { isCurrent = () => true, preferExisting = false } = {}) {
   if (typeof uid !== "string" || uid.length === 0) {
     return sidebarFailure("missing-uid", "This Timing Line has no block UID.");
   }
@@ -1026,11 +1157,24 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
       "Roam right-sidebar block windows are unavailable."
     );
   }
+  if (!isCurrent())
+    return { ok: false, skipped: true, reason: "superseded" };
+  const hadPendingOperation = sidebarOperationQueues.has(sidebar);
+  const recentlyKnown = hasRecentlyKnownSidebarWindow(sidebar, uid);
+  const shouldPreview = typeof sidebar.setWindowOrder === "function" && (hadPendingOperation || recentlyKnown || preferExisting);
+  const sidebarOpen = openSidebarForIntent(sidebar);
+  let previewPromise = null;
+  if (shouldPreview) {
+    previewPromise = revealExistingBlockWindow(sidebar, uid, {
+      isCurrent,
+      requireOrder: true,
+      unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
+    }).catch((error) => ({ ok: false, previewFailed: true, error }));
+  }
   try {
     return await runSidebarOperation(sidebar, async () => {
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
-      const sidebarOpen = openSidebarForIntent(sidebar);
       const findExisting = (windows) => Array.isArray(windows) ? windows.find(
         (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
       ) : null;
@@ -1057,27 +1201,34 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
           return null;
         return sidebar.getWindows();
       };
-      if (hasRecentlyKnownSidebarWindow(sidebar, uid) && typeof sidebar.setWindowOrder === "function") {
-        if (!isCurrent())
-          return { ok: false, skipped: true, reason: "superseded" };
-        try {
-          const visibility = await revealExistingBlockWindow(sidebar, uid, {
-            isCurrent,
-            requireOrder: true,
-            unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
-          });
-          if (visibility.ok) {
-            return { ok: true, deduped: true, reordered: visibility.reordered };
-          }
-          if (visibility.skipped)
-            return visibility;
-        } catch {
+      let previewSettled = false;
+      let previewResult = null;
+      const settlePreview = async () => {
+        if (!previewSettled && previewPromise) {
+          previewResult = await previewPromise;
+          previewSettled = true;
         }
-        forgetSidebarWindow(sidebar, uid);
-        await sidebarOpen;
-        if (!isCurrent())
+        return previewResult;
+      };
+      const revealConfirmedWindow = async (windows) => {
+        const existing = findExisting(windows);
+        if (!existing)
+          return null;
+        const preview2 = await settlePreview();
+        if (!isCurrent() || preview2?.skipped) {
           return { ok: false, skipped: true, reason: "superseded" };
-      }
+        }
+        if (preview2?.ok && !hadPendingOperation) {
+          rememberSidebarWindows(sidebar, windows);
+          rememberSidebarWindow(sidebar, uid);
+          return {
+            ok: true,
+            deduped: true,
+            reordered: preview2.reordered
+          };
+        }
+        return revealAuthoritative(windows);
+      };
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
       if (typeof sidebar.getWindows === "function") {
@@ -1093,17 +1244,34 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
           return { ok: false, skipped: true, reason: "superseded" };
         let revealed;
         try {
-          revealed = await revealAuthoritative(windows);
+          revealed = await revealConfirmedWindow(windows);
         } catch {
           const retryWindows = await readAfterOpen();
           if (retryWindows?.skipped)
             return retryWindows;
           if (retryWindows !== null) {
-            revealed = await revealAuthoritative(retryWindows);
+            revealed = await revealConfirmedWindow(retryWindows);
           }
         }
         if (revealed)
           return revealed;
+        const preview2 = await settlePreview();
+        if (!isCurrent() || preview2?.skipped) {
+          return { ok: false, skipped: true, reason: "superseded" };
+        }
+        if (preview2?.previewFailed || recentlyKnown) {
+          forgetSidebarWindow(sidebar, uid);
+        }
+        if (preview2?.ok) {
+          const retryWindows = await readAfterOpen();
+          if (retryWindows?.skipped)
+            return retryWindows;
+          if (retryWindows !== null) {
+            const retryRevealed = await revealConfirmedWindow(retryWindows);
+            if (retryRevealed)
+              return retryRevealed;
+          }
+        }
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
         try {
@@ -1126,13 +1294,43 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
           return { ok: false, skipped: true, reason: "superseded" };
         return { ok: true, added: true };
       }
+      const preview = await settlePreview();
+      if (!isCurrent() || preview?.skipped) {
+        return { ok: false, skipped: true, reason: "superseded" };
+      }
       let requested = requestedSidebarBlocks.get(sidebar);
       if (!requested) {
         requested = /* @__PURE__ */ new Set();
         requestedSidebarBlocks.set(sidebar, requested);
       }
-      if (requested.has(uid))
+      const wasRequested = requested.has(uid);
+      if (preview?.ok) {
+        if (hadPendingOperation) {
+          const visibility = await revealExistingBlockWindow(sidebar, uid, {
+            isCurrent,
+            requireOrder: true,
+            unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
+          });
+          if (visibility.ok === false)
+            return visibility;
+          requested.add(uid);
+          rememberSidebarWindow(sidebar, uid);
+          return {
+            ok: true,
+            deduped: true,
+            reordered: visibility.reordered
+          };
+        }
+        requested.add(uid);
+        rememberSidebarWindow(sidebar, uid);
+        return { ok: true, deduped: true, reordered: preview.reordered === true };
+      }
+      if (preview?.previewFailed && wasRequested) {
+        requested.delete(uid);
+        forgetSidebarWindow(sidebar, uid);
+      } else if (wasRequested) {
         return { ok: true, deduped: true };
+      }
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
       try {
@@ -1532,137 +1730,6 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     mirrorsOf,
     issues
   };
-}
-
-// src/active-work.js
-var ACTIVE_WORK_WINDOW_MINUTES = 45;
-var ACTIVE_WORK_WINDOW_MS = ACTIVE_WORK_WINDOW_MINUTES * 6e4;
-var instantOf = (value) => {
-  if (value instanceof Date)
-    return value.getTime();
-  const timestamp = Number(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-};
-var normalizeWindowMinutes = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : ACTIVE_WORK_WINDOW_MINUTES;
-function openLineMinutesLeft(entry, now = Date.now(), windowMinutes = ACTIVE_WORK_WINDOW_MINUTES) {
-  const endedAt = instantOf(entry?.end);
-  const nowMs = instantOf(now) ?? Date.now();
-  if (endedAt === null)
-    return 0;
-  const remainingMs = normalizeWindowMinutes(windowMinutes) * 6e4 - (nowMs - endedAt);
-  if (remainingMs <= 0)
-    return 0;
-  return Math.max(1, Math.ceil(remainingMs / 6e4));
-}
-var compareNewest = (left, right) => (instantOf(right?.start) ?? -Infinity) - (instantOf(left?.start) ?? -Infinity);
-function chooseFocusedEntry(entries = []) {
-  return entries.filter((entry) => entry?.running && instantOf(entry.start) !== null).sort(compareNewest)[0] || null;
-}
-var buildInvariantIndex = (snapshot) => {
-  const focusedEntry = chooseFocusedEntry(snapshot);
-  const completedMinutesByTask = /* @__PURE__ */ new Map();
-  const recentCandidates = [];
-  for (let sourceIndex = 0; sourceIndex < snapshot.length; sourceIndex += 1) {
-    const entry = snapshot[sourceIndex];
-    if (!entry || entry.running)
-      continue;
-    if (entry.taskUid) {
-      completedMinutesByTask.set(
-        entry.taskUid,
-        (completedMinutesByTask.get(entry.taskUid) || 0) + (Number(entry.minutes) || 0)
-      );
-    }
-    const endedAt = instantOf(entry.end);
-    if (endedAt === null)
-      continue;
-    recentCandidates.push({ entry, endedAt, sourceIndex });
-  }
-  recentCandidates.sort(
-    (left, right) => (right.endedAt ?? -Infinity) - (left.endedAt ?? -Infinity) || left.sourceIndex - right.sourceIndex
-  );
-  return {
-    focusedEntry,
-    completedMinutesByTask,
-    recentCandidates
-  };
-};
-function createActiveWorkDeriver() {
-  const snapshotIndexes = /* @__PURE__ */ new WeakMap();
-  let snapshotBuilds = 0;
-  const getSnapshotIndex = (snapshot) => {
-    const cached = snapshotIndexes.get(snapshot);
-    if (cached)
-      return cached;
-    const index = buildInvariantIndex(snapshot);
-    snapshotIndexes.set(snapshot, index);
-    snapshotBuilds += 1;
-    return index;
-  };
-  const build = (entries = [], {
-    now = Date.now(),
-    windowMinutes = ACTIVE_WORK_WINDOW_MINUTES
-  } = {}) => {
-    const snapshot = Array.isArray(entries) ? entries : [];
-    const nowMs = instantOf(now) ?? Date.now();
-    const normalizedWindow = normalizeWindowMinutes(windowMinutes);
-    const windowMs = normalizedWindow * 6e4;
-    const {
-      focusedEntry,
-      completedMinutesByTask,
-      recentCandidates
-    } = getSnapshotIndex(snapshot);
-    const recentByTask = /* @__PURE__ */ new Map();
-    const firstEligibleIndexByTask = /* @__PURE__ */ new Map();
-    for (const candidate of recentCandidates) {
-      const age = nowMs - candidate.endedAt;
-      if (age < 0)
-        continue;
-      if (age >= windowMs)
-        break;
-      if (candidate.entry.taskUid === focusedEntry?.taskUid)
-        continue;
-      const taskUid = candidate.entry.taskUid;
-      const firstEligibleIndex = firstEligibleIndexByTask.get(taskUid);
-      if (firstEligibleIndex === void 0 || candidate.sourceIndex < firstEligibleIndex) {
-        firstEligibleIndexByTask.set(taskUid, candidate.sourceIndex);
-      }
-      const previous = recentByTask.get(taskUid);
-      if (!previous || candidate.endedAt > previous.endedAt) {
-        recentByTask.set(taskUid, candidate);
-      }
-    }
-    const recent = [...recentByTask.values()].sort(
-      (left, right) => right.endedAt - left.endedAt || firstEligibleIndexByTask.get(left.entry.taskUid) - firstEligibleIndexByTask.get(right.entry.taskUid)
-    ).map((candidate) => candidate.entry);
-    const focused = focusedEntry ? {
-      ...focusedEntry,
-      priorMinutes: completedMinutesByTask.get(focusedEntry.taskUid) || 0,
-      activeKind: "focused"
-    } : null;
-    const recentItems = recent.map((item) => ({
-      ...item,
-      priorMinutes: completedMinutesByTask.get(item.taskUid) || 0,
-      remainingMinutes: openLineMinutesLeft(item, nowMs, normalizedWindow),
-      activeKind: "recent"
-    }));
-    const allItems = [focused, ...recentItems].filter(Boolean);
-    const uniqueItems = [...new Map(allItems.map((item) => [item.taskUid, item])).values()];
-    return {
-      focused,
-      recent: recentItems,
-      items: uniqueItems,
-      count: uniqueItems.length,
-      windowMinutes: normalizedWindow
-    };
-  };
-  return {
-    build,
-    getCacheStats: () => ({ snapshotBuilds })
-  };
-}
-var defaultDeriver = createActiveWorkDeriver();
-function buildActiveWork(entries = [], options = {}) {
-  return defaultDeriver.build(entries, options);
 }
 
 // src/mutations.js
@@ -4911,7 +4978,6 @@ function createDashboard({
   let liveMetricCache = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
-  let focusInFlight = null;
   let themeRuntime = null;
   let releaseScrollLock = null;
   const focusTrap = createFocusTrap(() => root?.querySelector(".rlb-dialog"));
@@ -5172,19 +5238,15 @@ function createDashboard({
     void act(() => discardClock(entry.clockUid));
   };
   const startTaskTiming = (taskUid) => {
-    if (!taskUid || focusInFlight)
-      return focusInFlight;
-    const request = act(
+    if (!taskUid)
+      return null;
+    return act(
       () => clockIn(taskUid, {
         source: "active-work-switch",
         trustedNavigationTaskUid: taskUid,
         ...typeof scheduleMutationStartFn === "function" ? { scheduleMutationStartFn } : {}
       })
     );
-    focusInFlight = request.finally(() => {
-      focusInFlight = null;
-    });
-    return focusInFlight;
   };
   const taskTimingAction = (node) => {
     if (node.running) {
@@ -5371,7 +5433,6 @@ function createDashboard({
       liveMetricCache = null;
       refreshRuntime.dispose();
       focusTrap.deactivate();
-      focusInFlight = null;
       refreshButton = null;
       refreshStatusNode = null;
       refreshAlertNode = null;
@@ -9999,9 +10060,21 @@ function createTimingLineSidebarFronting({
   }
 } = {}) {
   let latestIntent = 0;
-  let queue = Promise.resolve();
+  const inFlight = /* @__PURE__ */ new Set();
   let disposed = false;
-  const isCurrent = (intent) => !disposed && intent === latestIntent && Boolean(isEnabled());
+  const isFrontingEnabled = () => {
+    try {
+      return Boolean(isEnabled());
+    } catch (error) {
+      console.debug("[roam-logbook] sidebar setting check failed", error);
+      return false;
+    }
+  };
+  const isCurrent = (intent) => {
+    if (disposed || intent !== latestIntent)
+      return false;
+    return isFrontingEnabled();
+  };
   const runIntent = async (action, intent) => {
     if (!isCurrent(intent)) {
       return { ok: false, skipped: true, reason: "superseded" };
@@ -10009,7 +10082,8 @@ function createTimingLineSidebarFronting({
     let result;
     try {
       result = await frontBlock(action.taskUid, {
-        isCurrent: () => isCurrent(intent)
+        isCurrent: () => isCurrent(intent),
+        preferExisting: action.source === "active-work-switch"
       });
     } catch (error) {
       result = {
@@ -10020,23 +10094,32 @@ function createTimingLineSidebarFronting({
       };
     }
     if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
-      onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+      try {
+        onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+      } catch (error) {
+        console.debug("[roam-logbook] sidebar notice failed", error);
+      }
     }
     return result;
   };
   const handleAction = (action) => {
-    if (disposed || !isTimingLineFrontIntent(action) || !isEnabled())
+    if (disposed || !isTimingLineFrontIntent(action) || !isFrontingEnabled())
       return false;
     const intent = ++latestIntent;
-    queue = queue.then(
-      () => runIntent(action, intent),
-      () => runIntent(action, intent)
-    );
+    const request = Promise.resolve().then(() => runIntent(action, intent));
+    inFlight.add(request);
+    const release = () => inFlight.delete(request);
+    void request.then(release, release);
     return true;
+  };
+  const whenIdle = async () => {
+    while (inFlight.size > 0) {
+      await Promise.allSettled([...inFlight]);
+    }
   };
   return {
     handleAction,
-    whenIdle: () => queue,
+    whenIdle,
     dispose() {
       disposed = true;
       latestIntent += 1;

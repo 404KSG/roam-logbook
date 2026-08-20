@@ -166,7 +166,6 @@ export function createDashboard({
     let liveMetricCache = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
-    let focusInFlight = null;
     let themeRuntime = null;
     let releaseScrollLock = null;
     const focusTrap = createFocusTrap(() => root?.querySelector('.rlb-dialog'));
@@ -442,8 +441,8 @@ export function createDashboard({
     };
 
     const startTaskTiming = taskUid => {
-        if (!taskUid || focusInFlight) return focusInFlight;
-        const request = act(() =>
+        if (!taskUid) return null;
+        return act(() =>
             clock.clockIn(taskUid, {
                 source: 'active-work-switch',
                 trustedNavigationTaskUid: taskUid,
@@ -452,10 +451,6 @@ export function createDashboard({
                     : {}),
             })
         );
-        focusInFlight = request.finally(() => {
-            focusInFlight = null;
-        });
-        return focusInFlight;
     };
 
     const taskTimingAction = node => {
@@ -650,7 +645,6 @@ export function createDashboard({
             liveMetricCache = null;
             refreshRuntime.dispose();
             focusTrap.deactivate();
-            focusInFlight = null;
             refreshButton = null;
             refreshStatusNode = null;
             refreshAlertNode = null;

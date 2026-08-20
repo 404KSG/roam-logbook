@@ -401,6 +401,61 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
     }
 });
 
+test('Dashboard rapid focus clicks publish the newest Timing Line intent before older graph work starts', async () => {
+    graph = installGraph([
+        { uid: 'rapid-task-a', string: '{{[[TODO]]}} Rapid task A', parent: null },
+        { uid: 'rapid-drawer-a', string: 'LOGBOOK::', parent: 'rapid-task-a' },
+        {
+            uid: 'rapid-clock-a',
+            string: 'CLOCK: [2026-08-15 Sat 08:00]--[2026-08-15 Sat 08:05] => 0:05',
+            parent: 'rapid-drawer-a',
+        },
+        { uid: 'rapid-task-b', string: '{{[[TODO]]}} Rapid task B', parent: null },
+        { uid: 'rapid-drawer-b', string: 'LOGBOOK::', parent: 'rapid-task-b' },
+        {
+            uid: 'rapid-clock-b',
+            string: 'CLOCK: [2026-08-15 Sat 08:10]--[2026-08-15 Sat 08:15] => 0:05',
+            parent: 'rapid-drawer-b',
+        },
+    ]);
+
+    const mutationStarts = [];
+    const intents = [];
+    const dashboard = createDashboard({
+        now: () => new Date('2026-08-15T09:10:00'),
+        scheduleMutationStartFn: callback => {
+            mutationStarts.push(callback);
+            return () => {};
+        },
+    });
+    const unsubscribe = clock.subscribeClockInIntents(action => {
+        intents.push(action.taskUid);
+        return true;
+    });
+
+    try {
+        dashboard.open();
+        const playFor = title =>
+            [...document.querySelectorAll('.rlb-task-table tbody tr')]
+                .find(row => row.querySelector('.rlb-task-link__text')?.textContent === title)
+                ?.querySelector('[data-action="start-timing"]');
+
+        playFor('Rapid task A').click();
+        playFor('Rapid task B').click();
+
+        assert.deepEqual(intents, ['rapid-task-a', 'rapid-task-b']);
+        await Promise.resolve();
+        assert.equal(
+            mutationStarts.length,
+            1,
+            'graph mutations remain serialized even though both reversible intents publish immediately'
+        );
+    } finally {
+        unsubscribe();
+        dashboard.destroy();
+    }
+});
+
 test('Dashboard Running and By Task links preserve Roam page refs and tags without an icon cue', async () => {
     const nowMs = new Date('2026-08-15T09:00:00').getTime();
     graph.store.get('live-parent').string =

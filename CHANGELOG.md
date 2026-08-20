@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.57 — 2026-08-20
+
+### Preemptive Timing Line switching
+
+- Lets a newer Task switch start its reversible native sidebar preview while an
+  older native operation is still settling, instead of waiting for the previous
+  task before showing the new target.
+- Keeps authoritative right-sidebar reads and adds serialized, then re-fronts
+  the newest target after stale work settles so old completion cannot win.
+- Extends the weak existing-window hint to the same fixed 45-minute lifetime as
+  Active Work and validates optimistic reveals against Roam's native window list.
+- Allows rapid Dashboard Task clicks to publish every navigation intent while
+  retaining the existing single-CLOCK graph mutation queue.
+- Adds deterministic regressions for rapid preview preemption, stale-operation
+  reconciliation, expired-cache recovery, missing-window dedupe, and Dashboard
+  intent delivery.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.56 — 2026-08-20
 
 ### Native-speed Timing Line navigation

@@ -396,6 +396,7 @@ test('a recently confirmed Timing Line uses the native reveal fast path', async 
                 window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
             },
         },
+        'getWindows',
         {
             action: 'expandWindow',
             spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
@@ -752,6 +753,28 @@ test('disabled fronting performs no sidebar work', async () => {
     assert.equal(calls, 0);
 });
 
+test('a failing setting read rejects the intent without throwing synchronously', async () => {
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async () => assert.fail('disabled intent must not reach the adapter'),
+        isEnabled: () => {
+            throw new Error('settings store unavailable');
+        },
+    });
+
+    assert.doesNotThrow(() => {
+        assert.equal(
+            fronting.handleAction({
+                type: 'clock-in-intent',
+                source: 'user',
+                taskUid: 'timing-task',
+            }),
+            false
+        );
+    });
+    await fronting.whenIdle();
+    fronting.dispose();
+});
+
 test('sidebar failures stay isolated and emit one concise non-blocking notice', async () => {
     const notices = [];
     const fronting = createTimingLineSidebarFronting({
@@ -770,6 +793,37 @@ test('sidebar failures stay isolated and emit one concise non-blocking notice', 
     );
     await assert.doesNotReject(fronting.whenIdle());
     assert.deepEqual(notices, ['Native sidebar is temporarily unavailable.']);
+});
+
+test('a throwing notice callback cannot create an unhandled sidebar rejection', async () => {
+    const unhandled = [];
+    const onUnhandled = reason => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async () => ({
+            ok: false,
+            reason: 'sidebar-front-failed',
+            message: 'Native sidebar is temporarily unavailable.',
+        }),
+        isEnabled: () => true,
+        onNotice: () => {
+            throw new Error('host notice surface was removed');
+        },
+    });
+
+    try {
+        fronting.handleAction({
+            type: 'clock-in-intent',
+            source: 'user',
+            taskUid: 'timing-task',
+        });
+        await fronting.whenIdle();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(unhandled, []);
+    } finally {
+        process.off('unhandledRejection', onUnhandled);
+        fronting.dispose();
+    }
 });
 
 test('rapid switches serialize side effects so the newest intent finishes last', async () => {
@@ -807,6 +861,56 @@ test('rapid switches serialize side effects so the newest intent finishes last',
     assert.deepEqual(calls, ['task-a', 'task-b']);
     assert.deepEqual(applied, ['task-a', 'task-b']);
     assert.equal(applied.at(-1), 'task-b');
+});
+
+test('the latest intent starts a reversible native preview before the prior preview settles', async () => {
+    const started = [];
+    const applied = [];
+    let releaseFirst;
+    let markFirstStarted;
+    const firstStarted = new Promise(resolve => {
+        markFirstStarted = resolve;
+    });
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: (uid, { isCurrent }) => {
+            started.push(uid);
+            if (uid === 'task-a') {
+                markFirstStarted();
+                return new Promise(resolve => {
+                    releaseFirst = () => {
+                        if (isCurrent()) applied.push(uid);
+                        resolve({ ok: true });
+                    };
+                });
+            }
+            if (isCurrent()) applied.push(uid);
+            return Promise.resolve({ ok: true });
+        },
+        isEnabled: () => true,
+    });
+
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-a' });
+    await firstStarted;
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-b' });
+
+    let observedError;
+    try {
+        // The first native preview is deliberately unresolved. The latest
+        // intent must still reach its reversible native preview before it is
+        // released, and the stale completion must not apply afterward.
+        await Promise.resolve();
+        assert.deepEqual(started, ['task-a', 'task-b']);
+        assert.deepEqual(applied, ['task-b']);
+    } catch (error) {
+        observedError = error;
+    } finally {
+        releaseFirst();
+    }
+
+    await fronting.whenIdle();
+    assert.ifError(observedError);
+    assert.deepEqual(started, ['task-a', 'task-b']);
+    assert.deepEqual(applied, ['task-b']);
 });
 
 test('a newer intent skips a stale sidebar request that has not started yet', async () => {
