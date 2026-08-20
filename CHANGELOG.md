@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0-beta.54 — 2026-08-20
+
+### Closed right-sidebar recovery
+
+- Clock In and Active Thread switching now explicitly wait for Roam's native
+  right sidebar to open before reading, adding, reordering, or expanding its
+  block windows.
+- Applied the same open-before-reveal rule to the recently confirmed window
+  fast path, so switching back to an existing Task also reopens a closed
+  sidebar and keeps that Task at the top.
+- Re-checks the latest user intent after the asynchronous open, preventing a
+  stale Task from displacing a newer switch request.
+- Preserved compatibility with Roam hosts that do not expose `rightSidebar.open`
+  and kept sidebar navigation isolated from authoritative CLOCK writes.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.53 — 2026-08-20
 
 ### Lean work surfaces

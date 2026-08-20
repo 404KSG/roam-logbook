@@ -734,18 +734,16 @@ const sidebarFailure = (reason, message, error) => ({
     ...(error ? { error } : {}),
 });
 
-/** Warm the native sidebar without putting its animation on the reveal path. */
-const warmOpenSidebar = sidebar => {
+/** Open the native sidebar before any reveal/add operation. */
+const openSidebarForIntent = async sidebar => {
     if (typeof sidebar?.open !== 'function') return;
     try {
-        Promise.resolve(sidebar.open()).catch(error => {
-            // `addWindow` remains the authoritative open operation. A rejected
-            // warm-up must not turn a successful block reveal into a failure,
-            // but it is useful when diagnosing a host-specific API regression.
-            console.debug('[roam-logbook] sidebar warm-open failed', error);
-        });
+        await sidebar.open();
     } catch (error) {
-        console.debug('[roam-logbook] sidebar warm-open failed', error);
+        // A sidebar failure is isolated from the timing mutation. Older Roam
+        // builds may still open the sidebar as part of addWindow, so continue
+        // with the authoritative reveal/add path after the failed best effort.
+        console.debug('[roam-logbook] sidebar open failed', error);
     }
 };
 
@@ -811,12 +809,16 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
 
     try {
         return await runSidebarOperation(sidebar, async () => {
+            if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+            await openSidebarForIntent(sidebar);
+            if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
+
             // A successful authoritative read followed by a successful reveal
             // is the common path while switching between recently used Timing
-            // Lines. Do not pay the open/getWindows round trip again. Native
-            // calls are still serialized by runSidebarOperation, and any
-            // rejection invalidates the hint and immediately falls through to
-            // Roam's authoritative window list for close/recovery handling.
+            // Lines. Native calls are still serialized by runSidebarOperation,
+            // and any rejection invalidates the hint and immediately falls
+            // through to Roam's authoritative window list for close/recovery
+            // handling.
             if (
                 hasRecentlyKnownSidebarWindow(sidebar, uid) &&
                 typeof sidebar.setWindowOrder === 'function'
@@ -841,12 +843,7 @@ export async function frontBlockInRightSidebar(uid, { isCurrent = () => true } =
                 forgetSidebarWindow(sidebar, uid);
             }
 
-            // `addWindow` opens a closed native sidebar itself. Start a
-            // best-effort warm-open for hosts that need the visibility hint,
-            // but never wait for its animation or rejection before the
-            // authoritative window read and add operation.
             if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };
-            warmOpenSidebar(sidebar);
             if (typeof sidebar.getWindows === 'function') {
                 const windows = await sidebar.getWindows();
                 if (!isCurrent()) return { ok: false, skipped: true, reason: 'superseded' };

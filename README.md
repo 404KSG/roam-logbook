@@ -1,6 +1,6 @@
 # Task Tracker – 404KSG
 
-Current package version: **0.9.0-beta.53**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.54**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.53 removes context breadcrumbs and their extra ancestry lookup from the compact work surfaces, while retaining Today hierarchy, Dashboard roll-ups, and parent-DONE automatic Clock Out; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.54 opens a closed native right sidebar before adding or re-fronting the selected Timing Line, while preserving the single-focus CLOCK model and the lean compact work surfaces; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -43,8 +43,9 @@ The Command Palette exposes only three shortcut-ready actions: **Task Tracker: F
 
 By default, a user Clock In immediately starts opening that Task in Roam's
 native right sidebar at order 0, while the serialized CLOCK mutation continues
-to perform its graph writes and post-write confirmation independently. A slow
-native sidebar-open animation no longer blocks the window read/add path.
+to perform its graph writes and post-write confirmation independently. The
+sidebar operation waits for Roam's native open request before reading, adding,
+or revealing block windows, so a closed sidebar becomes visible reliably.
 Switching work moves an existing block window
 back to the top instead of duplicating it, while preserving every other sidebar
 window. A recently confirmed window takes a bounded fast path on later switches;

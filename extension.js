@@ -964,15 +964,13 @@ var sidebarFailure = (reason, message, error) => ({
   message,
   ...error ? { error } : {}
 });
-var warmOpenSidebar = (sidebar) => {
+var openSidebarForIntent = async (sidebar) => {
   if (typeof sidebar?.open !== "function")
     return;
   try {
-    Promise.resolve(sidebar.open()).catch((error) => {
-      console.debug("[roam-logbook] sidebar warm-open failed", error);
-    });
+    await sidebar.open();
   } catch (error) {
-    console.debug("[roam-logbook] sidebar warm-open failed", error);
+    console.debug("[roam-logbook] sidebar open failed", error);
   }
 };
 var runSidebarOperation = (sidebar, operation) => {
@@ -1018,6 +1016,11 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
   }
   try {
     return await runSidebarOperation(sidebar, async () => {
+      if (!isCurrent())
+        return { ok: false, skipped: true, reason: "superseded" };
+      await openSidebarForIntent(sidebar);
+      if (!isCurrent())
+        return { ok: false, skipped: true, reason: "superseded" };
       if (hasRecentlyKnownSidebarWindow(sidebar, uid) && typeof sidebar.setWindowOrder === "function") {
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
@@ -1038,7 +1041,6 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
       }
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
-      warmOpenSidebar(sidebar);
       if (typeof sidebar.getWindows === "function") {
         const windows = await sidebar.getWindows();
         if (!isCurrent())
@@ -3574,7 +3576,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.53";
+var PLUGIN_VERSION = "0.9.0-beta.54";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,

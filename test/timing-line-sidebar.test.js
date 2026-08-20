@@ -58,13 +58,40 @@ test('a new Timing Line opens at native sidebar order 0 without unrelated UI ope
     assert.deepEqual(forbidden, []);
 });
 
-test('the first Timing Line add does not wait for a redundant sidebar open', async () => {
+test('legacy Timing Line fronting remains compatible without a sidebar open API', async () => {
+    const calls = [];
+    const forbidden = installSidebar({
+        getWindows: () => {
+            calls.push('getWindows');
+            return [];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    assert.deepEqual(await frontBlockInRightSidebar('timing-task'), {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+    assert.deepEqual(forbidden, []);
+});
+
+test('the first Timing Line add waits for sidebar open before inspecting or adding', async () => {
     const calls = [];
     let releaseOpen;
     const openSettled = new Promise(resolve => {
         releaseOpen = resolve;
     });
     let addStarted = false;
+    let inspectionStarted = false;
 
     installSidebar({
         open: async () => {
@@ -72,6 +99,7 @@ test('the first Timing Line add does not wait for a redundant sidebar open', asy
             await openSettled;
         },
         getWindows: () => {
+            inspectionStarted = true;
             calls.push('getWindows');
             return [];
         },
@@ -84,7 +112,9 @@ test('the first Timing Line add does not wait for a redundant sidebar open', asy
     const resultPromise = frontBlockInRightSidebar('timing-task');
     await new Promise(resolve => setImmediate(resolve));
     try {
-        assert.equal(addStarted, true);
+        assert.deepEqual(calls, ['open']);
+        assert.equal(inspectionStarted, false);
+        assert.equal(addStarted, false);
     } finally {
         releaseOpen();
     }
@@ -161,6 +191,7 @@ test('a recently confirmed Timing Line uses the native reveal fast path', async 
         reordered: true,
     });
     assert.deepEqual(calls, [
+        'open',
         {
             action: 'setWindowOrder',
             spec: {
@@ -173,6 +204,95 @@ test('a recently confirmed Timing Line uses the native reveal fast path', async 
         },
     ]);
     assert.deepEqual(forbidden, []);
+});
+
+test('a closed cached Timing Line waits for sidebar open before the reveal fast path', async () => {
+    const calls = [];
+    let openGate = Promise.resolve();
+    let releaseOpen;
+    const forbidden = installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openGate;
+        },
+        getWindows: () => [{ type: 'block', 'block-uid': 'timing-task', order: 0 }],
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+    });
+
+    // Seed the recently-known cache while the sidebar is available.
+    await frontBlockInRightSidebar('timing-task');
+    calls.length = 0;
+
+    openGate = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    const resultPromise = frontBlockInRightSidebar('timing-task');
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.deepEqual(calls, ['open']);
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        {
+            action: 'setWindowOrder',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        {
+            action: 'expandWindow',
+            spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
+        },
+    ]);
+    assert.deepEqual(forbidden, []);
+});
+
+test('a superseded Timing Line does not reveal after async sidebar open settles', async () => {
+    const calls = [];
+    let current = true;
+    let releaseOpen;
+    const openSettled = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openSettled;
+        },
+        getWindows: () => {
+            calls.push('getWindows');
+            return [];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const resultPromise = frontBlockInRightSidebar('timing-task', {
+        isCurrent: () => current,
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.deepEqual(calls, ['open']);
+        current = false;
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: false,
+        skipped: true,
+        reason: 'superseded',
+    });
+    assert.deepEqual(calls, ['open']);
 });
 
 test('a closed cached Timing Line invalidates the fast path and recovers without duplication', async () => {
@@ -206,8 +326,8 @@ test('a closed cached Timing Line invalidates the fast path and recovers without
         added: true,
     });
     assert.deepEqual(calls, [
-        'setWindowOrder',
         'open',
+        'setWindowOrder',
         'getWindows',
         {
             action: 'addWindow',
@@ -219,7 +339,7 @@ test('a closed cached Timing Line invalidates the fast path and recovers without
     assert.equal(present, true);
 });
 
-test('a rejected warm-open does not block the first Timing Line add', async () => {
+test('a rejected sidebar open does not block the first Timing Line add', async () => {
     const calls = [];
     installSidebar({
         open: async () => {
@@ -250,7 +370,7 @@ test('a rejected warm-open does not block the first Timing Line add', async () =
     ]);
 });
 
-test('a superseded first Timing Line add does not warm-open or inspect the sidebar', async () => {
+test('a superseded first Timing Line add does not open or inspect the sidebar', async () => {
     const calls = [];
     installSidebar({
         open: async () => calls.push('open'),
@@ -295,6 +415,7 @@ test('a superseded cached Timing Line stops before fallback sidebar work', async
         { ok: false, skipped: true, reason: 'superseded' }
     );
     assert.deepEqual(calls, [
+        'open',
         {
             action: 'setWindowOrder',
             spec: {
