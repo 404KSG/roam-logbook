@@ -298,10 +298,18 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         },
     ]);
 
+    const mutationStarts = [];
     const dashboard = createDashboard({
         now: () => new Date('2026-08-15T09:10:00'),
         setIntervalFn: () => 'dashboard-ticker',
         clearIntervalFn: () => {},
+        scheduleMutationStartFn: callback => {
+            mutationStarts.push(callback);
+            return () => {
+                const index = mutationStarts.indexOf(callback);
+                if (index >= 0) mutationStarts.splice(index, 1);
+            };
+        },
     });
     const actions = [];
     const sidebarTasks = [];
@@ -359,6 +367,9 @@ test('Dashboard By Task exposes status-aware focus actions and switches the sing
         const dialog = overlay.querySelector('.rlb-dialog');
         const tableBeforeSwitch = overlay.querySelector('.rlb-task-table');
         play.click();
+        await Promise.resolve();
+        assert.equal(mutationStarts.length, 1, 'Dashboard focus uses the injected mutation scheduler');
+        mutationStarts.shift()();
         await settle();
         await fronting.whenIdle();
 

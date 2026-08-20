@@ -9,6 +9,17 @@
 
 let tail = Promise.resolve();
 let generation = 0;
+const pendingMutationStarts = new Set();
+
+// A timer task gives the browser a rendering opportunity after an immediate
+// navigation intent has been published. Callers can replace this in tests (or
+// use a different host scheduler) without making the mutation queue itself
+// aware of the browser. The returned cancellation hook lets a lifecycle reset
+// close a not-yet-started wait without leaving its caller pending.
+export const scheduleMutationStart = callback => {
+    const timerId = setTimeout(callback, 0);
+    return () => clearTimeout(timerId);
+};
 
 const invalidatedMutationResult = () => ({
     action: 'mutation-invalidated',
@@ -31,7 +42,10 @@ const invalidatedMutationResult = () => ({
     error: new Error('Mutation was invalidated by an extension reload before it could be applied.'),
 });
 
-export function enqueueMutation(action) {
+export function enqueueMutation(
+    action,
+    { deferStart = false, scheduleStart = scheduleMutationStart } = {}
+) {
     const expectedGeneration = generation;
     const run = () => {
         if (expectedGeneration !== generation) {
@@ -39,7 +53,51 @@ export function enqueueMutation(action) {
         }
         return action();
     };
-    const result = tail.then(run, run);
+    const start = deferStart
+        ? () =>
+              new Promise((resolve, reject) => {
+                  let settled = false;
+                  let cancelScheduled = null;
+                  const pending = {
+                      cancel() {
+                          if (settled) return;
+                          settled = true;
+                          pendingMutationStarts.delete(pending);
+                          try {
+                              cancelScheduled?.();
+                          } catch {
+                              // A host scheduler's cancellation failure cannot
+                              // make the invalidated mutation wait forever.
+                          }
+                          resolve(invalidatedMutationResult());
+                      },
+                  };
+                  const settle = callback => {
+                      if (settled) return;
+                      settled = true;
+                      pendingMutationStarts.delete(pending);
+                      callback();
+                  };
+                  pendingMutationStarts.add(pending);
+                  try {
+                      cancelScheduled = scheduleStart(() =>
+                          settle(() => {
+                              try {
+                                  resolve(run());
+                              } catch (error) {
+                                  reject(error);
+                              }
+                          })
+                      );
+                      if (typeof cancelScheduled !== 'function') cancelScheduled = null;
+                  } catch (error) {
+                      settle(() => reject(error));
+                  }
+              })
+        : run;
+    // The scheduled start is part of the tail, so a later mutation cannot pass
+    // the deferred action or interleave with its read-then-write boundary.
+    const result = tail.then(start, start);
     // A failed action must not poison the queue for the next user action.
     tail = result.catch(() => undefined);
     return result;
@@ -51,4 +109,5 @@ export function resetMutationQueue() {
     // Generation invalidation prevents queued work that has not started from
     // writing after the lifecycle boundary without creating a second queue.
     generation += 1;
+    for (const pending of [...pendingMutationStarts]) pending.cancel();
 }

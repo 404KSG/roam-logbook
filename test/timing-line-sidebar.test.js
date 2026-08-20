@@ -437,6 +437,23 @@ test('rapid switches serialize side effects so the newest intent finishes last',
     assert.equal(applied.at(-1), 'task-b');
 });
 
+test('a newer intent skips a stale sidebar request that has not started yet', async () => {
+    const calls = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async uid => {
+            calls.push(uid);
+            return { ok: true };
+        },
+        isEnabled: () => true,
+    });
+
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-a' });
+    fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-b' });
+    await fronting.whenIdle();
+
+    assert.deepEqual(calls, ['task-b']);
+});
+
 test('repeating a Clock In intent can front the same block again', async () => {
     const calls = [];
     const fronting = createTimingLineSidebarFronting({

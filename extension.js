@@ -1502,6 +1502,11 @@ function buildActiveWork(entries = [], {
 // src/mutations.js
 var tail = Promise.resolve();
 var generation = 0;
+var pendingMutationStarts = /* @__PURE__ */ new Set();
+var scheduleMutationStart = (callback) => {
+  const timerId = setTimeout(callback, 0);
+  return () => clearTimeout(timerId);
+};
 var invalidatedMutationResult = () => ({
   action: "mutation-invalidated",
   ok: false,
@@ -1522,7 +1527,7 @@ var invalidatedMutationResult = () => ({
   notice: "This action was interrupted by an extension reload before it could be applied. Retry.",
   error: new Error("Mutation was invalidated by an extension reload before it could be applied.")
 });
-function enqueueMutation(action) {
+function enqueueMutation(action, { deferStart = false, scheduleStart = scheduleMutationStart } = {}) {
   const expectedGeneration = generation;
   const run = () => {
     if (expectedGeneration !== generation) {
@@ -1530,12 +1535,54 @@ function enqueueMutation(action) {
     }
     return action();
   };
-  const result = tail.then(run, run);
+  const start = deferStart ? () => new Promise((resolve2, reject) => {
+    let settled = false;
+    let cancelScheduled2 = null;
+    const pending = {
+      cancel() {
+        if (settled)
+          return;
+        settled = true;
+        pendingMutationStarts.delete(pending);
+        try {
+          cancelScheduled2?.();
+        } catch {
+        }
+        resolve2(invalidatedMutationResult());
+      }
+    };
+    const settle = (callback) => {
+      if (settled)
+        return;
+      settled = true;
+      pendingMutationStarts.delete(pending);
+      callback();
+    };
+    pendingMutationStarts.add(pending);
+    try {
+      cancelScheduled2 = scheduleStart(
+        () => settle(() => {
+          try {
+            resolve2(run());
+          } catch (error) {
+            reject(error);
+          }
+        })
+      );
+      if (typeof cancelScheduled2 !== "function")
+        cancelScheduled2 = null;
+    } catch (error) {
+      settle(() => reject(error));
+    }
+  }) : run;
+  const result = tail.then(start, start);
   tail = result.catch(() => void 0);
   return result;
 }
 function resetMutationQueue() {
   generation += 1;
+  for (const pending of [...pendingMutationStarts])
+    pending.cancel();
 }
 
 // src/clock.js
@@ -1572,13 +1619,15 @@ function subscribeClockInIntents(listener) {
   return () => clockInIntentListeners.delete(listener);
 }
 function publishClockInIntent(intent) {
+  let handled = false;
   for (const listener of clockInIntentListeners) {
     try {
-      listener(intent);
+      handled = listener(intent) === true || handled;
     } catch (error) {
       console.error("[roam-logbook] Clock In intent listener failed", error);
     }
   }
+  return handled;
 }
 function publishAction(action) {
   for (const listener of actionListeners) {
@@ -1822,151 +1871,155 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
     error: uncertain?.error || results.find((result) => result.error)?.error || null
   };
 }
-async function clockIn(blockUid, { now = /* @__PURE__ */ new Date(), source = "user" } = {}) {
+async function clockIn(blockUid, {
+  now = /* @__PURE__ */ new Date(),
+  source = "user",
+  scheduleMutationStartFn = scheduleMutationStart
+} = {}) {
   let intentTaskUid = null;
   try {
     intentTaskUid = resolveTaskUid(blockUid);
   } catch {
   }
-  if (intentTaskUid) {
-    publishClockInIntent({ type: "clock-in-intent", source, taskUid: intentTaskUid });
-  }
-  return enqueueMutation(
-    () => withGraphGuard(async () => {
-      const taskUid = resolveTaskUid(blockUid);
-      if (!taskUid)
-        throw new Error("No block to clock in");
-      const entries = readAllEntries();
-      const open = entries.filter((entry) => entry.running);
-      const taskString = getBlockString(taskUid);
-      if (!isTaskBlock(taskString) || taskStatus(taskString) !== "TODO") {
-        const error = new Error("Clock In is only available on unfinished TODO blocks.");
-        error.code = "todo-only";
-        error.taskUid = taskUid;
-        throw error;
-      }
-      const doneAncestorUid = doneAncestorFor(taskUid);
-      if (doneAncestorUid) {
-        const error = new Error(
-          `Cannot Clock In under DONE Task ${doneAncestorUid}; reopen it first.`
-        );
-        error.code = "done-ancestor";
-        error.taskUid = taskUid;
-        error.doneAncestorUid = doneAncestorUid;
-        throw error;
-      }
-      if (open.length === 1 && open[0].taskUid === taskUid) {
-        refresh({ entries, notify: false });
-        const result2 = { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
-        publishAction({
-          type: "clock-in",
-          source,
-          clockUid: open[0].clockUid,
-          taskUid,
-          alreadyFocused: true,
-          newCycle: false,
-          cycleStartedAt: null
-        });
-        return result2;
-      }
-      let closedClockUids = [];
-      if (open.length > 0) {
-        const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
-          publish: false
-        });
-        closedClockUids = outcome.results.filter((result2) => result2.closed).map((result2) => result2.clockUid);
-        if (outcome.uncertain) {
-          return {
-            taskUid,
-            uncertain: true,
-            partial: true,
-            notice: GRAPH_UNCERTAIN,
-            retry: outcome.retry
-          };
-        }
-        if (outcome.failed > 0)
-          throw outcome.results.find((result2) => result2.error).error;
-      }
-      let drawer;
-      let clockUid;
-      const retry = (details) => ({
-        action: "clock-in",
-        taskUid,
-        ...open.length > 0 ? { closedClockUids } : {},
-        ...details
-      });
-      try {
-        drawer = await ensureDrawer(taskUid);
-        if (drawer.confirmation && !drawer.confirmation.ok) {
-          return {
-            taskUid,
-            drawerUid: drawer.uid,
-            uncertain: true,
-            partial: true,
-            notice: GRAPH_UNCERTAIN,
-            retry: retry({ drawerUid: drawer.uid })
-          };
-        }
-        clockUid = await createBlock({
-          parentUid: drawer.uid,
-          // Roam shifts existing siblings when a child is created at 0,
-          // keeping the newest Session at the top of the drawer.
-          order: 0,
-          string: formatClockLine(now)
-        });
-        const confirmation = refreshResult({ notify: false });
-        if (!confirmation.ok) {
-          return {
-            clockUid,
-            taskUid,
-            uncertain: true,
-            partial: true,
-            notice: GRAPH_UNCERTAIN,
-            retry: retry({ drawerUid: drawer.uid, clockUid })
-          };
-        }
-        const confirmed = entriesSnapshot.find(
-          (item) => item.clockUid === clockUid && item.running === true
-        );
-        if (!confirmed) {
-          return {
-            clockUid,
-            taskUid,
-            uncertain: true,
-            partial: true,
-            notice: GRAPH_UNCERTAIN,
-            retry: retry({ drawerUid: drawer.uid, clockUid })
-          };
-        }
-      } catch (error) {
-        if (open.length === 0)
-          throw error;
-        return {
-          ...clockUid ? { clockUid } : {},
-          taskUid,
-          ...drawer?.uid ? { drawerUid: drawer.uid } : {},
-          uncertain: true,
-          partial: true,
-          notice: GRAPH_UNCERTAIN,
-          retry: retry({
-            ...drawer?.uid ? { drawerUid: drawer.uid } : {},
-            ...clockUid ? { clockUid } : {}
-          })
-        };
-      }
-      const result = { clockUid, taskUid };
+  const hasSidebarIntent = intentTaskUid && publishClockInIntent({ type: "clock-in-intent", source, taskUid: intentTaskUid });
+  const mutation = () => withGraphGuard(async () => {
+    const taskUid = resolveTaskUid(blockUid);
+    if (!taskUid)
+      throw new Error("No block to clock in");
+    const entries = readAllEntries();
+    const open = entries.filter((entry) => entry.running);
+    const taskString = getBlockString(taskUid);
+    if (!isTaskBlock(taskString) || taskStatus(taskString) !== "TODO") {
+      const error = new Error("Clock In is only available on unfinished TODO blocks.");
+      error.code = "todo-only";
+      error.taskUid = taskUid;
+      throw error;
+    }
+    const doneAncestorUid = doneAncestorFor(taskUid);
+    if (doneAncestorUid) {
+      const error = new Error(
+        `Cannot Clock In under DONE Task ${doneAncestorUid}; reopen it first.`
+      );
+      error.code = "done-ancestor";
+      error.taskUid = taskUid;
+      error.doneAncestorUid = doneAncestorUid;
+      throw error;
+    }
+    if (open.length === 1 && open[0].taskUid === taskUid) {
+      refresh({ entries, notify: false });
+      const result2 = { clockUid: open[0].clockUid, taskUid, alreadyFocused: true };
       publishAction({
         type: "clock-in",
         source,
-        clockUid,
+        clockUid: open[0].clockUid,
         taskUid,
-        newCycle: open.length === 0,
-        cycleStartedAt: open.length === 0 ? now.getTime() : null
+        alreadyFocused: true,
+        newCycle: false,
+        cycleStartedAt: null
       });
-      notify();
-      return result;
-    })
-  );
+      return result2;
+    }
+    let closedClockUids = [];
+    if (open.length > 0) {
+      const outcome = await closeEntriesNow(entries, open.map((entry) => entry.clockUid), now, {
+        publish: false
+      });
+      closedClockUids = outcome.results.filter((result2) => result2.closed).map((result2) => result2.clockUid);
+      if (outcome.uncertain) {
+        return {
+          taskUid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: outcome.retry
+        };
+      }
+      if (outcome.failed > 0)
+        throw outcome.results.find((result2) => result2.error).error;
+    }
+    let drawer;
+    let clockUid;
+    const retry = (details) => ({
+      action: "clock-in",
+      taskUid,
+      ...open.length > 0 ? { closedClockUids } : {},
+      ...details
+    });
+    try {
+      drawer = await ensureDrawer(taskUid);
+      if (drawer.confirmation && !drawer.confirmation.ok) {
+        return {
+          taskUid,
+          drawerUid: drawer.uid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: retry({ drawerUid: drawer.uid })
+        };
+      }
+      clockUid = await createBlock({
+        parentUid: drawer.uid,
+        // Roam shifts existing siblings when a child is created at 0,
+        // keeping the newest Session at the top of the drawer.
+        order: 0,
+        string: formatClockLine(now)
+      });
+      const confirmation = refreshResult({ notify: false });
+      if (!confirmation.ok) {
+        return {
+          clockUid,
+          taskUid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: retry({ drawerUid: drawer.uid, clockUid })
+        };
+      }
+      const confirmed = entriesSnapshot.find(
+        (item) => item.clockUid === clockUid && item.running === true
+      );
+      if (!confirmed) {
+        return {
+          clockUid,
+          taskUid,
+          uncertain: true,
+          partial: true,
+          notice: GRAPH_UNCERTAIN,
+          retry: retry({ drawerUid: drawer.uid, clockUid })
+        };
+      }
+    } catch (error) {
+      if (open.length === 0)
+        throw error;
+      return {
+        ...clockUid ? { clockUid } : {},
+        taskUid,
+        ...drawer?.uid ? { drawerUid: drawer.uid } : {},
+        uncertain: true,
+        partial: true,
+        notice: GRAPH_UNCERTAIN,
+        retry: retry({
+          ...drawer?.uid ? { drawerUid: drawer.uid } : {},
+          ...clockUid ? { clockUid } : {}
+        })
+      };
+    }
+    const result = { clockUid, taskUid };
+    publishAction({
+      type: "clock-in",
+      source,
+      clockUid,
+      taskUid,
+      newCycle: open.length === 0,
+      cycleStartedAt: open.length === 0 ? now.getTime() : null
+    });
+    notify();
+    return result;
+  });
+  return enqueueMutation(mutation, {
+    deferStart: Boolean(hasSidebarIntent),
+    scheduleStart: scheduleMutationStartFn
+  });
 }
 async function reconcileOpenClocks({
   now = /* @__PURE__ */ new Date(),
@@ -4596,7 +4649,8 @@ function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
   clearIntervalFn = (ticker) => clearInterval(ticker),
-  confirmation = createConfirmationController()
+  confirmation = createConfirmationController(),
+  scheduleMutationStartFn = null
 } = {}) {
   let root = null;
   let summaryNode = null;
@@ -4868,7 +4922,10 @@ function createDashboard({
     if (!taskUid || focusInFlight)
       return focusInFlight;
     const request = act(
-      () => clockIn(taskUid, { source: "active-work-switch" })
+      () => clockIn(taskUid, {
+        source: "active-work-switch",
+        ...typeof scheduleMutationStartFn === "function" ? { scheduleMutationStartFn } : {}
+      })
     );
     focusInFlight = request.finally(() => {
       focusInFlight = null;

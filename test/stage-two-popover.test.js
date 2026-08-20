@@ -75,6 +75,12 @@ const settlePostPaint = async () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     await settle();
 };
+const clockInWithMockedStart = async (t, taskUid, now) => {
+    const pending = clock.clockIn(taskUid, { now });
+    await Promise.resolve();
+    t.mock.timers.tick(0);
+    await pending;
+};
 const topbarButton = () => document.querySelector('#roam-logbook-topbar button');
 const topbarWidget = () => document.getElementById('roam-logbook-topbar');
 // The Thread/timing detail lives in a polite live region rather than in the
@@ -887,8 +893,18 @@ test('Active Work open revalidation uses the Today spinner and keeps success sil
         parent: null,
         page: 'Project Page',
     });
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:00:00') });
+    const firstClockIn = clock.clockIn('popover-task-01', {
+        now: new Date('2026-08-15T09:00:00'),
+    });
+    await Promise.resolve();
+    t.mock.timers.tick(0);
+    await firstClockIn;
+    const secondClockIn = clock.clockIn('popover-task-02', {
+        now: new Date('2026-08-15T09:00:00'),
+    });
+    await Promise.resolve();
+    t.mock.timers.tick(0);
+    await secondClockIn;
 
     const popover = openPopover();
     const today = popover.querySelector('[data-view="today"]');
@@ -1161,15 +1177,15 @@ test('clicking a Recent title opens its block without switching Focus', async t 
 });
 
 test('the Recent Focus action switches it to the one Focused CLOCK', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:05:00') });
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-15T09:05:00') });
     graph.store.set('popover-task-02', {
         uid: 'popover-task-02',
         string: '{{[[TODO]]}} A second task',
         parent: null,
         page: 'Project Page',
     });
-    await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-15T09:02:00') });
+    await clockInWithMockedStart(t, 'popover-task-01', new Date('2026-08-15T09:00:00'));
+    await clockInWithMockedStart(t, 'popover-task-02', new Date('2026-08-15T09:02:00'));
 
     const surface = openPopover();
     const recentFocus = surface.querySelector(
@@ -1191,6 +1207,8 @@ test('the Recent Focus action switches it to the one Focused CLOCK', async t => 
     };
     try {
         click(recentFocus);
+        await Promise.resolve();
+        t.mock.timers.tick(0);
         await settle();
     } finally {
         window.roamAlphaAPI.ui.rightSidebar = previousSidebar;
@@ -1332,9 +1350,9 @@ test('pure Recent Active Work expires on the ticker without another graph read',
 });
 
 test('pure Recent rows keep navigation and an independent Focus action', async t => {
-    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-17T09:05:00') });
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: new Date('2026-08-17T09:05:00') });
     addTask('popover-task-02', 'A Recent task');
-    await clock.clockIn('popover-task-02', { now: new Date('2026-08-17T09:00:00') });
+    await clockInWithMockedStart(t, 'popover-task-02', new Date('2026-08-17T09:00:00'));
     await clock.clockOut(clock.getRunning()[0].clockUid, { now: new Date('2026-08-17T09:01:00') });
 
     const openCalls = [];
@@ -1353,6 +1371,8 @@ test('pure Recent rows keep navigation and an independent Focus action', async t
         assert.equal(clock.getRunning().length, 0, 'navigation does not start timing');
 
         click(focus);
+        await Promise.resolve();
+        t.mock.timers.tick(0);
         await settle();
         assert.equal(clock.getRunning().length, 1);
         assert.equal(clock.getRunning()[0].taskUid, 'popover-task-02');

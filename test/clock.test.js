@@ -15,6 +15,25 @@ const AT_1558 = new Date(2026, 7, 5, 15, 58);
 const AT_1658 = new Date(2026, 7, 5, 16, 58);
 const AT_1005 = new Date(2026, 7, 17, 10, 5);
 
+const createManualMutationScheduler = () => {
+    const pending = [];
+    return {
+        schedule(callback) {
+            pending.push(callback);
+            return () => {
+                const index = pending.indexOf(callback);
+                if (index >= 0) pending.splice(index, 1);
+            };
+        },
+        runNext() {
+            pending.shift()?.();
+        },
+        get size() {
+            return pending.length;
+        },
+    };
+};
+
 /** Rebuild the graph and the clock module's derived state. */
 function seed(blocks) {
     const graph = installGraph(blocks);
@@ -103,6 +122,123 @@ test('Clock In publishes sidebar navigation intent before graph confirmation set
             },
         ]);
         await pending;
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('an accepted sidebar intent yields before graph writes and keeps the click timestamp', async () => {
+    const graph = seed([TASK]);
+    const scheduler = createManualMutationScheduler();
+    const intents = [];
+    const unsubscribe = clock.subscribeClockInIntents(intent => {
+        intents.push(intent);
+        return true;
+    });
+    try {
+        const pending = clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            source: 'active-work-switch',
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+
+        assert.deepEqual(intents, [
+            {
+                type: 'clock-in-intent',
+                source: 'active-work-switch',
+                taskUid: TASK.uid,
+            },
+        ]);
+        assert.equal(scheduler.size, 0, 'the intent publishes synchronously');
+        assert.equal(graph.childrenOf(TASK.uid).length, 0, 'the graph is untouched before the yield');
+
+        await Promise.resolve();
+        assert.equal(scheduler.size, 1, 'the queued mutation waits for its injected start scheduler');
+        assert.equal(graph.childrenOf(TASK.uid).length, 0);
+
+        scheduler.runNext();
+        const result = await pending;
+        assert.equal(result.taskUid, TASK.uid);
+        assert.deepEqual(clockLinesOf(graph, TASK.uid), ['CLOCK: [2026-08-05 Wed 15:58]']);
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('deferred Clock Ins remain serial and later mutations cannot pass the first one', async () => {
+    const graph = seed([TASK, OTHER]);
+    const scheduler = createManualMutationScheduler();
+    const unsubscribe = clock.subscribeClockInIntents(() => true);
+    try {
+        const first = clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            source: 'active-work-switch',
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+        const second = clock.clockIn(OTHER.uid, {
+            now: AT_1658,
+            source: 'active-work-switch',
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+
+        await Promise.resolve();
+        assert.equal(scheduler.size, 1, 'only the first queued mutation may start');
+        scheduler.runNext();
+        await first;
+
+        await Promise.resolve();
+        assert.equal(scheduler.size, 1, 'the second start is scheduled only after the first settles');
+        scheduler.runNext();
+        await second;
+
+        assert.equal(clock.getRunning()[0].taskUid, OTHER.uid);
+        assert.deepEqual(clockLinesOf(graph, TASK.uid), ['CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00']);
+        assert.deepEqual(clockLinesOf(graph, OTHER.uid), ['CLOCK: [2026-08-05 Wed 16:58]']);
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('reset cancels an unstarted deferred mutation with the existing invalidated result', async () => {
+    const graph = seed([TASK]);
+    const scheduler = createManualMutationScheduler();
+    const unsubscribe = clock.subscribeClockInIntents(() => true);
+    try {
+        const pending = clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            source: 'active-work-switch',
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+        await Promise.resolve();
+        assert.equal(scheduler.size, 1);
+
+        clock.reset();
+        const result = await pending;
+        assert.equal(result.invalidated, true);
+        assert.equal(result.retryable, true);
+        assert.equal(scheduler.size, 0, 'reset cancels the not-yet-started scheduler callback');
+        assert.equal(graph.childrenOf(TASK.uid).length, 0);
+    } finally {
+        unsubscribe();
+    }
+});
+
+test('without an accepted sidebar intent, Clock In and Clock Out keep the immediate queue path', async () => {
+    const graph = seed([TASK]);
+    const scheduler = createManualMutationScheduler();
+    const unsubscribe = clock.subscribeClockInIntents(() => false);
+    try {
+        const started = await clock.clockIn(TASK.uid, {
+            now: AT_1558,
+            scheduleMutationStartFn: scheduler.schedule,
+        });
+        assert.equal(scheduler.size, 0);
+
+        await clock.clockOut(started.clockUid, { now: AT_1658 });
+        assert.equal(scheduler.size, 0, 'Clock Out has no navigation intent');
+        assert.deepEqual(clockLinesOf(graph, TASK.uid), [
+            'CLOCK: [2026-08-05 Wed 15:58]--[2026-08-05 Wed 16:58] => 1:00',
+        ]);
     } finally {
         unsubscribe();
     }

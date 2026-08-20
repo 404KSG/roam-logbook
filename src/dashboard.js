@@ -39,6 +39,7 @@ export function createDashboard({
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
     clearIntervalFn = ticker => clearInterval(ticker),
     confirmation = createConfirmationController(),
+    scheduleMutationStartFn = null,
 } = {}) {
     let root = null;
     let summaryNode = null;
@@ -323,7 +324,12 @@ export function createDashboard({
     const startTaskTiming = taskUid => {
         if (!taskUid || focusInFlight) return focusInFlight;
         const request = act(() =>
-            clock.clockIn(taskUid, { source: 'active-work-switch' })
+            clock.clockIn(taskUid, {
+                source: 'active-work-switch',
+                ...(typeof scheduleMutationStartFn === 'function'
+                    ? { scheduleMutationStartFn }
+                    : {}),
+            })
         );
         focusInFlight = request.finally(() => {
             focusInFlight = null;

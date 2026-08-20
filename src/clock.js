@@ -10,7 +10,11 @@ import { readAllEntries, readHierarchy } from './entries.js';
 import { buildActiveWork, chooseFocusedEntry } from './active-work.js';
 import { DRAWER_LABEL, formatClockLine, isDrawerBlock, isTaskBlock, taskStatus } from './org.js';
 import { createBlock, deleteBlock, GraphReadError, getBlockString, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
-import { enqueueMutation, resetMutationQueue } from './mutations.js';
+import {
+    enqueueMutation,
+    resetMutationQueue,
+    scheduleMutationStart,
+} from './mutations.js';
 
 let running = [];
 let entriesSnapshot = [];
@@ -54,13 +58,15 @@ export function subscribeClockInIntents(listener) {
 }
 
 function publishClockInIntent(intent) {
+    let handled = false;
     for (const listener of clockInIntentListeners) {
         try {
-            listener(intent);
+            handled = listener(intent) === true || handled;
         } catch (error) {
             console.error('[roam-logbook] Clock In intent listener failed', error);
         }
     }
+    return handled;
 }
 
 function publishAction(action) {
@@ -373,7 +379,14 @@ async function closeEntriesNow(entries, clockUids, now, { publish = true } = {})
  *
  * @returns {Promise<{clockUid: string, taskUid: string}>}
  */
-export async function clockIn(blockUid, { now = new Date(), source = 'user' } = {}) {
+export async function clockIn(
+    blockUid,
+    {
+        now = new Date(),
+        source = 'user',
+        scheduleMutationStartFn = scheduleMutationStart,
+    } = {}
+) {
     // Sidebar navigation is a reversible response to the user's click, not a
     // graph mutation. Publish it before the mutation queue performs drawer,
     // CLOCK, and post-write confirmation work so the native block can begin
@@ -387,11 +400,11 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
         // will preserve the existing uncertainty result. A failed speculative
         // lookup must not change Clock In error semantics.
     }
-    if (intentTaskUid) {
+    const hasSidebarIntent =
+        intentTaskUid &&
         publishClockInIntent({ type: 'clock-in-intent', source, taskUid: intentTaskUid });
-    }
 
-    return enqueueMutation(() =>
+    const mutation = () =>
         withGraphGuard(async () => {
             const taskUid = resolveTaskUid(blockUid);
             if (!taskUid) throw new Error('No block to clock in');
@@ -531,8 +544,12 @@ export async function clockIn(blockUid, { now = new Date(), source = 'user' } = 
             });
             notify();
             return result;
-        })
-    );
+        });
+
+    return enqueueMutation(mutation, {
+        deferStart: Boolean(hasSidebarIntent),
+        scheduleStart: scheduleMutationStartFn,
+    });
 }
 
 /**
