@@ -964,18 +964,30 @@ var sidebarFailure = (reason, message, error) => ({
   message,
   ...error ? { error } : {}
 });
-var openSidebarForIntent = async (sidebar) => {
+var openSidebarForIntent = (sidebar) => {
   if (typeof sidebar?.open !== "function")
-    return;
+    return Promise.resolve();
   try {
-    await sidebar.open();
+    return Promise.resolve(sidebar.open()).catch((error) => {
+      console.debug("[roam-logbook] sidebar open failed", error);
+    });
   } catch (error) {
     console.debug("[roam-logbook] sidebar open failed", error);
+    return Promise.resolve();
   }
 };
 var runSidebarOperation = (sidebar, operation) => {
-  const previous = sidebarOperationQueues.get(sidebar) || Promise.resolve();
-  const current = previous.catch(() => void 0).then(operation);
+  const previous = sidebarOperationQueues.get(sidebar);
+  let current;
+  if (previous) {
+    current = previous.then(operation, operation);
+  } else {
+    try {
+      current = Promise.resolve(operation());
+    } catch (error) {
+      current = Promise.reject(error);
+    }
+  }
   sidebarOperationQueues.set(sidebar, current);
   return current.finally(() => {
     if (sidebarOperationQueues.get(sidebar) === current) {
@@ -1018,9 +1030,33 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
     return await runSidebarOperation(sidebar, async () => {
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
-      await openSidebarForIntent(sidebar);
-      if (!isCurrent())
-        return { ok: false, skipped: true, reason: "superseded" };
+      const sidebarOpen = openSidebarForIntent(sidebar);
+      const findExisting = (windows) => Array.isArray(windows) ? windows.find(
+        (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
+      ) : null;
+      const revealAuthoritative = async (windows) => {
+        rememberSidebarWindows(sidebar, windows);
+        const existing = findExisting(windows);
+        if (!existing)
+          return null;
+        const visibility = await revealExistingBlockWindow(sidebar, uid, {
+          isCurrent,
+          requireOrder: true,
+          unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
+        });
+        if (visibility.ok === false)
+          return visibility;
+        rememberSidebarWindow(sidebar, uid);
+        return { ok: true, deduped: true, reordered: visibility.reordered };
+      };
+      const readAfterOpen = async () => {
+        await sidebarOpen;
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        if (typeof sidebar.getWindows !== "function")
+          return null;
+        return sidebar.getWindows();
+      };
       if (hasRecentlyKnownSidebarWindow(sidebar, uid) && typeof sidebar.setWindowOrder === "function") {
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
@@ -1038,32 +1074,56 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
         } catch {
         }
         forgetSidebarWindow(sidebar, uid);
+        await sidebarOpen;
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
       }
       if (!isCurrent())
         return { ok: false, skipped: true, reason: "superseded" };
       if (typeof sidebar.getWindows === "function") {
-        const windows = await sidebar.getWindows();
-        if (!isCurrent())
-          return { ok: false, skipped: true, reason: "superseded" };
-        rememberSidebarWindows(sidebar, windows);
-        const existing = Array.isArray(windows) ? windows.find(
-          (sidebarWindow) => sidebarWindow?.type === "block" && sidebarWindow?.["block-uid"] === uid
-        ) : null;
-        if (existing) {
-          const visibility = await revealExistingBlockWindow(sidebar, uid, {
-            isCurrent,
-            requireOrder: true,
-            unavailableMessage: "Roam could not move the Timing Line sidebar window to the top."
-          });
-          if (visibility.ok === false)
-            return visibility;
-          rememberSidebarWindow(sidebar, uid);
-          return { ok: true, deduped: true, reordered: visibility.reordered };
+        let windows;
+        try {
+          windows = await sidebar.getWindows();
+        } catch {
+          windows = await readAfterOpen();
+          if (windows?.skipped)
+            return windows;
         }
         if (!isCurrent())
           return { ok: false, skipped: true, reason: "superseded" };
-        await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        let revealed;
+        try {
+          revealed = await revealAuthoritative(windows);
+        } catch {
+          const retryWindows = await readAfterOpen();
+          if (retryWindows?.skipped)
+            return retryWindows;
+          if (retryWindows !== null) {
+            revealed = await revealAuthoritative(retryWindows);
+          }
+        }
+        if (revealed)
+          return revealed;
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        try {
+          await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        } catch {
+          const retryWindows = await readAfterOpen();
+          if (retryWindows?.skipped)
+            return retryWindows;
+          if (retryWindows !== null) {
+            const retryRevealed = await revealAuthoritative(retryWindows);
+            if (retryRevealed)
+              return retryRevealed;
+          }
+          if (!isCurrent())
+            return { ok: false, skipped: true, reason: "superseded" };
+          await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+        }
         rememberSidebarWindow(sidebar, uid);
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
         return { ok: true, added: true };
       }
       let requested = requestedSidebarBlocks.get(sidebar);
@@ -1079,10 +1139,23 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true } = {}) {
         await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
         requested.add(uid);
         rememberSidebarWindow(sidebar, uid);
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
       } catch (error) {
         requested.delete(uid);
         forgetSidebarWindow(sidebar, uid);
-        throw error;
+        await sidebarOpen;
+        if (!isCurrent())
+          return { ok: false, skipped: true, reason: "superseded" };
+        try {
+          await sidebar.addWindow({ window: blockSidebarWindow(uid, 0) });
+          requested.add(uid);
+          rememberSidebarWindow(sidebar, uid);
+          if (!isCurrent())
+            return { ok: false, skipped: true, reason: "superseded" };
+        } catch {
+          throw error;
+        }
       }
       return { ok: true, added: true };
     });
@@ -3632,7 +3705,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.54";
+var PLUGIN_VERSION = "0.9.0-beta.56";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -9929,32 +10002,36 @@ function createTimingLineSidebarFronting({
   let queue = Promise.resolve();
   let disposed = false;
   const isCurrent = (intent) => !disposed && intent === latestIntent && Boolean(isEnabled());
+  const runIntent = async (action, intent) => {
+    if (!isCurrent(intent)) {
+      return { ok: false, skipped: true, reason: "superseded" };
+    }
+    let result;
+    try {
+      result = await frontBlock(action.taskUid, {
+        isCurrent: () => isCurrent(intent)
+      });
+    } catch (error) {
+      result = {
+        ok: false,
+        reason: "sidebar-front-failed",
+        message: error?.message || DEFAULT_FAILURE_NOTICE,
+        error
+      };
+    }
+    if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
+      onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+    }
+    return result;
+  };
   const handleAction = (action) => {
     if (disposed || !isTimingLineFrontIntent(action) || !isEnabled())
       return false;
     const intent = ++latestIntent;
-    queue = queue.catch(() => void 0).then(async () => {
-      if (!isCurrent(intent)) {
-        return { ok: false, skipped: true, reason: "superseded" };
-      }
-      let result;
-      try {
-        result = await frontBlock(action.taskUid, {
-          isCurrent: () => isCurrent(intent)
-        });
-      } catch (error) {
-        result = {
-          ok: false,
-          reason: "sidebar-front-failed",
-          message: error?.message || DEFAULT_FAILURE_NOTICE,
-          error
-        };
-      }
-      if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
-        onNotice(result.message || DEFAULT_FAILURE_NOTICE);
-      }
-      return result;
-    });
+    queue = queue.then(
+      () => runIntent(action, intent),
+      () => runIntent(action, intent)
+    );
     return true;
   };
   return {

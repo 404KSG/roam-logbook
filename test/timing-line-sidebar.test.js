@@ -84,7 +84,7 @@ test('legacy Timing Line fronting remains compatible without a sidebar open API'
     assert.deepEqual(forbidden, []);
 });
 
-test('the first Timing Line add waits for sidebar open before inspecting or adding', async () => {
+test('the first Timing Line add starts native inspection before sidebar open settles', async () => {
     const calls = [];
     let releaseOpen;
     const openSettled = new Promise(resolve => {
@@ -110,11 +110,21 @@ test('the first Timing Line add waits for sidebar open before inspecting or addi
     });
 
     const resultPromise = frontBlockInRightSidebar('timing-task');
+    assert.deepEqual(calls, ['open', 'getWindows']);
     await new Promise(resolve => setImmediate(resolve));
     try {
-        assert.deepEqual(calls, ['open']);
-        assert.equal(inspectionStarted, false);
-        assert.equal(addStarted, false);
+        assert.deepEqual(calls, [
+            'open',
+            'getWindows',
+            {
+                action: 'addWindow',
+                spec: {
+                    window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+                },
+            },
+        ]);
+        assert.equal(inspectionStarted, true);
+        assert.equal(addStarted, true);
     } finally {
         releaseOpen();
     }
@@ -128,6 +138,194 @@ test('the first Timing Line add waits for sidebar open before inspecting or addi
         'getWindows',
         {
             action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+});
+
+test('a failed optimistic inspection waits for open and retries the authoritative add once', async () => {
+    const calls = [];
+    let releaseOpen;
+    const openSettled = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    let inspectionCount = 0;
+
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openSettled;
+        },
+        getWindows: () => {
+            inspectionCount += 1;
+            calls.push(`getWindows:${inspectionCount}`);
+            if (inspectionCount === 1) throw new Error('sidebar is still closed');
+            return [];
+        },
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const resultPromise = frontBlockInRightSidebar('timing-task');
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.deepEqual(calls, ['open', 'getWindows:1']);
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows:1',
+        'getWindows:2',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+    ]);
+});
+
+test('a failed optimistic reveal waits for open and retries the existing native window once', async () => {
+    const calls = [];
+    let releaseOpen;
+    const openSettled = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    let inspectionCount = 0;
+    let revealCount = 0;
+
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openSettled;
+        },
+        getWindows: () => {
+            inspectionCount += 1;
+            calls.push(`getWindows:${inspectionCount}`);
+            return [{ type: 'block', 'block-uid': 'timing-task', order: 2 }];
+        },
+        setWindowOrder: async spec => {
+            revealCount += 1;
+            calls.push({ action: `setWindowOrder:${revealCount}`, spec });
+            if (revealCount === 1) throw new Error('sidebar is still closed');
+        },
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const resultPromise = frontBlockInRightSidebar('timing-task');
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.deepEqual(calls, [
+            'open',
+            'getWindows:1',
+            {
+                action: 'setWindowOrder:1',
+                spec: {
+                    window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+                },
+            },
+        ]);
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: true,
+        deduped: true,
+        reordered: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows:1',
+        {
+            action: 'setWindowOrder:1',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        'getWindows:2',
+        {
+            action: 'setWindowOrder:2',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        {
+            action: 'expandWindow',
+            spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
+        },
+    ]);
+});
+
+test('a failed optimistic add waits for open, re-reads, and retries without duplication', async () => {
+    const calls = [];
+    let releaseOpen;
+    const openSettled = new Promise(resolve => {
+        releaseOpen = resolve;
+    });
+    let addCount = 0;
+
+    installSidebar({
+        open: async () => {
+            calls.push('open');
+            await openSettled;
+        },
+        getWindows: () => {
+            calls.push(
+                `getWindows:${calls.filter(
+                    call => typeof call === 'string' && call.startsWith('getWindows')
+                ).length + 1}`
+            );
+            return [];
+        },
+        addWindow: async spec => {
+            addCount += 1;
+            calls.push({ action: `addWindow:${addCount}`, spec });
+            if (addCount === 1) throw new Error('sidebar is still closed');
+        },
+    });
+
+    const resultPromise = frontBlockInRightSidebar('timing-task');
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.deepEqual(calls, [
+            'open',
+            'getWindows:1',
+            {
+                action: 'addWindow:1',
+                spec: {
+                    window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+                },
+            },
+        ]);
+    } finally {
+        releaseOpen();
+    }
+
+    assert.deepEqual(await resultPromise, {
+        ok: true,
+        added: true,
+    });
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows:1',
+        {
+            action: 'addWindow:1',
+            spec: {
+                window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+            },
+        },
+        'getWindows:2',
+        {
+            action: 'addWindow:2',
             spec: {
                 window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
             },
@@ -206,7 +404,7 @@ test('a recently confirmed Timing Line uses the native reveal fast path', async 
     assert.deepEqual(forbidden, []);
 });
 
-test('a closed cached Timing Line waits for sidebar open before the reveal fast path', async () => {
+test('a cached Timing Line starts native reveal before sidebar open settles', async () => {
     const calls = [];
     let openGate = Promise.resolve();
     let releaseOpen;
@@ -231,7 +429,19 @@ test('a closed cached Timing Line waits for sidebar open before the reveal fast 
     const resultPromise = frontBlockInRightSidebar('timing-task');
     await new Promise(resolve => setImmediate(resolve));
     try {
-        assert.deepEqual(calls, ['open']);
+        assert.deepEqual(calls, [
+            'open',
+            {
+                action: 'setWindowOrder',
+                spec: {
+                    window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+                },
+            },
+            {
+                action: 'expandWindow',
+                spec: { window: { type: 'block', 'block-uid': 'timing-task' } },
+            },
+        ]);
     } finally {
         releaseOpen();
     }
@@ -257,12 +467,16 @@ test('a closed cached Timing Line waits for sidebar open before the reveal fast 
     assert.deepEqual(forbidden, []);
 });
 
-test('a superseded Timing Line does not reveal after async sidebar open settles', async () => {
+test('a superseded optimistic add stops after its native call and does not retry', async () => {
     const calls = [];
     let current = true;
     let releaseOpen;
+    let releaseAdd;
     const openSettled = new Promise(resolve => {
         releaseOpen = resolve;
+    });
+    const addSettled = new Promise(resolve => {
+        releaseAdd = resolve;
     });
     installSidebar({
         open: async () => {
@@ -273,7 +487,10 @@ test('a superseded Timing Line does not reveal after async sidebar open settles'
             calls.push('getWindows');
             return [];
         },
-        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+        addWindow: async spec => {
+            calls.push({ action: 'addWindow', spec });
+            await addSettled;
+        },
     });
 
     const resultPromise = frontBlockInRightSidebar('timing-task', {
@@ -281,10 +498,20 @@ test('a superseded Timing Line does not reveal after async sidebar open settles'
     });
     await new Promise(resolve => setImmediate(resolve));
     try {
-        assert.deepEqual(calls, ['open']);
+        assert.deepEqual(calls, [
+            'open',
+            'getWindows',
+            {
+                action: 'addWindow',
+                spec: {
+                    window: { type: 'block', 'block-uid': 'timing-task', order: 0 },
+                },
+            },
+        ]);
         current = false;
     } finally {
         releaseOpen();
+        releaseAdd();
     }
 
     assert.deepEqual(await resultPromise, {
@@ -292,7 +519,11 @@ test('a superseded Timing Line does not reveal after async sidebar open settles'
         skipped: true,
         reason: 'superseded',
     });
-    assert.deepEqual(calls, ['open']);
+    assert.equal(calls.filter(call => call === 'getWindows').length, 1);
+    assert.equal(
+        calls.filter(call => typeof call === 'object' && call.action === 'addWindow').length,
+        1
+    );
 });
 
 test('a closed cached Timing Line invalidates the fast path and recovers without duplication', async () => {
@@ -481,6 +712,26 @@ test('fronting accepts only immediate user and Active Work Clock In intents', as
     );
     await fronting.whenIdle();
     assert.deepEqual(calls, ['palette-task', 'open-line-task']);
+});
+
+test('the first Timing Line intent reaches the sidebar adapter in one microtask', async () => {
+    const calls = [];
+    const fronting = createTimingLineSidebarFronting({
+        frontBlock: async uid => {
+            calls.push(uid);
+            return { ok: true };
+        },
+        isEnabled: () => true,
+    });
+
+    assert.equal(
+        fronting.handleAction({ type: 'clock-in-intent', source: 'user', taskUid: 'task-a' }),
+        true
+    );
+    assert.deepEqual(calls, []);
+    await Promise.resolve();
+    assert.deepEqual(calls, ['task-a']);
+    await fronting.whenIdle();
 });
 
 test('disabled fronting performs no sidebar work', async () => {

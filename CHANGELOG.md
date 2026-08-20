@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.56 — 2026-08-20
+
+### Native-speed Timing Line navigation
+
+- Starts Roam's native right-sidebar open and target reveal/add operations
+  concurrently, instead of holding task navigation behind the full sidebar
+  animation.
+- Keeps closed-sidebar compatibility through one guarded recovery path: when an
+  optimistic list, reveal, or add call is rejected, the extension waits for the
+  in-flight open request, re-reads Roam's authoritative windows, and retries once.
+- Removes one redundant promise continuation before the first sidebar adapter
+  call while preserving latest-intent cancellation, serialized rapid switches,
+  existing-window deduplication, and unrelated sidebar windows.
+- Adds regression coverage for immediate first adds, cached and uncached reveals,
+  closed-sidebar retries, superseded switches, rejected open calls, and legacy
+  Roam hosts.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.54 — 2026-08-20
 
 ### Closed right-sidebar recovery

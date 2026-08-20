@@ -35,34 +35,41 @@ export function createTimingLineSidebarFronting({
     const isCurrent = intent =>
         !disposed && intent === latestIntent && Boolean(isEnabled());
 
+    const runIntent = async (action, intent) => {
+        if (!isCurrent(intent)) {
+            return { ok: false, skipped: true, reason: 'superseded' };
+        }
+        let result;
+        try {
+            result = await frontBlock(action.taskUid, {
+                isCurrent: () => isCurrent(intent),
+            });
+        } catch (error) {
+            result = {
+                ok: false,
+                reason: 'sidebar-front-failed',
+                message: error?.message || DEFAULT_FAILURE_NOTICE,
+                error,
+            };
+        }
+        if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
+            onNotice(result.message || DEFAULT_FAILURE_NOTICE);
+        }
+        return result;
+    };
+
     const handleAction = action => {
         if (disposed || !isTimingLineFrontIntent(action) || !isEnabled()) return false;
         const intent = ++latestIntent;
 
-        queue = queue
-            .catch(() => undefined)
-            .then(async () => {
-                if (!isCurrent(intent)) {
-                    return { ok: false, skipped: true, reason: 'superseded' };
-                }
-                let result;
-                try {
-                    result = await frontBlock(action.taskUid, {
-                        isCurrent: () => isCurrent(intent),
-                    });
-                } catch (error) {
-                    result = {
-                        ok: false,
-                        reason: 'sidebar-front-failed',
-                        message: error?.message || DEFAULT_FAILURE_NOTICE,
-                        error,
-                    };
-                }
-                if (result?.ok === false && !result?.skipped && isCurrent(intent)) {
-                    onNotice(result.message || DEFAULT_FAILURE_NOTICE);
-                }
-                return result;
-            });
+        // A resolved queue plus catch().then() used to spend two microtasks
+        // before the first native sidebar request. One continuation is enough
+        // to preserve serialized/latest-intent behavior, including recovery
+        // after an unexpected prior rejection.
+        queue = queue.then(
+            () => runIntent(action, intent),
+            () => runIntent(action, intent)
+        );
         return true;
     };
 
