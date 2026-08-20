@@ -63,15 +63,28 @@ test('clocking in creates the drawer and a running entry', async () => {
     assert.equal(clock.getRunning()[0].title, 'this is a test task');
 });
 
-test('clock refresh batches physical context metadata without changing timing state', async () => {
+test('clock refresh does not perform an extra hierarchy read for removed breadcrumbs', async () => {
     const parent = { uid: 'context-parent', string: '03 - Daily Tasks', parent: null };
     const task = { uid: 'context-task', string: '{{[[TODO]]}} Child task', parent: parent.uid };
-    seed([parent, task]);
+    const graph = seed([parent, task]);
 
     await clock.clockIn(task.uid, { now: AT_1558 });
 
+    const beforeRefresh = graph.queryLog().length;
+    clock.refresh();
+    const refreshQueries = graph.queryLog().slice(beforeRefresh);
+    assert.equal(
+        refreshQueries.some(query => query.includes(':find ?uid ?parent-uid')),
+        false,
+        'Active refresh must not walk parent chains for presentation metadata'
+    );
+    assert.equal(
+        refreshQueries.some(query => query.includes(':find ?target-uid ?mirror-uid')),
+        false,
+        'Active refresh must not resolve mirror context for presentation metadata'
+    );
     const entry = clock.getEntriesSnapshot().find(item => item.taskUid === task.uid);
-    assert.deepEqual(entry.contextPath, [{ uid: parent.uid, string: parent.string }]);
+    assert.equal('contextPath' in entry, false);
     assert.equal(clock.getRunning()[0].taskUid, task.uid);
 });
 

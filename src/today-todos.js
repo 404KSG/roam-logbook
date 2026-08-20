@@ -31,14 +31,12 @@ const makeVisibleNode = ({
     string,
     sourceUid = uid,
     orderPath = [],
-    contextPath = [],
 }) => ({
     uid,
     string: typeof string === 'string' ? string : '',
     sourceUid,
     status: 'TODO',
     orderPath: [...orderPath],
-    contextPath: contextPath.map(segment => ({ ...segment })),
     ancestorPath: [],
     children: [],
 });
@@ -62,24 +60,6 @@ const buildAncestorPath = (uid, visibleByUid, parentByUid) => {
     return path;
 };
 
-const contextSegment = (node, referenceStrings) => {
-    if (!isNode(node)) return null;
-    const referenceUid = referencedBlockUid(node.string);
-    const referencedString = referenceUid ? referenceStrings?.[referenceUid] : null;
-    return {
-        // A pure reference is a physical occurrence but its canonical task is
-        // the useful Roam navigation target and the stable display label.
-        uid: referenceUid || node.uid,
-        string: typeof referencedString === 'string' ? referencedString : node.string,
-        ...(referenceUid ? { sourceUid: node.uid } : {}),
-    };
-};
-
-const buildContextPath = (physicalPath, referenceStrings) =>
-    (Array.isArray(physicalPath) ? physicalPath : [])
-        .map(node => contextSegment(node, referenceStrings))
-        .filter(Boolean);
-
 /**
  * Build a visible task forest.
  *
@@ -95,10 +75,10 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
     const parentByUid = new Map();
     const occurrences = new Set();
 
-    const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent, contextPath }) => {
+    const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent }) => {
         let visible = visibleByUid.get(uid);
         if (!visible) {
-            visible = makeVisibleNode({ uid, string, sourceUid, orderPath, contextPath });
+            visible = makeVisibleNode({ uid, string, sourceUid, orderPath });
             visibleByUid.set(uid, visible);
             parentByUid.set(uid, parent?.uid || null);
             appendTo(parent, visible, outputRoots);
@@ -106,14 +86,13 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
         return visible;
     };
 
-    const walk = (node, nearestVisible, orderPath, physicalPath = []) => {
+    const walk = (node, nearestVisible, orderPath) => {
         if (!isNode(node) || occurrences.has(node.uid)) return;
         occurrences.add(node.uid);
 
         const rawString = typeof node.string === 'string' ? node.string : '';
         const status = taskStatus(rawString);
         const referenceUid = referencedBlockUid(rawString);
-        const contextPath = buildContextPath(physicalPath, referenceStrings);
         let nextParent = nearestVisible;
 
         // A pure reference is a context block. Resolve only its target string;
@@ -127,7 +106,6 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
                     sourceUid: node.uid,
                     orderPath,
                     parent: nearestVisible,
-                    contextPath,
                 });
             }
         } else if (status === 'TODO') {
@@ -136,7 +114,6 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
                 string: rawString,
                 orderPath,
                 parent: nearestVisible,
-                contextPath,
             });
         }
 
@@ -145,7 +122,7 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
             .slice()
             .sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0))
             .forEach((child, index) =>
-                walk(child, nextParent, [...orderPath, index], [...physicalPath, node])
+                walk(child, nextParent, [...orderPath, index])
             );
     };
 

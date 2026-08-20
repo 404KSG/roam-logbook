@@ -419,66 +419,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     white-space: nowrap;
 }
 
-.rlb-context-breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.rlb-context-breadcrumb__separator {
-    flex: 0 0 auto;
-    color: var(--rlb-muted);
-    opacity: 0.72;
-}
-
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment {
-    flex: 0 1 auto;
-    min-width: 0;
-    min-height: 16px;
-    height: auto;
-    max-width: 100%;
-    margin: 0;
-    padding: 0 2px !important;
-    overflow: hidden;
-    color: var(--rlb-muted);
-    font-size: inherit;
-    font-weight: inherit;
-    line-height: 1.2;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:hover,
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:focus-visible,
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:active {
-    color: var(--rlb-surface-link-hover);
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-run--with-context .rlb-run__title {
-    grid-row: 2;
-}
-
-.rlb-run--with-context .rlb-run__meta {
-    grid-row: 3;
-}
-
-.rlb-run--with-context .rlb-run__actions {
-    grid-row: 1 / span 3;
-}
-
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 1;
     grid-row: 1;
@@ -499,16 +439,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 2px;
     background: transparent !important;
     box-shadow: none !important;
-}
-
-/*
- * Context rows use three explicit content tracks. This selector deliberately
- * carries the row state plus the Blueprint button classes so a late Roam
- * button rule cannot place the title back on the breadcrumb's first track.
- */
-.rlb-run.rlb-run--with-context .bp3-button.bp3-minimal.rlb-run__title {
-    grid-row: 2;
-    min-width: 0;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {
@@ -648,10 +578,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-run--inline-meta .rlb-run__actions {
     grid-row: 1;
-}
-
-.rlb-run--with-context.rlb-run--inline-meta .rlb-run__actions {
-    grid-row: 1 / span 3;
 }
 
 .rlb-run__actions .rlb-run__checkout {
@@ -799,58 +725,6 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 .rlb-today__toggle:focus-visible {
     color: var(--rlb-surface-link-hover);
     background: var(--rlb-surface-hover);
-}
-
-.rlb-today__breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    padding: 1px 4px 0;
-    color: var(--rlb-muted);
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.rlb-context-breadcrumb__segment {
-    display: inline-block !important;
-    flex: 0 1 auto;
-    min-width: 0 !important;
-    max-width: 100%;
-    overflow: hidden;
-    padding: 0 !important;
-    color: var(--rlb-muted);
-    font-size: inherit;
-    font-weight: inherit;
-    line-height: inherit;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-context-breadcrumb__segment:hover,
-.rlb-context-breadcrumb__segment:focus-visible,
-.rlb-context-breadcrumb__segment:active {
-    color: var(--rlb-surface-link-hover);
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-context-breadcrumb__segment:focus-visible {
-    outline: 1px solid currentColor;
-    outline-offset: 1px;
-}
-
-.rlb-context-breadcrumb__separator {
-    flex: 0 0 auto;
-    color: var(--rlb-muted);
-    opacity: 0.72;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {

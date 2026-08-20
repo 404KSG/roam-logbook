@@ -386,11 +386,8 @@ test('a malformed hierarchy component does not disable healthy completion watche
     };
     try {
         const hierarchy = readHierarchy([CHILD.uid]);
-        assert.equal(
-            hierarchy.physicalParentOf[CHILD.uid],
-            undefined,
-            'an ambiguous physical parent suppresses the optional context path'
-        );
+        assert.equal('physicalParentOf' in hierarchy, false);
+        assert.ok(hierarchy.issues.some(issue => issue.code === 'ambiguous-parent'));
         await graph.api.data.block.update({
             block: { uid: SIBLING.uid, string: '{{[[DONE]]}} sibling task' },
         });

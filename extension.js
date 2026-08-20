@@ -267,15 +267,13 @@ var makeVisibleNode = ({
   uid,
   string,
   sourceUid = uid,
-  orderPath = [],
-  contextPath = []
+  orderPath = []
 }) => ({
   uid,
   string: typeof string === "string" ? string : "",
   sourceUid,
   status: "TODO",
   orderPath: [...orderPath],
-  contextPath: contextPath.map((segment) => ({ ...segment })),
   ancestorPath: [],
   children: []
 });
@@ -299,43 +297,28 @@ var buildAncestorPath = (uid, visibleByUid, parentByUid) => {
   }
   return path;
 };
-var contextSegment = (node, referenceStrings) => {
-  if (!isNode(node))
-    return null;
-  const referenceUid = referencedBlockUid(node.string);
-  const referencedString = referenceUid ? referenceStrings?.[referenceUid] : null;
-  return {
-    // A pure reference is a physical occurrence but its canonical task is
-    // the useful Roam navigation target and the stable display label.
-    uid: referenceUid || node.uid,
-    string: typeof referencedString === "string" ? referencedString : node.string,
-    ...referenceUid ? { sourceUid: node.uid } : {}
-  };
-};
-var buildContextPath = (physicalPath, referenceStrings) => (Array.isArray(physicalPath) ? physicalPath : []).map((node) => contextSegment(node, referenceStrings)).filter(Boolean);
 function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
   const outputRoots = [];
   const visibleByUid = /* @__PURE__ */ new Map();
   const parentByUid = /* @__PURE__ */ new Map();
   const occurrences = /* @__PURE__ */ new Set();
-  const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent, contextPath }) => {
+  const addVisible = ({ uid, string, sourceUid = uid, orderPath, parent }) => {
     let visible = visibleByUid.get(uid);
     if (!visible) {
-      visible = makeVisibleNode({ uid, string, sourceUid, orderPath, contextPath });
+      visible = makeVisibleNode({ uid, string, sourceUid, orderPath });
       visibleByUid.set(uid, visible);
       parentByUid.set(uid, parent?.uid || null);
       appendTo(parent, visible, outputRoots);
     }
     return visible;
   };
-  const walk = (node, nearestVisible, orderPath, physicalPath = []) => {
+  const walk = (node, nearestVisible, orderPath) => {
     if (!isNode(node) || occurrences.has(node.uid))
       return;
     occurrences.add(node.uid);
     const rawString = typeof node.string === "string" ? node.string : "";
     const status = taskStatus(rawString);
     const referenceUid = referencedBlockUid(rawString);
-    const contextPath = buildContextPath(physicalPath, referenceStrings);
     let nextParent = nearestVisible;
     if (referenceUid) {
       const referencedString = referenceStrings?.[referenceUid];
@@ -345,8 +328,7 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
           string: referencedString,
           sourceUid: node.uid,
           orderPath,
-          parent: nearestVisible,
-          contextPath
+          parent: nearestVisible
         });
       }
     } else if (status === "TODO") {
@@ -354,13 +336,12 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
         uid: node.uid,
         string: rawString,
         orderPath,
-        parent: nearestVisible,
-        contextPath
+        parent: nearestVisible
       });
     }
     const children = Array.isArray(node.children) ? node.children : [];
     children.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach(
-      (child, index) => walk(child, nextParent, [...orderPath, index], [...physicalPath, node])
+      (child, index) => walk(child, nextParent, [...orderPath, index])
     );
   };
   roots.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((root, index) => walk(root, null, [index]));
@@ -1176,58 +1157,6 @@ async function openBlockInRightSidebar(uid) {
   }
 }
 
-// src/context-path.js
-var isUid = (value) => typeof value === "string" && value.length > 0;
-var cleanSegment = (segment) => {
-  if (!segment || typeof segment !== "object")
-    return null;
-  const uid = segment.uid;
-  const string = segment.string;
-  if (!isUid(uid) || typeof string !== "string")
-    return null;
-  return {
-    uid,
-    string,
-    ...isUid(segment.sourceUid) ? { sourceUid: segment.sourceUid } : {}
-  };
-};
-function contextPathFromHierarchy(taskUid, hierarchy = {}) {
-  if (!isUid(taskUid))
-    return [];
-  const parentOf = hierarchy?.physicalParentOf || hierarchy?.parentOf || {};
-  const stringOf = hierarchy?.physicalStringOf || hierarchy?.stringOf || {};
-  const canonicalUidOf = hierarchy?.canonicalUidOf || {};
-  const canonicalStringOf = hierarchy?.canonicalStringOf || {};
-  const path = [];
-  const seen = /* @__PURE__ */ new Set([taskUid]);
-  let current = parentOf[taskUid] || null;
-  while (isUid(current) && !seen.has(current)) {
-    seen.add(current);
-    const canonicalUid = canonicalUidOf[current] || current;
-    const segment = cleanSegment({
-      uid: canonicalUid,
-      string: canonicalStringOf[current] ?? stringOf[current],
-      ...canonicalUid !== current ? { sourceUid: current } : {}
-    });
-    if (segment)
-      path.unshift(segment);
-    current = parentOf[current] || null;
-  }
-  return path;
-}
-function contextPathsFromHierarchy(taskUids = [], hierarchy = {}) {
-  const paths = /* @__PURE__ */ new Map();
-  for (const taskUid of new Set(Array.isArray(taskUids) ? taskUids : [])) {
-    if (!isUid(taskUid))
-      continue;
-    paths.set(taskUid, contextPathFromHierarchy(taskUid, hierarchy));
-  }
-  return paths;
-}
-function normalizeContextPath(path = []) {
-  return (Array.isArray(path) ? path : []).map(cleanSegment).filter(Boolean);
-}
-
 // src/entries.js
 var DRAWER_SHAPES = [
   { prefix: "", suffix: "::" },
@@ -1317,15 +1246,8 @@ function readAllEntries() {
 function readDashboardSnapshot() {
   const entries = readAllEntries();
   const hierarchy = readHierarchy([...new Set(entries.map((entry) => entry.taskUid))]);
-  const contextPaths = contextPathsFromHierarchy(
-    entries.map((entry) => entry.taskUid),
-    hierarchy
-  );
   return {
-    entries: entries.map((entry) => ({
-      ...entry,
-      contextPath: contextPaths.get(entry.taskUid) || []
-    })),
+    entries,
     hierarchy
   };
 }
@@ -1397,10 +1319,6 @@ var readBlockStrings = (uids) => {
 function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   const parentOf = {};
   const stringOf = {};
-  const physicalParentOf = {};
-  const physicalStringOf = {};
-  const canonicalUidOf = {};
-  const canonicalStringOf = {};
   const mirrorsOf = {};
   const issues = [];
   const seeds = new Set(taskUids);
@@ -1408,10 +1326,6 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
     return {
       parentOf,
       stringOf,
-      physicalParentOf,
-      physicalStringOf,
-      canonicalUidOf,
-      canonicalStringOf,
       mirrorsOf,
       issues
     };
@@ -1457,10 +1371,8 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
       choices.add(rawParentUid);
       parentChoices.set(uid, choices);
     }
-    const ambiguousParentUids = /* @__PURE__ */ new Set();
     for (const [uid, choices] of parentChoices) {
       if (choices.size > 1) {
-        ambiguousParentUids.add(uid);
         issues.push({
           code: "ambiguous-parent",
           taskUid: uid,
@@ -1472,17 +1384,9 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
       }
     }
     for (const [uid, rawParentUid, rawParentString] of relevantParentRows) {
-      if (!ambiguousParentUids.has(uid)) {
-        physicalParentOf[uid] = rawParentUid;
-        physicalStringOf[rawParentUid] = rawParentString;
-      }
       const referenced = referencedBlockUid(rawParentString);
       const parentUid = referenced || rawParentUid;
       const parentString = referenced ? referencedStrings[parentUid] : rawParentString;
-      if (referenced && typeof parentString === "string") {
-        canonicalUidOf[rawParentUid] = parentUid;
-        canonicalStringOf[rawParentUid] = parentString;
-      }
       next.add(rawParentUid);
       parentOf[uid] = parentUid;
       if (referenced && typeof parentString !== "string") {
@@ -1550,10 +1454,6 @@ function readHierarchy(taskUids, { includeSeedStrings = false } = {}) {
   return {
     parentOf,
     stringOf,
-    physicalParentOf,
-    physicalStringOf,
-    canonicalUidOf,
-    canonicalStringOf,
     mirrorsOf,
     issues
   };
@@ -1839,34 +1739,7 @@ function refresh({ entries, notify: shouldNotify = true } = {}) {
     console.error("[roam-logbook] could not refresh clocks", error);
     return running;
   }
-  const previousContext = new Map(
-    entriesSnapshot.filter((entry) => Array.isArray(entry?.contextPath)).map((entry) => [entry.taskUid, entry.contextPath])
-  );
-  if (entries === void 0 && all.length > 0) {
-    try {
-      const hierarchy = readHierarchy([...new Set(all.map((entry) => entry.taskUid))]);
-      const contextPaths = contextPathsFromHierarchy(
-        all.map((entry) => entry.taskUid),
-        hierarchy
-      );
-      all = all.map((entry) => ({
-        ...entry,
-        contextPath: contextPaths.get(entry.taskUid) || []
-      }));
-    } catch (error) {
-      console.warn("[roam-logbook] context path lookup failed; timing remains available", error);
-      all = all.map((entry) => ({
-        ...entry,
-        contextPath: previousContext.get(entry.taskUid) || []
-      }));
-    }
-  } else {
-    all = all.map((entry) => ({
-      ...entry,
-      contextPath: Array.isArray(entry.contextPath) ? entry.contextPath : previousContext.get(entry.taskUid) || []
-    }));
-  }
-  entriesSnapshot = all;
+  entriesSnapshot = all.map((entry) => ({ ...entry }));
   const focused = chooseFocusedEntry(entriesSnapshot);
   running = focused ? [{ ...focused }] : [];
   lastRefreshStatus = { ok: true, error: null };
@@ -3701,7 +3574,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.52";
+var PLUGIN_VERSION = "0.9.0-beta.53";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -6298,66 +6171,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
     white-space: nowrap;
 }
 
-.rlb-context-breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    color: var(--rlb-muted);
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.rlb-context-breadcrumb__separator {
-    flex: 0 0 auto;
-    color: var(--rlb-muted);
-    opacity: 0.72;
-}
-
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment {
-    flex: 0 1 auto;
-    min-width: 0;
-    min-height: 16px;
-    height: auto;
-    max-width: 100%;
-    margin: 0;
-    padding: 0 2px !important;
-    overflow: hidden;
-    color: var(--rlb-muted);
-    font-size: inherit;
-    font-weight: inherit;
-    line-height: 1.2;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:hover,
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:focus-visible,
-.bp3-button.bp3-minimal.rlb-context-breadcrumb__segment:active {
-    color: var(--rlb-surface-link-hover);
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-run--with-context .rlb-run__title {
-    grid-row: 2;
-}
-
-.rlb-run--with-context .rlb-run__meta {
-    grid-row: 3;
-}
-
-.rlb-run--with-context .rlb-run__actions {
-    grid-row: 1 / span 3;
-}
-
 .bp3-button.bp3-minimal.rlb-run__title {
     grid-column: 1;
     grid-row: 1;
@@ -6378,16 +6191,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 2px;
     background: transparent !important;
     box-shadow: none !important;
-}
-
-/*
- * Context rows use three explicit content tracks. This selector deliberately
- * carries the row state plus the Blueprint button classes so a late Roam
- * button rule cannot place the title back on the breadcrumb's first track.
- */
-.rlb-run.rlb-run--with-context .bp3-button.bp3-minimal.rlb-run__title {
-    grid-row: 2;
-    min-width: 0;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {
@@ -6527,10 +6330,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
 
 .rlb-run--inline-meta .rlb-run__actions {
     grid-row: 1;
-}
-
-.rlb-run--with-context.rlb-run--inline-meta .rlb-run__actions {
-    grid-row: 1 / span 3;
 }
 
 .rlb-run__actions .rlb-run__checkout {
@@ -6678,58 +6477,6 @@ var SURFACE = String.raw`/* ---- popover ---- */
 .rlb-today__toggle:focus-visible {
     color: var(--rlb-surface-link-hover);
     background: var(--rlb-surface-hover);
-}
-
-.rlb-today__breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    padding: 1px 4px 0;
-    color: var(--rlb-muted);
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.rlb-context-breadcrumb__segment {
-    display: inline-block !important;
-    flex: 0 1 auto;
-    min-width: 0 !important;
-    max-width: 100%;
-    overflow: hidden;
-    padding: 0 !important;
-    color: var(--rlb-muted);
-    font-size: inherit;
-    font-weight: inherit;
-    line-height: inherit;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-context-breadcrumb__segment:hover,
-.rlb-context-breadcrumb__segment:focus-visible,
-.rlb-context-breadcrumb__segment:active {
-    color: var(--rlb-surface-link-hover);
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-.rlb-context-breadcrumb__segment:focus-visible {
-    outline: 1px solid currentColor;
-    outline-offset: 1px;
-}
-
-.rlb-context-breadcrumb__separator {
-    flex: 0 0 auto;
-    color: var(--rlb-muted);
-    opacity: 0.72;
 }
 
 .bp3-button.bp3-minimal.rlb-today__title {
@@ -8020,38 +7767,6 @@ var renderTitle = (row, onOpenTask) => {
   );
   return taskButton;
 };
-var renderContextPath = (path, onOpenTask, className = "rlb-context-breadcrumb") => {
-  const segments = normalizeContextPath(path);
-  if (segments.length === 0)
-    return null;
-  const breadcrumb = el("nav", className);
-  breadcrumb.setAttribute("aria-label", "Context path");
-  for (const [index, segment] of segments.entries()) {
-    if (index > 0) {
-      const separator = el("span", "rlb-context-breadcrumb__separator", "\u203A");
-      separator.setAttribute("aria-hidden", "true");
-      breadcrumb.appendChild(separator);
-    }
-    const label = formatDisplayTitle({
-      taskString: segment.string,
-      title: segment.title,
-      taskUid: segment.uid
-    });
-    const link = button(
-      "bp3-button bp3-minimal rlb-context-breadcrumb__segment",
-      label,
-      (event) => {
-        event.stopPropagation();
-        onOpenTask?.(segment.uid, event, { context: true });
-      },
-      { ariaLabel: `Open parent block: ${label}` }
-    );
-    link.dataset.action = "context-open";
-    link.dataset.contextUid = segment.uid;
-    breadcrumb.appendChild(link);
-  }
-  return breadcrumb;
-};
 var renderTodayRow = (row, options) => {
   const node = row.node;
   const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
@@ -8081,9 +7796,6 @@ var renderTodayRow = (row, options) => {
     rail.appendChild(el("span", "rlb-today__spacer"));
   }
   const content = el("div", "rlb-today__content");
-  const breadcrumb = row.depth === 0 ? renderContextPath(node.contextPath, options.onOpenTask, "rlb-today__breadcrumb") : null;
-  if (breadcrumb)
-    content.appendChild(breadcrumb);
   const titleButton = button(
     "bp3-button bp3-minimal rlb-today__title",
     title,
@@ -8144,11 +7856,6 @@ var renderRunningRow = (row, now, options) => {
   if (started.datetime)
     startedNode.dateTime = started.datetime;
   appendMetaNodes(meta, [primary, startedNode]);
-  const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, "rlb-run__context");
-  if (breadcrumb) {
-    node.classList.add("rlb-run--with-context");
-    body.appendChild(breadcrumb);
-  }
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   const checkout = button(
@@ -8206,11 +7913,6 @@ var renderRecentRow = (row, now, options) => {
     endedNode.dateTime = ended.datetime;
   endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
   meta.appendChild(endedNode);
-  const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, "rlb-run__context");
-  if (breadcrumb) {
-    node.classList.add("rlb-run--with-context");
-    body.appendChild(breadcrumb);
-  }
   body.append(renderTitle(row, options.onOpenTask), meta);
   const actions = el("div", "rlb-run__actions");
   if (row.status === "DONE") {
@@ -8251,7 +7953,6 @@ function buildSessionSurfaceModel({
     taskString: entry.taskString,
     title: entry.title,
     status: entry.status ?? null,
-    contextPath: normalizeContextPath(entry.contextPath),
     entry
   }));
   const recentRows = recentItems.map((entry) => ({
@@ -8261,7 +7962,6 @@ function buildSessionSurfaceModel({
     taskString: entry.taskString,
     title: entry.title,
     status: entry.status ?? null,
-    contextPath: normalizeContextPath(entry.contextPath),
     entry
   }));
   return {

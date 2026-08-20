@@ -13,7 +13,6 @@ import { findStaleClocks } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
 import { flattenTodayRows } from './today-todos.js';
-import { normalizeContextPath } from './context-path.js';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
@@ -75,39 +74,6 @@ const renderTitle = (row, onOpenTask) => {
     return taskButton;
 };
 
-const renderContextPath = (path, onOpenTask, className = 'rlb-context-breadcrumb') => {
-    const segments = normalizeContextPath(path);
-    if (segments.length === 0) return null;
-
-    const breadcrumb = el('nav', className);
-    breadcrumb.setAttribute('aria-label', 'Context path');
-    for (const [index, segment] of segments.entries()) {
-        if (index > 0) {
-            const separator = el('span', 'rlb-context-breadcrumb__separator', '›');
-            separator.setAttribute('aria-hidden', 'true');
-            breadcrumb.appendChild(separator);
-        }
-        const label = formatDisplayTitle({
-            taskString: segment.string,
-            title: segment.title,
-            taskUid: segment.uid,
-        });
-        const link = button(
-            'bp3-button bp3-minimal rlb-context-breadcrumb__segment',
-            label,
-            event => {
-                event.stopPropagation();
-                onOpenTask?.(segment.uid, event, { context: true });
-            },
-            { ariaLabel: `Open parent block: ${label}` }
-        );
-        link.dataset.action = 'context-open';
-        link.dataset.contextUid = segment.uid;
-        breadcrumb.appendChild(link);
-    }
-    return breadcrumb;
-};
-
 const renderTodayRow = (row, options) => {
     const node = row.node;
     const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
@@ -139,14 +105,6 @@ const renderTodayRow = (row, options) => {
     }
 
     const content = el('div', 'rlb-today__content');
-    // Visible child rows already communicate their parent through the tree
-    // rail/indentation. Keep contextPath on the model, but avoid repeating the
-    // same hierarchy in every descendant row; roots still need page-context
-    // breadcrumbs when their physical path is outside the visible task tree.
-    const breadcrumb = row.depth === 0
-        ? renderContextPath(node.contextPath, options.onOpenTask, 'rlb-today__breadcrumb')
-        : null;
-    if (breadcrumb) content.appendChild(breadcrumb);
     const titleButton = button(
         'bp3-button bp3-minimal rlb-today__title',
         title,
@@ -211,11 +169,6 @@ const renderRunningRow = (row, now, options) => {
     startedNode.setAttribute('aria-label', startedDetails);
     if (started.datetime) startedNode.dateTime = started.datetime;
     appendMetaNodes(meta, [primary, startedNode]);
-    const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, 'rlb-run__context');
-    if (breadcrumb) {
-        node.classList.add('rlb-run--with-context');
-        body.appendChild(breadcrumb);
-    }
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
@@ -277,11 +230,6 @@ const renderRecentRow = (row, now, options) => {
     if (ended.datetime) endedNode.dateTime = ended.datetime;
     endedNode.dataset.openLineEnd = String(entry.end instanceof Date ? entry.end.getTime() : entry.end);
     meta.appendChild(endedNode);
-    const breadcrumb = renderContextPath(row.contextPath, options.onOpenTask, 'rlb-run__context');
-    if (breadcrumb) {
-        node.classList.add('rlb-run--with-context');
-        body.appendChild(breadcrumb);
-    }
     body.append(renderTitle(row, options.onOpenTask), meta);
 
     const actions = el('div', 'rlb-run__actions');
@@ -327,7 +275,6 @@ export function buildSessionSurfaceModel({
         taskString: entry.taskString,
         title: entry.title,
         status: entry.status ?? null,
-        contextPath: normalizeContextPath(entry.contextPath),
         entry,
     }));
     const recentRows = recentItems.map(entry => ({
@@ -337,7 +284,6 @@ export function buildSessionSurfaceModel({
         taskString: entry.taskString,
         title: entry.title,
         status: entry.status ?? null,
-        contextPath: normalizeContextPath(entry.contextPath),
         entry,
     }));
     return {

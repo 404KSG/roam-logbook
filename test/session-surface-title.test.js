@@ -104,15 +104,11 @@ test('Timing and Parallel Thread buttons expose the same bracket-preserving visi
     assert.equal(root.querySelectorAll('.rlb-run__title a').length, 0);
     assert.ok(titles.every(node => node.tagName === 'BUTTON'));
     assert.ok(titles.every(node => node.title === ''));
-    assert.deepEqual(
-        [...root.querySelectorAll('.rlb-run__context')].map(node =>
-            [...node.querySelectorAll('.rlb-context-breadcrumb__segment')].map(segment => segment.textContent)
-        ),
-        [
-            ['[[Daily Log]]', '03 - Daily Tasks'],
-            ['Project'],
-        ]
-    );
+    assert.equal('contextPath' in model.focusedRows[0], false);
+    assert.equal('contextPath' in model.recentRows[0], false);
+    assert.equal(root.querySelector('.rlb-run__context'), null);
+    assert.equal(root.querySelector('.rlb-context-breadcrumb'), null);
+    assert.equal(root.querySelector('[data-action="context-open"]'), null);
 
     const completed = root.querySelector('.rlb-run--recent .rlb-run__completed');
     assert.ok(completed, 'a DONE Parallel Thread exposes a completed status indicator');

@@ -15,6 +15,7 @@ export function installGraph(blocks = []) {
     const pageUids = new Map();
     const pullWatches = new Map();
     const pullCalls = { pull: 0, pullMany: 0, fastQ: 0 };
+    const queryLog = [];
 
     const nextOrderByParent = new Map();
     for (const block of blocks) {
@@ -87,6 +88,7 @@ export function installGraph(blocks = []) {
     };
 
     const q = (datalog, ...args) => {
+        queryLog.push(datalog);
         if (
             datalog.includes(':find ?page-uid ?uid ?string ?order ?parent-uid') &&
             datalog.includes('[?block :block/page ?page]')
@@ -244,6 +246,7 @@ export function installGraph(blocks = []) {
         pullCount: () => pullCalls.pull,
         pullManyCount: () => pullCalls.pullMany,
         fastQueryCount: () => pullCalls.fastQ,
+        queryLog: () => [...queryLog],
     };
 }
 

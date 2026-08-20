@@ -69,7 +69,7 @@ test('bare references provide unfinished task context without showing the mirror
     assert.equal(model.nodes.some(node => node.uid === 'mirror-1'), false);
 });
 
-test('Today nodes expose root-to-parent hierarchy and complete physical context paths', () => {
+test('Today nodes expose root-to-parent hierarchy without physical context paths', () => {
     const model = buildTodayTodoTree([
         todo('root-path', 'Root', [
             plain('note-path', 'context', [
@@ -79,7 +79,7 @@ test('Today nodes expose root-to-parent hierarchy and complete physical context 
     ]);
 
     assert.deepEqual(model.nodes.find(node => node.uid === 'root-path').ancestorPath, []);
-    assert.deepEqual(model.nodes.find(node => node.uid === 'root-path').contextPath, []);
+    assert.equal('contextPath' in model.nodes.find(node => node.uid === 'root-path'), false);
     assert.deepEqual(
         model.nodes.find(node => node.uid === 'child-path').ancestorPath.map(node => node.uid),
         ['root-path']
@@ -88,13 +88,10 @@ test('Today nodes expose root-to-parent hierarchy and complete physical context 
         model.nodes.find(node => node.uid === 'leaf-path').ancestorPath.map(node => node.uid),
         ['root-path', 'child-path']
     );
-    assert.deepEqual(
-        model.nodes.find(node => node.uid === 'leaf-path').contextPath.map(node => node.uid),
-        ['root-path', 'note-path', 'child-path']
-    );
+    assert.ok(model.nodes.every(node => !('contextPath' in node)));
 });
 
-test('Today context paths preserve plain, TODO, and DONE physical ancestors', () => {
+test('Today tree keeps physical ancestors structural without exposing breadcrumb metadata', () => {
     const model = buildTodayTodoTree([
         plain('daily-log', '[[Daily Log]]', [
             plain('daily-section', '03 - Daily Tasks', [
@@ -110,19 +107,9 @@ test('Today context paths preserve plain, TODO, and DONE physical ancestors', ()
         ]),
     ]);
 
-    const project = model.nodes.find(node => node.uid === 'project');
     const leaf = model.nodes.find(node => node.uid === 'leaf');
-    assert.deepEqual(project.contextPath.map(segment => segment.string), [
-        '[[Daily Log]]',
-        '03 - Daily Tasks',
-    ]);
-    assert.deepEqual(leaf.contextPath.map(segment => segment.string), [
-        '[[Daily Log]]',
-        '03 - Daily Tasks',
-        '{{[[TODO]]}} Project',
-        '{{[[DONE]]}} Finished branch',
-    ]);
-    assert.equal(leaf.contextPath.some(segment => segment.string === 'August 20th, 2026'), false);
+    assert.deepEqual(leaf.ancestorPath.map(node => node.uid), ['project']);
+    assert.ok(model.nodes.every(node => !('contextPath' in node)));
 });
 
 test('collapse defaults to roots, while the current Timing Line branch is expanded', () => {

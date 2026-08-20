@@ -1,6 +1,6 @@
 # Task Tracker – 404KSG
 
-Current package version: **0.9.0-beta.52**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.53**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Org-mode style clock tracking for Roam Research TODOs. Right-click a task to clock in, watch the session run in the topbar, and add it all up in a Roam-native dashboard.
@@ -24,7 +24,7 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.52 keeps complete context in Active Threads, removes redundant child breadcrumbs from Today’s visible tree, and restores clear spacing between the toolbar, Timing card, title, and metadata; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.53 removes context breadcrumbs and their extra ancestry lookup from the compact work surfaces, while retaining Today hierarchy, Dashboard roll-ups, and parent-DONE automatic Clock Out; until acceptance, use its shorthand only for non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,

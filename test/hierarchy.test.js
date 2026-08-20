@@ -14,7 +14,7 @@ import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 installGraph();
 
 const clock = await import('../src/clock.js');
-const { readAllEntries, readHierarchy } = await import('../src/entries.js');
+const { readAllEntries, readDashboardSnapshot, readHierarchy } = await import('../src/entries.js');
 const { buildDashboard, flattenForest } = await import('../src/stats.js');
 
 const TODO = title => `{{[[TODO]]}} ${title}`;
@@ -37,6 +37,35 @@ function treeOf() {
 }
 
 test.after(() => uninstallGraph());
+
+test('readHierarchy keeps roll-up and completion ancestry while dropping physical breadcrumb maps', () => {
+    installGraph([
+        { uid: 'hier-parent', string: TODO('Parent'), parent: null },
+        { uid: 'hier-child', string: TODO('Child'), parent: 'hier-parent' },
+    ]);
+
+    const hierarchy = readHierarchy(['hier-child']);
+    assert.equal(hierarchy.parentOf['hier-child'], 'hier-parent');
+    assert.equal(hierarchy.stringOf['hier-parent'], TODO('Parent'));
+    assert.equal('canonicalUidOf' in hierarchy, false);
+    assert.equal('physicalParentOf' in hierarchy, false);
+    assert.equal('physicalStringOf' in hierarchy, false);
+});
+
+test('readDashboardSnapshot keeps hierarchy for roll-up without mapping context paths', async () => {
+    installGraph([
+        { uid: 'snapshot-parent', string: TODO('Parent'), parent: null },
+        { uid: 'snapshot-child', string: TODO('Child'), parent: 'snapshot-parent' },
+    ]);
+    clock.reset();
+    clock.refresh();
+    await clock.clockIn('snapshot-child', { now: at(9) });
+
+    const snapshot = readDashboardSnapshot();
+    assert.equal(snapshot.hierarchy.parentOf['snapshot-child'], 'snapshot-parent');
+    assert.ok(snapshot.entries.length > 0);
+    assert.ok(snapshot.entries.every(entry => !('contextPath' in entry)));
+});
 
 test('real sub-task nesting rolls up through a plain intermediate block', async () => {
     installGraph([

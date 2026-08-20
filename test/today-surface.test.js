@@ -181,7 +181,7 @@ test('Today view switches in place, collapses hierarchy, and exposes icon-only P
     unmount(dom);
 });
 
-test('Today breadcrumbs render only for root context and not visible child rows', () => {
+test('Today rows render without breadcrumb DOM while preserving tree folding', () => {
     const { dom, root } = mount();
     const tree = buildTodayTodoTree(
         [
@@ -236,13 +236,11 @@ test('Today breadcrumbs render only for root context and not visible child rows'
     const rootRow = root.querySelector('[data-task-uid="root-breadcrumb"]');
     const targetRow = root.querySelector('[data-task-uid="target-breadcrumb"]');
     const childRow = root.querySelector('[data-task-uid="child-breadcrumb"]');
-    assert.equal(
-        contextualRootRow.querySelector('.rlb-today__breadcrumb')?.textContent,
-        'Project context'
-    );
+    assert.equal(contextualRootRow.querySelector('.rlb-today__breadcrumb'), null);
     assert.equal(rootRow.querySelector('.rlb-today__breadcrumb'), null);
     assert.equal(targetRow.querySelector('.rlb-today__breadcrumb'), null);
     assert.equal(childRow.querySelector('.rlb-today__breadcrumb'), null);
+    assert.equal(root.querySelector('[data-action="context-open"]'), null);
     const title = childRow.querySelector('.rlb-today__title');
     assert.equal(title?.textContent, 'Child');
     assert.equal(title?.getAttribute('aria-label'), 'Open this block: Child');

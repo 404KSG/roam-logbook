@@ -861,8 +861,8 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             <div class="rlb-surface__list" role="group" aria-label="Active Threads">
                 <section class="rlb-surface__section rlb-surface__section--focused" aria-label="TIMING">
                     <div class="rlb-surface__section-label">TIMING</div>
-                    <div class="rlb-run rlb-run--inline-meta rlb-run--with-context rlb-run--overrun" data-session-state="running">
-                        <div class="rlb-run__body"><nav class="rlb-run__context" aria-label="Context path"><button class="bp3-button bp3-minimal rlb-context-breadcrumb__segment">Project</button><span class="rlb-context-breadcrumb__separator" aria-hidden="true">›</span><button class="bp3-button bp3-minimal rlb-context-breadcrumb__segment">Work</button></nav><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div>
+                    <div class="rlb-run rlb-run--inline-meta rlb-run--overrun" data-session-state="running">
+                        <div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div>
                         <div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div>
                     </div>
                 </section>
@@ -895,8 +895,6 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             const focusedStartedStyle = getComputedStyle(focused.querySelector('.rlb-run__started'));
             const focusedTitle = focused.querySelector('.rlb-run__title');
             const focusedTitleRect = rect(focusedTitle);
-            const focusedContext = focused.querySelector('.rlb-run__context');
-            const focusedContextRect = rect(focusedContext);
             const focusedMeta = focused.querySelector('.rlb-run__meta');
             const focusedMetaRect = rect(focusedMeta);
             const focusedActions = focused.querySelector('.rlb-run__actions');
@@ -941,11 +939,9 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                 focusedCount: focusedSection.querySelectorAll('.rlb-run').length,
                 recentCount: recentSection.querySelectorAll('.rlb-run').length,
                 statusCount: list.querySelectorAll('.rlb-run__status').length,
-                contextGridRow: getComputedStyle(focusedContext).gridRow,
                 titleGridRow: getComputedStyle(focusedTitle).gridRow,
                 metaGridRow: getComputedStyle(focusedMeta).gridRow,
                 actionsGridRow: getComputedStyle(focusedActions).gridRow,
-                contextAboveTitle: focusedContextRect.bottom <= focusedTitleRect.top + 0.5,
                 titleAboveMeta: focusedTitleRect.bottom <= focusedMetaRect.top + 0.5,
                 titleStartsAtRowContent: focusedTitleRect.left >= focusedRect.left,
                 titleBeforeActions: focusedTitleRect.right <= focusedActionsRect.left + .5,
@@ -1014,11 +1010,9 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.focusedCount, 1, context);
             assert.equal(geometry.recentCount, 1, context);
             assert.equal(geometry.statusCount, 0, context);
-            assert.equal(geometry.contextGridRow, '1', context);
-            assert.equal(geometry.titleGridRow, '2', context);
-            assert.equal(geometry.metaGridRow, '3', context);
-            assert.equal(geometry.actionsGridRow, '1 / span 3', context);
-            assert.equal(geometry.contextAboveTitle, true, context);
+            assert.equal(geometry.titleGridRow, '1', context);
+            assert.equal(geometry.metaGridRow, '2', context);
+            assert.equal(geometry.actionsGridRow, '1', context);
             assert.equal(geometry.titleAboveMeta, true, context);
             assert.equal(geometry.titleStartsAtRowContent, true, context);
             assert.equal(geometry.titleBeforeActions, true, context);
@@ -1077,7 +1071,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                         <div class="rlb-today__rail">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Parent"></button>
                             <div class="rlb-today__content">
-                                <div class="rlb-today__breadcrumb" aria-hidden="true">A very long project › B › … › Immediate parent</div>
                                 <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested parent that must keep a usable title region</button>
                             </div>
                         </div>
@@ -1098,7 +1091,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
         const rows = [...popover.querySelectorAll('.rlb-today__row')];
         const actions = rows.map(row => row.querySelector('.rlb-today__action'));
         const titles = rows.map(row => row.querySelector('.rlb-today__title'));
-        const breadcrumbs = rows.map(row => row.querySelector('.rlb-today__breadcrumb'));
         const rails = rows.map(row => row.querySelector('.rlb-today__rail'));
         const rowRects = rows.map(rect);
         const actionRects = actions.map(rect);
@@ -1120,12 +1112,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
             actionWidths: actionRects.map(action => action.width),
             titleWidths: titleRects.map(title => title.width),
             titleScrolls: titles.map(title => title.scrollWidth > title.clientWidth),
-            breadcrumbCount: breadcrumbs.filter(Boolean).length,
-            breadcrumbWhiteSpace: breadcrumbs.filter(Boolean).map(breadcrumb => getComputedStyle(breadcrumb).whiteSpace),
-            breadcrumbAboveTitle: rows.map((row, index) => {
-                const breadcrumb = breadcrumbs[index];
-                return !breadcrumb || rect(breadcrumb).bottom <= rect(titles[index]).top;
-            }),
             titleInkStartsInside: titles.map((title, index) => {
                 const ink = titleInk(title);
                 return ink.left >= titleRects[index].left - 0.5;
@@ -1149,9 +1135,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
     assert.ok(desktop.actionWidths.every(width => Math.abs(width - 32) <= 0.5), JSON.stringify({ desktop }));
     assert.ok(desktop.titleWidths[0] > 260, JSON.stringify({ desktop }));
     assert.equal(desktop.titleScrolls[0], true, JSON.stringify({ desktop }));
-    assert.equal(desktop.breadcrumbCount, 1, JSON.stringify({ desktop }));
-    assert.deepEqual(desktop.breadcrumbWhiteSpace, ['nowrap'], JSON.stringify({ desktop }));
-    assert.deepEqual(desktop.breadcrumbAboveTitle, [true, true], JSON.stringify({ desktop }));
     assert.deepEqual(desktop.titleInkStartsInside, [true, true], JSON.stringify({ desktop }));
     assert.deepEqual(desktop.railOverflow, [false, false], JSON.stringify({ desktop }));
     assert.ok(desktop.actionRightDelta <= 0.5, JSON.stringify({ desktop }));
@@ -1171,9 +1154,6 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
         assert.equal(geometry.titleBeforeAction, true, context);
         assert.ok(geometry.actionWidths.every(actionWidth => Math.abs(actionWidth - 32) <= 0.5), context);
         assert.deepEqual(geometry.titleInkStartsInside, [true, true], context);
-        assert.equal(geometry.breadcrumbCount, 1, context);
-        assert.deepEqual(geometry.breadcrumbWhiteSpace, ['nowrap'], context);
-        assert.deepEqual(geometry.breadcrumbAboveTitle, [true, true], context);
         assert.deepEqual(geometry.railOverflow, [false, false], context);
         assert.ok(geometry.actionRightDelta <= 0.5, context);
         assert.equal(geometry.hiddenCountNodes, 0, context);
@@ -1221,7 +1201,6 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
                         <div class="rlb-today__rail">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Parent"></button>
                             <div class="rlb-today__content">
-                                <div class="rlb-today__breadcrumb" aria-hidden="true">Project › … › Parent</div>
                                 <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested parent with a fixed action rail</button>
                             </div>
                         </div>

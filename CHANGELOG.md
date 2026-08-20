@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0-beta.53 — 2026-08-20
+
+### Lean work surfaces
+
+- Removed context breadcrumbs from Active Threads, Timing, Parallel Threads,
+  and Today so compact task surfaces show only the task hierarchy and timing
+  controls that drive the workflow.
+- Removed breadcrumb-only model fields, DOM, styles, navigation handlers, and
+  the additional batched ancestry lookup performed during Active Threads
+  refresh.
+- Preserved Today expand/collapse hierarchy, Dashboard task roll-ups, and the
+  confirmed parent-tree checks used by automatic Clock Out when a parent is
+  marked DONE.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.52 — 2026-08-20
 
 ### Active Threads and Today hierarchy

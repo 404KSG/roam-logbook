@@ -8,7 +8,6 @@
 
 import { readAllEntries, readHierarchy } from './entries.js';
 import { buildActiveWork, chooseFocusedEntry } from './active-work.js';
-import { contextPathsFromHierarchy } from './context-path.js';
 import { DRAWER_LABEL, formatClockLine, isDrawerBlock, isTaskBlock, taskStatus } from './org.js';
 import { createBlock, deleteBlock, GraphReadError, getBlockString, getChildren, resolveReferencedUid, updateBlock } from './roam.js';
 import {
@@ -163,44 +162,7 @@ export function refresh({ entries, notify: shouldNotify = true } = {}) {
         return running;
     }
 
-    // Context metadata is a snapshot concern, never a ticker concern. A
-    // dashboard can provide the hierarchy it already read; a normal Active
-    // Work refresh performs one batched parent walk. If that optional lookup
-    // fails, timing remains authoritative and the rows simply render without
-    // breadcrumbs.
-    const previousContext = new Map(
-        entriesSnapshot
-            .filter(entry => Array.isArray(entry?.contextPath))
-            .map(entry => [entry.taskUid, entry.contextPath])
-    );
-    if (entries === undefined && all.length > 0) {
-        try {
-            const hierarchy = readHierarchy([...new Set(all.map(entry => entry.taskUid))]);
-            const contextPaths = contextPathsFromHierarchy(
-                all.map(entry => entry.taskUid),
-                hierarchy
-            );
-            all = all.map(entry => ({
-                ...entry,
-                contextPath: contextPaths.get(entry.taskUid) || [],
-            }));
-        } catch (error) {
-            console.warn('[roam-logbook] context path lookup failed; timing remains available', error);
-            all = all.map(entry => ({
-                ...entry,
-                contextPath: previousContext.get(entry.taskUid) || [],
-            }));
-        }
-    } else {
-        all = all.map(entry => ({
-            ...entry,
-            contextPath: Array.isArray(entry.contextPath)
-                ? entry.contextPath
-                : previousContext.get(entry.taskUid) || [],
-        }));
-    }
-
-    entriesSnapshot = all;
+    entriesSnapshot = all.map(entry => ({ ...entry }));
     const focused = chooseFocusedEntry(entriesSnapshot);
     // The graph may contain legacy overlapping CLOCKs. Keep the public running
     // seam single-focused immediately; reconcileOpenClocks() then closes the
