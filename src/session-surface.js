@@ -12,7 +12,7 @@ import * as pomodoro from './pomodoro.js';
 import { findStaleClocks } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { formatElapsed, formatMinutesHuman, formatStarted } from './time.js';
-import { flattenTodayRows } from './today-todos.js';
+import { compactTodayBreadcrumb, flattenTodayRows } from './today-todos.js';
 
 export const sessionCount = count => `${count} Session${count === 1 ? '' : 's'}`;
 const SURFACE_TITLE = 'ACTIVE THREADS';
@@ -77,6 +77,11 @@ const renderTitle = (row, onOpenTask) => {
 const renderTodayRow = (row, options) => {
     const node = row.node;
     const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
+    const breadcrumbLabels = compactTodayBreadcrumb(
+        (node.ancestorPath || []).map(ancestor =>
+            formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
+        )
+    );
     const rowNode = el('div', 'rlb-today__row');
     rowNode.dataset.taskUid = node.uid;
     rowNode.style.setProperty('--rlb-today-depth', String(row.depth));
@@ -104,6 +109,12 @@ const renderTodayRow = (row, options) => {
         rail.appendChild(el('span', 'rlb-today__spacer'));
     }
 
+    const content = el('div', 'rlb-today__content');
+    if (breadcrumbLabels.length > 0) {
+        const breadcrumb = el('div', 'rlb-today__breadcrumb', breadcrumbLabels.join(' › '));
+        breadcrumb.setAttribute('aria-hidden', 'true');
+        content.appendChild(breadcrumb);
+    }
     const titleButton = button(
         'bp3-button bp3-minimal rlb-today__title',
         title,
@@ -111,7 +122,8 @@ const renderTodayRow = (row, options) => {
         { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
     );
     titleButton.dataset.action = 'today-open';
-    rail.appendChild(titleButton);
+    content.appendChild(titleButton);
+    rail.appendChild(content);
     rowNode.appendChild(rail);
 
     const action = el('div', 'rlb-today__action');

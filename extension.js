@@ -269,6 +269,7 @@ var makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
   sourceUid,
   status: "TODO",
   orderPath: [...orderPath],
+  ancestorPath: [],
   children: []
 });
 var appendTo = (parent, node, roots) => {
@@ -276,6 +277,20 @@ var appendTo = (parent, node, roots) => {
     parent.children.push(node);
   else
     roots.push(node);
+};
+var buildAncestorPath = (uid, visibleByUid, parentByUid) => {
+  const path = [];
+  const seen = /* @__PURE__ */ new Set([uid]);
+  let parentUid = parentByUid.get(uid) || null;
+  while (parentUid && !seen.has(parentUid)) {
+    seen.add(parentUid);
+    const parent = visibleByUid.get(parentUid);
+    if (!parent)
+      break;
+    path.unshift({ uid: parent.uid, string: parent.string });
+    parentUid = parentByUid.get(parentUid) || null;
+  }
+  return path;
 };
 function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
   const outputRoots = [];
@@ -324,8 +339,10 @@ function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
   };
   roots.slice().sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).forEach((root, index) => walk(root, null, [index]));
   const all = [...visibleByUid.values()];
-  for (const node of all)
+  for (const node of all) {
     node.hasChildren = node.children.length > 0;
+    node.ancestorPath = buildAncestorPath(node.uid, visibleByUid, parentByUid);
+  }
   return {
     roots: outputRoots,
     nodes: all,
@@ -346,6 +363,12 @@ function currentTodayPath(model, taskUid) {
     current = model.parentByUid?.get(current) || null;
   }
   return path;
+}
+function compactTodayBreadcrumb(labels = []) {
+  const clean = (Array.isArray(labels) ? labels : []).filter((label) => typeof label === "string" && label.trim()).map((label) => label.trim());
+  if (clean.length <= 3)
+    return clean;
+  return [clean[0], "\u2026", clean.at(-1)];
 }
 var walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {
   for (const node of nodes || []) {
@@ -6389,6 +6412,12 @@ var SURFACE = String.raw`/* ---- popover ---- */
     min-width: 0;
 }
 
+.rlb-today__content {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
 .rlb-today__toggle,
 .rlb-today__spacer {
     display: inline-flex !important;
@@ -6409,10 +6438,24 @@ var SURFACE = String.raw`/* ---- popover ---- */
     background: var(--rlb-surface-hover);
 }
 
+.rlb-today__breadcrumb {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px 4px 0;
+    color: var(--rlb-muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .bp3-button.bp3-minimal.rlb-today__title {
     display: block !important;
-    flex: 1 1 0;
-    width: 0;
+    width: 100%;
+    flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
@@ -7691,6 +7734,11 @@ var renderTitle = (row, onOpenTask) => {
 var renderTodayRow = (row, options) => {
   const node = row.node;
   const title = formatDisplayTitle({ taskString: node.string, taskUid: node.uid });
+  const breadcrumbLabels = compactTodayBreadcrumb(
+    (node.ancestorPath || []).map(
+      (ancestor) => formatDisplayTitle({ taskString: ancestor.string, taskUid: ancestor.uid })
+    )
+  );
   const rowNode = el("div", "rlb-today__row");
   rowNode.dataset.taskUid = node.uid;
   rowNode.style.setProperty("--rlb-today-depth", String(row.depth));
@@ -7716,6 +7764,12 @@ var renderTodayRow = (row, options) => {
   } else {
     rail.appendChild(el("span", "rlb-today__spacer"));
   }
+  const content = el("div", "rlb-today__content");
+  if (breadcrumbLabels.length > 0) {
+    const breadcrumb = el("div", "rlb-today__breadcrumb", breadcrumbLabels.join(" \u203A "));
+    breadcrumb.setAttribute("aria-hidden", "true");
+    content.appendChild(breadcrumb);
+  }
   const titleButton = button(
     "bp3-button bp3-minimal rlb-today__title",
     title,
@@ -7723,7 +7777,8 @@ var renderTodayRow = (row, options) => {
     { title: fullTaskLabel(title), ariaLabel: fullTaskLabel(title) }
   );
   titleButton.dataset.action = "today-open";
-  rail.appendChild(titleButton);
+  content.appendChild(titleButton);
+  rail.appendChild(content);
   rowNode.appendChild(rail);
   const action = el("div", "rlb-today__action");
   if (node.uid === options.currentTaskUid) {

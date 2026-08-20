@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     buildTodayTodoTree,
+    compactTodayBreadcrumb,
     currentTodayPath,
     dateToPageTitle,
     flattenTodayRows,
@@ -58,7 +59,39 @@ test('bare references provide unfinished task context without showing the mirror
     assert.deepEqual(model.roots[0].children.map(node => node.uid), ['target-1']);
     assert.equal(model.roots[0].children[0].string, '{{[[TODO]]}} Referenced task');
     assert.deepEqual(model.roots[0].children[0].children.map(node => node.uid), ['nested']);
+    assert.deepEqual(
+        model.nodes.find(node => node.uid === 'target-1').ancestorPath.map(node => node.uid),
+        ['project']
+    );
+    assert.deepEqual(
+        model.nodes.find(node => node.uid === 'nested').ancestorPath.map(node => node.uid),
+        ['project', 'target-1']
+    );
     assert.equal(model.nodes.some(node => node.uid === 'mirror-1'), false);
+});
+
+test('Today nodes expose root-to-parent ancestor paths and compact long breadcrumbs deterministically', () => {
+    const model = buildTodayTodoTree([
+        todo('root-path', 'Root', [
+            plain('note-path', 'context', [
+                todo('child-path', 'Child', [todo('leaf-path', 'Leaf')]),
+            ]),
+        ]),
+    ]);
+
+    assert.deepEqual(model.nodes.find(node => node.uid === 'root-path').ancestorPath, []);
+    assert.deepEqual(
+        model.nodes.find(node => node.uid === 'child-path').ancestorPath.map(node => node.uid),
+        ['root-path']
+    );
+    assert.deepEqual(
+        model.nodes.find(node => node.uid === 'leaf-path').ancestorPath.map(node => node.uid),
+        ['root-path', 'child-path']
+    );
+    assert.deepEqual(compactTodayBreadcrumb([]), []);
+    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C']), ['A', 'B', 'C']);
+    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D']), ['A', '…', 'D']);
+    assert.deepEqual(compactTodayBreadcrumb(['A', 'B', 'C', 'D', 'E']), ['A', '…', 'E']);
 });
 
 test('collapse defaults to roots, while the current Timing Line branch is expanded', () => {

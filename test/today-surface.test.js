@@ -181,6 +181,71 @@ test('Today view switches in place, collapses hierarchy, and exposes icon-only P
     unmount(dom);
 });
 
+test('Today breadcrumbs render above titles with formatted reference parents and decorative accessibility', () => {
+    const { dom, root } = mount();
+    const tree = buildTodayTodoTree(
+        [
+            {
+                uid: 'root-breadcrumb',
+                string: '{{[[TODO]]}} [[Project Page]] #[[Area]]',
+                order: 0,
+                children: [
+                    {
+                        uid: 'mirror-breadcrumb',
+                        string: '((target-breadcrumb))',
+                        order: 0,
+                        children: [
+                            { uid: 'child-breadcrumb', string: '{{[[TODO]]}} Child', order: 0, children: [] },
+                        ],
+                    },
+                ],
+            },
+        ],
+        {
+            referenceStrings: {
+                'target-breadcrumb': '{{[[TODO]]}} [[Referenced Page]] #[[Subtask]]',
+            },
+        }
+    );
+    const model = { ...tree, status: 'success' };
+
+    renderSessionSurface(
+        root,
+        buildSessionSurfaceModel({ now: new Date('2026-08-19T10:00:00') }),
+        {
+            view: 'today',
+            todayModel: model,
+            todayRows: flattenTodayRows(model, {
+                expanded: new Set(['root-breadcrumb', 'target-breadcrumb']),
+            }),
+            onOpenTask: () => {},
+            onStartToday: () => {},
+        }
+    );
+
+    const rootRow = root.querySelector('[data-task-uid="root-breadcrumb"]');
+    const targetRow = root.querySelector('[data-task-uid="target-breadcrumb"]');
+    const childRow = root.querySelector('[data-task-uid="child-breadcrumb"]');
+    assert.equal(rootRow.querySelector('.rlb-today__breadcrumb'), null);
+    assert.equal(
+        targetRow.querySelector('.rlb-today__breadcrumb')?.textContent,
+        '[[Project Page]] #[[Area]]'
+    );
+    const breadcrumb = childRow.querySelector('.rlb-today__breadcrumb');
+    const title = childRow.querySelector('.rlb-today__title');
+    assert.equal(
+        breadcrumb?.textContent,
+        '[[Project Page]] #[[Area]] › [[Referenced Page]] #[[Subtask]]'
+    );
+    assert.equal(breadcrumb?.getAttribute('aria-hidden'), 'true');
+    assert.equal(breadcrumb?.nextElementSibling, title);
+    assert.equal(title?.textContent, 'Child');
+    assert.equal(title?.getAttribute('aria-label'), 'Open this block: Child');
+    assert.equal(childRow.textContent.includes('{{[[TODO]]}}'), false);
+
+    unmount(dom);
+});
+
 test('Today current Timing Line branch is expanded and its indicator is non-interactive', () => {
     const { dom, root } = mount();
     const tree = buildTodayTodoTree([

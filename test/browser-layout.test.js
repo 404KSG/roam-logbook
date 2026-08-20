@@ -1047,7 +1047,9 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                     <div class="rlb-today__row" style="--rlb-today-depth:0" role="treeitem">
                         <div class="rlb-today__rail">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Project"></button>
-                            <button class="bp3-button bp3-minimal rlb-today__title">A long project title that should ellipsize on the right without pushing the action rail away</button>
+                            <div class="rlb-today__content">
+                                <button class="bp3-button bp3-minimal rlb-today__title">A long project title that should ellipsize on the right without pushing the action rail away</button>
+                            </div>
                         </div>
                         <div class="rlb-today__action">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
@@ -1056,7 +1058,10 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
                     <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
                         <div class="rlb-today__rail">
                             <span class="rlb-today__spacer"></span>
-                            <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child that must keep a usable title region</button>
+                            <div class="rlb-today__content">
+                                <div class="rlb-today__breadcrumb" aria-hidden="true">A very long project › B › … › Immediate parent</div>
+                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child that must keep a usable title region</button>
+                            </div>
                         </div>
                         <div class="rlb-today__action">
                             <span class="bp3-icon bp3-icon-time rlb-today__timing" role="img" aria-label="Currently timing"></span>
@@ -1075,6 +1080,7 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
         const rows = [...popover.querySelectorAll('.rlb-today__row')];
         const actions = rows.map(row => row.querySelector('.rlb-today__action'));
         const titles = rows.map(row => row.querySelector('.rlb-today__title'));
+        const breadcrumbs = rows.map(row => row.querySelector('.rlb-today__breadcrumb'));
         const rails = rows.map(row => row.querySelector('.rlb-today__rail'));
         const rowRects = rows.map(rect);
         const actionRects = actions.map(rect);
@@ -1096,6 +1102,12 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
             actionWidths: actionRects.map(action => action.width),
             titleWidths: titleRects.map(title => title.width),
             titleScrolls: titles.map(title => title.scrollWidth > title.clientWidth),
+            breadcrumbCount: breadcrumbs.filter(Boolean).length,
+            breadcrumbWhiteSpace: breadcrumbs.filter(Boolean).map(breadcrumb => getComputedStyle(breadcrumb).whiteSpace),
+            breadcrumbAboveTitle: rows.map((row, index) => {
+                const breadcrumb = breadcrumbs[index];
+                return !breadcrumb || rect(breadcrumb).bottom <= rect(titles[index]).top;
+            }),
             titleInkStartsInside: titles.map((title, index) => {
                 const ink = titleInk(title);
                 return ink.left >= titleRects[index].left - 0.5;
@@ -1119,6 +1131,9 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
     assert.ok(desktop.actionWidths.every(width => Math.abs(width - 32) <= 0.5), JSON.stringify({ desktop }));
     assert.ok(desktop.titleWidths[0] > 260, JSON.stringify({ desktop }));
     assert.equal(desktop.titleScrolls[0], true, JSON.stringify({ desktop }));
+    assert.equal(desktop.breadcrumbCount, 1, JSON.stringify({ desktop }));
+    assert.deepEqual(desktop.breadcrumbWhiteSpace, ['nowrap'], JSON.stringify({ desktop }));
+    assert.deepEqual(desktop.breadcrumbAboveTitle, [true, true], JSON.stringify({ desktop }));
     assert.deepEqual(desktop.titleInkStartsInside, [true, true], JSON.stringify({ desktop }));
     assert.deepEqual(desktop.railOverflow, [false, false], JSON.stringify({ desktop }));
     assert.ok(desktop.actionRightDelta <= 0.5, JSON.stringify({ desktop }));
@@ -1138,6 +1153,9 @@ test('Active Threads popover uses a natural desktop width and bounded Today rail
         assert.equal(geometry.titleBeforeAction, true, context);
         assert.ok(geometry.actionWidths.every(actionWidth => Math.abs(actionWidth - 32) <= 0.5), context);
         assert.deepEqual(geometry.titleInkStartsInside, [true, true], context);
+        assert.equal(geometry.breadcrumbCount, 1, context);
+        assert.deepEqual(geometry.breadcrumbWhiteSpace, ['nowrap'], context);
+        assert.deepEqual(geometry.breadcrumbAboveTitle, [true, true], context);
         assert.deepEqual(geometry.railOverflow, [false, false], context);
         assert.ok(geometry.actionRightDelta <= 0.5, context);
         assert.equal(geometry.hiddenCountNodes, 0, context);
@@ -1173,7 +1191,9 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
                     <div class="rlb-today__row" style="--rlb-today-depth:0" role="treeitem" aria-expanded="false">
                         <div class="rlb-today__rail">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-chevron-right rlb-today__toggle" aria-label="Expand Project"></button>
-                            <button class="bp3-button bp3-minimal rlb-today__title">A long project title that stays inside the flexible rail</button>
+                            <div class="rlb-today__content">
+                                <button class="bp3-button bp3-minimal rlb-today__title">A long project title that stays inside the flexible rail</button>
+                            </div>
                         </div>
                         <div class="rlb-today__action">
                             <button class="bp3-button bp3-minimal bp3-small bp3-icon-play rlb-today__play" aria-label="Start timing Project"></button>
@@ -1182,7 +1202,10 @@ test('Today bulk control is one stateful toggle with aligned actions at desktop 
                     <div class="rlb-today__row" style="--rlb-today-depth:8" role="treeitem">
                         <div class="rlb-today__rail">
                             <span class="rlb-today__spacer"></span>
-                            <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child with a fixed action rail</button>
+                            <div class="rlb-today__content">
+                                <div class="rlb-today__breadcrumb" aria-hidden="true">Project › … › Parent</div>
+                                <button class="bp3-button bp3-minimal rlb-today__title">A deeply nested child with a fixed action rail</button>
+                            </div>
                         </div>
                         <div class="rlb-today__action">
                             <span class="bp3-icon bp3-icon-time rlb-today__timing" role="img" aria-label="Currently timing"></span>

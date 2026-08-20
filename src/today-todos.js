@@ -32,12 +32,27 @@ const makeVisibleNode = ({ uid, string, sourceUid = uid, orderPath = [] }) => ({
     sourceUid,
     status: 'TODO',
     orderPath: [...orderPath],
+    ancestorPath: [],
     children: [],
 });
 
 const appendTo = (parent, node, roots) => {
     if (parent) parent.children.push(node);
     else roots.push(node);
+};
+
+const buildAncestorPath = (uid, visibleByUid, parentByUid) => {
+    const path = [];
+    const seen = new Set([uid]);
+    let parentUid = parentByUid.get(uid) || null;
+    while (parentUid && !seen.has(parentUid)) {
+        seen.add(parentUid);
+        const parent = visibleByUid.get(parentUid);
+        if (!parent) break;
+        path.unshift({ uid: parent.uid, string: parent.string });
+        parentUid = parentByUid.get(parentUid) || null;
+    }
+    return path;
 };
 
 /**
@@ -110,7 +125,10 @@ export function buildTodayTodoTree(roots = [], { referenceStrings = {} } = {}) {
         .forEach((root, index) => walk(root, null, [index]));
 
     const all = [...visibleByUid.values()];
-    for (const node of all) node.hasChildren = node.children.length > 0;
+    for (const node of all) {
+        node.hasChildren = node.children.length > 0;
+        node.ancestorPath = buildAncestorPath(node.uid, visibleByUid, parentByUid);
+    }
     return {
         roots: outputRoots,
         nodes: all,
@@ -132,6 +150,15 @@ export function currentTodayPath(model, taskUid) {
         current = model.parentByUid?.get(current) || null;
     }
     return path;
+}
+
+/** Keep the first and nearest parent when a breadcrumb has more than three layers. */
+export function compactTodayBreadcrumb(labels = []) {
+    const clean = (Array.isArray(labels) ? labels : [])
+        .filter(label => typeof label === 'string' && label.trim())
+        .map(label => label.trim());
+    if (clean.length <= 3) return clean;
+    return [clean[0], '…', clean.at(-1)];
 }
 
 const walkVisible = (nodes, rows, expanded, forcedPath, depth = 0) => {

@@ -679,6 +679,12 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     min-width: 0;
 }
 
+.rlb-today__content {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
 .rlb-today__toggle,
 .rlb-today__spacer {
     display: inline-flex !important;
@@ -699,10 +705,24 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     background: var(--rlb-surface-hover);
 }
 
+.rlb-today__breadcrumb {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px 4px 0;
+    color: var(--rlb-muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .bp3-button.bp3-minimal.rlb-today__title {
     display: block !important;
-    flex: 1 1 0;
-    width: 0;
+    width: 100%;
+    flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
