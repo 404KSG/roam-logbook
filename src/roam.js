@@ -449,7 +449,9 @@ const REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
 
 export const DAILY_NOTE_READ_LIMITS = Object.freeze({
     maxDepth: 24,
-    maxNodes: 500,
+    // A post-query node cap does not reduce the query's work. Callers may
+    // still provide an explicit diagnostic/test cap to readDailyNoteTree.
+    maxNodes: null,
 });
 
 const boundedReadError = message =>
@@ -459,6 +461,13 @@ const boundedReadError = message =>
 
 const normalizeBound = (value, fallback) =>
     Number.isInteger(value) && value > 0 ? value : fallback;
+
+// The page query is intentionally complete, so a node cap checked after the
+// query would not reduce graph work or the rows materialized by Roam. Keep a
+// caller-supplied cap available for diagnostics/tests, but never apply one by
+// default: ordinary large Daily Notes are valid input.
+const normalizeOptionalBound = value =>
+    Number.isInteger(value) && value > 0 ? value : null;
 
 const readDailyPageRows = pageTitle =>
     validateQueryRows(
@@ -487,32 +496,37 @@ const readReferencedBlockStrings = uids => {
 };
 
 /**
- * Read one page's bounded block tree and the strings for its bare references.
+ * Read one page's block tree and the strings for its bare references.
  *
  * The page title is an exact Datalog input. One page-scoped query returns the
  * direct-parent edge for every descendant, then the tree is rebuilt in memory
- * with hard depth/node caps. This avoids one Pull/query per nested block.
+ * with structural validation and a hard depth cap. A node cap is opt-in only:
+ * because this query already materializes every matching row, a default
+ * post-query cap would reject valid pages without reducing graph work.
  * Reference targets are a second, finite lookup because a daily note commonly
  * contains `((uid))` rather than a copied task string. A missing page is a
  * confirmed empty result; an unavailable or malformed read is not.
  */
 export function readDailyNoteTree(
     pageTitle,
-    { maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth, maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes } = {}
+    {
+        maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth,
+        maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes,
+    } = {}
 ) {
     if (typeof pageTitle !== 'string' || pageTitle.trim() === '') {
         return { ok: false, roots: null, pageUid: null, error: boundedReadError('Daily note title is required.') };
     }
 
     const depthLimit = normalizeBound(maxDepth, DAILY_NOTE_READ_LIMITS.maxDepth);
-    const nodeLimit = normalizeBound(maxNodes, DAILY_NOTE_READ_LIMITS.maxNodes);
+    const nodeLimit = normalizeOptionalBound(maxNodes);
 
     try {
         const rows = readDailyPageRows(pageTitle);
         if (rows.length === 0) {
             return { ok: true, pageUid: null, roots: [], referenceStrings: {} };
         }
-        if (rows.length > nodeLimit) {
+        if (nodeLimit !== null && rows.length > nodeLimit) {
             throw boundedReadError(
                 `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
             );

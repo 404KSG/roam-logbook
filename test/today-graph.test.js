@@ -51,6 +51,48 @@ test('Today read follows only a bounded page-anchored tree and resolves bare ref
     assert.ok(graph.fastQueryCount() <= 2, 'Today uses one page-tree query plus at most one finite reference query');
 });
 
+test('Today read accepts a legal 509-block page with maximum depth 9', () => {
+    const blocks = [
+        {
+            uid: 'large-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Large project',
+        },
+    ];
+
+    // Keep one branch at the real page depth while filling the page with
+    // ordinary sibling blocks. This is a valid tree, not malformed data.
+    for (let depth = 1; depth <= 9; depth += 1) {
+        blocks.push({
+            uid: `large-depth-${depth}`,
+            page: 'August 19th, 2026',
+            parent: depth === 1 ? 'large-root' : `large-depth-${depth - 1}`,
+            order: 0,
+            string: depth === 9 ? '{{[[TODO]]}} Deep task' : `context ${depth}`,
+        });
+    }
+    for (let index = 0; index < 499; index += 1) {
+        blocks.push({
+            uid: `large-sibling-${index}`,
+            page: 'August 19th, 2026',
+            parent: 'large-root',
+            order: index + 1,
+            string: `context sibling ${index}`,
+        });
+    }
+
+    assert.equal(blocks.length, 509);
+    installGraph(blocks);
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'), { maxDepth: 9 });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'success');
+    assert.equal(result.roots.length, 1);
+    assert.equal(result.roots[0].children.length, 500);
+});
+
 test('Today read rejects pages beyond its explicit node and depth bounds', () => {
     installGraph([
         { uid: 'bound-1', page: 'August 19th, 2026', parent: null, order: 0, string: '{{[[TODO]]}} One' },

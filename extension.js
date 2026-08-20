@@ -869,12 +869,15 @@ var REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
   [?b :block/string ?string]]`;
 var DAILY_NOTE_READ_LIMITS = Object.freeze({
   maxDepth: 24,
-  maxNodes: 500
+  // A post-query node cap does not reduce the query's work. Callers may
+  // still provide an explicit diagnostic/test cap to readDailyNoteTree.
+  maxNodes: null
 });
 var boundedReadError = (message) => new GraphReadError(message, {
   issue: graphReadIssue({ source: "daily-note", message })
 });
 var normalizeBound = (value, fallback) => Number.isInteger(value) && value > 0 ? value : fallback;
+var normalizeOptionalBound = (value) => Number.isInteger(value) && value > 0 ? value : null;
 var readDailyPageRows = (pageTitle) => validateQueryRows(
   queryOrThrow(DAILY_PAGE_TREE_QUERY, pageTitle),
   "daily note page tree",
@@ -890,18 +893,21 @@ var readReferencedBlockStrings = (uids) => {
   );
   return Object.fromEntries(rows.map(([uid, string]) => [uid, string]));
 };
-function readDailyNoteTree(pageTitle, { maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth, maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes } = {}) {
+function readDailyNoteTree(pageTitle, {
+  maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth,
+  maxNodes = DAILY_NOTE_READ_LIMITS.maxNodes
+} = {}) {
   if (typeof pageTitle !== "string" || pageTitle.trim() === "") {
     return { ok: false, roots: null, pageUid: null, error: boundedReadError("Daily note title is required.") };
   }
   const depthLimit = normalizeBound(maxDepth, DAILY_NOTE_READ_LIMITS.maxDepth);
-  const nodeLimit = normalizeBound(maxNodes, DAILY_NOTE_READ_LIMITS.maxNodes);
+  const nodeLimit = normalizeOptionalBound(maxNodes);
   try {
     const rows = readDailyPageRows(pageTitle);
     if (rows.length === 0) {
       return { ok: true, pageUid: null, roots: [], referenceStrings: {} };
     }
-    if (rows.length > nodeLimit) {
+    if (nodeLimit !== null && rows.length > nodeLimit) {
       throw boundedReadError(
         `Today's Daily Note exceeds the safe ${nodeLimit}-block read limit.`
       );

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0-beta.60 — 2026-08-20
+
+### Reliable Today reads for large Daily Notes
+
+- Fixes the Today tab failing on valid Daily Notes with more than 500 blocks.
+- Removes the ineffective default post-query node rejection: Roam has already
+  returned the complete page at that point, so rejecting it saved no graph-read
+  work and turned valid task trees into a false error state.
+- Keeps explicit diagnostic node limits plus the existing depth, cycle,
+  duplicate, missing-parent, and page-boundary validation.
+- Adds a regression fixture matching the reported 509-block, nine-level Daily
+  Note shape.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.59 — 2026-08-20
 
 ### Unified Dashboard task status actions
