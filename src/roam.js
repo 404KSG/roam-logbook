@@ -682,7 +682,16 @@ const sidebarOperationQueues = new WeakMap();
 // authority, while a recently closed window is recovered through the fallback
 // path below instead of being treated as permanently present.
 const knownSidebarBlockWindows = new WeakMap();
+const sidebarWindowCacheRevisions = new WeakMap();
 const SIDEBAR_WINDOW_CACHE_TTL_MS = ACTIVE_WORK_WINDOW_MS;
+
+const sidebarWindowCacheRevision = sidebar => sidebarWindowCacheRevisions.get(sidebar) || 0;
+
+const bumpSidebarWindowCacheRevision = sidebar => {
+    const revision = sidebarWindowCacheRevision(sidebar) + 1;
+    sidebarWindowCacheRevisions.set(sidebar, revision);
+    return revision;
+};
 
 const sidebarWindowCache = sidebar => {
     let cache = knownSidebarBlockWindows.get(sidebar);
@@ -703,14 +712,18 @@ const rememberSidebarWindows = (sidebar, windows) => {
             cache.set(uid, Date.now());
         }
     }
+    bumpSidebarWindowCacheRevision(sidebar);
 };
 
 const rememberSidebarWindow = (sidebar, uid) => {
     sidebarWindowCache(sidebar).set(uid, Date.now());
+    bumpSidebarWindowCacheRevision(sidebar);
 };
 
 const forgetSidebarWindow = (sidebar, uid) => {
-    sidebarWindowCache(sidebar).delete(uid);
+    if (sidebarWindowCache(sidebar).delete(uid)) {
+        bumpSidebarWindowCacheRevision(sidebar);
+    }
 };
 
 const hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
@@ -721,6 +734,47 @@ const hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
     }
     return true;
 };
+
+/**
+ * Warm the native sidebar-window hint after a plugin reload.
+ *
+ * This is deliberately read-only and non-blocking: the first user action must
+ * still use the authoritative path when this read has not settled yet. A
+ * successful read only enables the existing recent-window preview on a later
+ * action; it never opens, reorders, expands, or creates a native window.
+ */
+export function warmRightSidebarWindowCache() {
+    const sidebar = getApi()?.ui?.rightSidebar;
+    if (typeof sidebar?.getWindows !== 'function') {
+        return Promise.resolve({ ok: false, reason: 'unavailable' });
+    }
+
+    const startingRevision = sidebarWindowCacheRevision(sidebar);
+    let windows;
+    try {
+        windows = sidebar.getWindows();
+    } catch (error) {
+        console.debug('[roam-logbook] sidebar cache warmup failed', error);
+        return Promise.resolve({ ok: false, reason: 'read-failed' });
+    }
+
+    return Promise.resolve(windows).then(
+        resolvedWindows => {
+            if (!Array.isArray(resolvedWindows)) {
+                return { ok: false, reason: 'malformed-read' };
+            }
+            if (sidebarWindowCacheRevision(sidebar) !== startingRevision) {
+                return { ok: false, reason: 'stale-read' };
+            }
+            rememberSidebarWindows(sidebar, resolvedWindows);
+            return { ok: true, count: sidebarWindowCache(sidebar).size };
+        },
+        error => {
+            console.debug('[roam-logbook] sidebar cache warmup failed', error);
+            return { ok: false, reason: 'read-failed' };
+        }
+    );
+}
 
 const blockSidebarWindow = (uid, order) => {
     const sidebarWindow = { type: 'block', 'block-uid': uid };
@@ -840,7 +894,7 @@ export async function frontBlockInRightSidebar(
     const recentlyKnown = hasRecentlyKnownSidebarWindow(sidebar, uid);
     const shouldPreview =
         typeof sidebar.setWindowOrder === 'function' &&
-        (hadPendingOperation || recentlyKnown || preferExisting);
+        (recentlyKnown || preferExisting);
     const sidebarOpen = openSidebarForIntent(sidebar);
     let previewPromise = null;
     if (shouldPreview) {

@@ -604,24 +604,4 @@ export const DASHBOARD = String.raw`/* ---- dashboard ---- */
     background: var(--rlb-surface);
 }
 
-/* Single-focus mode exposes at most one live CLOCK. Keep this control surface
-   compact while preserving the table labels and 32px action targets. */
-.rlb-running.rlb-dashboard-panel {
-    padding: 8px 12px 7px;
-}
-
-.rlb-running .rlb-panel__header {
-    margin-bottom: 2px;
-}
-
-.rlb-dashboard .rlb-running .rlb-table th {
-    padding-top: 2px;
-    padding-bottom: 2px;
-}
-
-.rlb-dashboard .rlb-running .rlb-table td {
-    padding-top: 2px;
-    padding-bottom: 2px;
-    vertical-align: middle;
-}
 `;

@@ -1718,12 +1718,13 @@ test('dashboard traps focus and returns it to both topbar and command entry poin
     assert.equal(document.activeElement, trigger);
 });
 
-test('Topbar and Dashboard expose the same injected elapsed instant', async t => {
+test('Topbar keeps live seconds while Dashboard stays minute-level analysis', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-08-15T09:00:00') });
     await clock.clockIn('popover-task-01', { now: new Date('2026-08-15T09:00:00') });
     const topbarElapsed = topbarWidget().querySelector('.rlb-topbar__time').textContent;
 
     paletteCommands.get('Task Tracker: Open dashboard')();
-    const dashboardElapsed = document.querySelector('[data-running-elapsed="true"]').textContent;
-    assert.equal(dashboardElapsed, topbarElapsed);
+    assert.equal(topbarElapsed, '0:00');
+    assert.equal(document.querySelector('[data-live-metric="today"]').textContent, '0m');
+    assert.equal(document.querySelector('[data-running-elapsed="true"]'), null);
 });

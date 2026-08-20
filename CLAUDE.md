@@ -94,13 +94,15 @@ Layering, innermost first:
     is unavailable, the current-session surface stays open with a retry notice.
     The topbar/host recovery observers are narrowly attached to the discovered
     navigation shells and are disconnected during replacement and unload.
-  - Dashboard is a content-fit, list-first inspector with an adaptive width and
+  - Dashboard is a content-fit analysis surface with an adaptive width and
     viewport max-height: its header is compact, its body scrolls only for long
     reports, and short reports end shortly after the final row. It has exactly
-    four chart-free metrics—Today, the selected range total, Sessions, and Tasks
-    tracked—then Running when populated and the By Task tree. There is no
-    Analytics/chart view, By Day chart, category view, or visible chart axis;
-    hierarchy and numeric columns stay unchanged while borders remain light.
+    four metrics—Today, the selected range total, Sessions, and Tasks tracked—
+    followed by Activity and the By Task tree. The live Timing card and its
+    Clock Out/discard controls belong only to Active Work, not Dashboard.
+    Dashboard minute-level values update once per minute without another graph
+    read; hierarchy and numeric columns stay unchanged while borders remain
+    light.
   - Current-work rows use a shared grid with the title on row one, metadata on
     row two, and actions spanning both rows. Alignment is
     structural (`display: contents` plus explicit grid tracks), not a margin

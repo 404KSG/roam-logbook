@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ACTIVE_WORK_WINDOW_MS } from '../src/active-work.js';
-import { frontBlockInRightSidebar } from '../src/roam.js';
+import { frontBlockInRightSidebar, warmRightSidebarWindowCache } from '../src/roam.js';
 
 const blockWindow = (uid, order) => ({
     type: 'block',
@@ -22,41 +22,128 @@ test.afterEach(() => {
     delete globalThis.window;
 });
 
-test('an Active Work switch previews an existing native window after plugin reload', async () => {
+test('plugin reload warms the native window cache without opening or previewing the sidebar', async () => {
     const calls = [];
-    let releaseValidation;
-    const validation = new Promise(resolve => {
-        releaseValidation = resolve;
+    let releaseWarmup;
+    const warmup = new Promise(resolve => {
+        releaseWarmup = resolve;
     });
 
     installSidebar({
         open: async () => calls.push('open'),
         getWindows: () => {
             calls.push('getWindows');
-            return validation;
+            return warmup;
         },
         setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
         expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
         addWindow: async spec => calls.push({ action: 'addWindow', spec }),
     });
 
-    const resultPromise = frontBlockInRightSidebar('reload-thread', {
-        preferExisting: true,
-    });
-    assert.ok(
-        calls.some(call => call?.action === 'setWindowOrder'),
-        'Active Work starts the native preview before an empty local cache is validated'
-    );
-    assert.equal(calls.filter(call => call?.action === 'addWindow').length, 0);
+    const warmupPromise = warmRightSidebarWindowCache();
+    assert.deepEqual(calls, ['getWindows']);
 
-    releaseValidation([blockWindow('reload-thread', 2)]);
+    releaseWarmup([blockWindow('prewarmed-thread', 2)]);
+    assert.deepEqual(await warmupPromise, { ok: true, count: 1 });
+
+    calls.length = 0;
+    const resultPromise = frontBlockInRightSidebar('prewarmed-thread');
+    const orderCallIndex = calls.findIndex(call => call?.action === 'setWindowOrder');
+    const validationCallIndex = calls.indexOf('getWindows');
+    assert.ok(orderCallIndex >= 0, 'a confirmed prewarmed target may preview immediately');
+    assert.ok(
+        orderCallIndex < validationCallIndex,
+        'the confirmed prewarmed target previews before the second authoritative read settles'
+    );
+
     assert.deepEqual(await resultPromise, {
         ok: true,
         deduped: true,
         reordered: true,
     });
-    assert.equal(calls.filter(call => call === 'getWindows').length, 1);
     assert.equal(calls.filter(call => call?.action === 'addWindow').length, 0);
+});
+
+test('a stale warmup result cannot overwrite a window added by the first user action', async () => {
+    const calls = [];
+    let releaseWarmup;
+    let reads = 0;
+    const warmup = new Promise(resolve => {
+        releaseWarmup = resolve;
+    });
+
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            reads += 1;
+            calls.push('getWindows');
+            if (reads === 1) return warmup;
+            if (reads === 2) return [];
+            return [blockWindow('first-action-thread', 0)];
+        },
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const warmupPromise = warmRightSidebarWindowCache();
+    assert.deepEqual(await frontBlockInRightSidebar('first-action-thread'), {
+        ok: true,
+        added: true,
+    });
+    releaseWarmup([]);
+    assert.deepEqual(await warmupPromise, { ok: false, reason: 'stale-read' });
+
+    calls.length = 0;
+    const resultPromise = frontBlockInRightSidebar('first-action-thread');
+    assert.ok(
+        calls.some(call => call?.action === 'setWindowOrder'),
+        'the first action cache survives a stale startup read'
+    );
+    assert.equal((await resultPromise).ok, true);
+});
+
+test('a pending unknown target does not make a newer unknown target eligible for blind preview', async () => {
+    const calls = [];
+    let currentA = true;
+    let releaseFirstRead;
+    let reads = 0;
+    const firstRead = new Promise(resolve => {
+        releaseFirstRead = resolve;
+    });
+
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            reads += 1;
+            calls.push('getWindows');
+            return reads === 1 ? firstRead : [];
+        },
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const first = frontBlockInRightSidebar('unknown-a', {
+        isCurrent: () => currentA,
+    });
+    currentA = false;
+    const second = frontBlockInRightSidebar('unknown-b');
+    await Promise.resolve();
+
+    assert.equal(
+        calls.some(call => call?.action === 'setWindowOrder'),
+        false,
+        'queue pressure is not proof that the newer native window exists'
+    );
+
+    releaseFirstRead([]);
+    assert.deepEqual(await first, { ok: false, skipped: true, reason: 'superseded' });
+    assert.deepEqual(await second, { ok: true, added: true });
+    assert.equal(
+        calls.some(call => call?.action === 'setWindowOrder'),
+        false
+    );
 });
 
 test('a known Active Thread still previews after the legacy 30-second cache window', async () => {

@@ -1399,40 +1399,6 @@ test('Active Threads popover hides its scrollbar without losing stable native sc
     assert.ok(geometry.rightDelta <= 1, JSON.stringify(geometry));
 });
 
-test('Dashboard Timing keeps one live CLOCK in a compact labelled panel', async t => {
-    if (!(await findChromium())) return t.skip('Chromium is unavailable');
-    const geometry = await withChromium(
-        htmlWithLateHost(`
-            <div class="rlb-dashboard">
-                <section class="rlb-dashboard-section rlb-dashboard-panel rlb-running" style="width:900px">
-                    <div class="rlb-panel__header"><h3 class="rlb-section__title">Timing</h3></div>
-                    <table class="rlb-table">
-                        <thead><tr><th>Task</th><th>Started</th><th class="rlb-table__num">Elapsed</th><th><span class="rlb-visually-hidden">Actions</span></th></tr></thead>
-                        <tbody><tr><td>Roam Logbook v1</td><td>Today 07:18</td><td class="rlb-table__num">2:48</td><td class="rlb-table__num"><button class="bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout"></button><button class="bp3-button bp3-minimal bp3-small bp3-icon-trash"></button></td></tr></tbody>
-                    </table>
-                </section>
-            </div>`),
-        `(() => {
-            const rect = node => node.getBoundingClientRect();
-            const panel = document.querySelector('.rlb-running');
-            const heading = panel.querySelector('.rlb-panel__header');
-            const action = panel.querySelector('.rlb-running__checkout');
-            return {
-                panelHeight: rect(panel).height,
-                headingGap: parseFloat(getComputedStyle(heading).marginBottom),
-                actionHeight: rect(action).height,
-                title: panel.querySelector('.rlb-section__title').textContent,
-                countExists: Boolean(panel.querySelector('.rlb-panel__count')),
-            };
-        })()`
-    );
-    assert.equal(geometry.title, 'Timing', JSON.stringify(geometry));
-    assert.equal(geometry.countExists, false, JSON.stringify(geometry));
-    assert.ok(geometry.panelHeight <= 90, JSON.stringify(geometry));
-    assert.ok(geometry.headingGap <= 2, JSON.stringify(geometry));
-    assert.ok(geometry.actionHeight >= 32, JSON.stringify(geometry));
-});
-
 test('Dashboard overlay keeps background and dialog chrome fixed while body content scrolls', async t => {
     if (!(await findChromium())) return t.skip('Chromium is unavailable');
     const geometry = await withChromium(

@@ -46,9 +46,61 @@ test.afterEach(() => {
 
 test.after(() => uninstallGraph());
 
-test('Dashboard live elapsed updates only running cells without graph reads or tree rebuilds', async () => {
+test('Dashboard stays analytics-only with a running CLOCK and updates live data once per minute', async () => {
     let nowMs = new Date('2026-08-15T09:00:00').getTime();
     let tick;
+    let timerDelay;
+    let nextTimer = 0;
+    const query = graph.api.data.q;
+    let queryCount = 0;
+    graph.api.data.q = (...args) => {
+        queryCount += 1;
+        return query(...args);
+    };
+
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const dashboard = createDashboard({
+        now: () => new Date(nowMs),
+        setIntervalFn: (callback, delay) => {
+            tick = callback;
+            timerDelay = delay;
+            nextTimer += 1;
+            return nextTimer;
+        },
+        clearIntervalFn: () => {},
+    });
+
+    dashboard.open();
+
+    assert.equal(document.querySelector('.rlb-running'), null);
+    assert.doesNotMatch(document.body.textContent, /Timing/);
+    assert.ok(document.querySelector('.rlb-overview'));
+    assert.ok(document.querySelector('.rlb-activity'));
+    assert.ok(document.querySelector('.rlb-by-task'));
+    assert.equal(timerDelay, 60_000);
+    assert.ok(tick);
+
+    const activity = document.querySelector('.rlb-activity');
+    const byTask = document.querySelector('.rlb-by-task');
+    const readsBeforeTick = queryCount;
+    nowMs += 61_000;
+    tick();
+
+    assert.equal(queryCount, readsBeforeTick);
+    assert.equal(document.querySelector('.rlb-activity'), activity);
+    assert.equal(document.querySelector('.rlb-by-task'), byTask);
+    assert.equal(
+        document.querySelector('[data-live-metric="today"]').textContent,
+        '1m'
+    );
+
+    dashboard.destroy();
+});
+
+test('Dashboard live analytics updates without graph reads or tree rebuilds', async () => {
+    let nowMs = new Date('2026-08-15T09:00:00').getTime();
+    let tick;
+    let timerDelay;
     let nextTimer = 0;
     let clearCount = 0;
     let queryCount = 0;
@@ -61,8 +113,9 @@ test('Dashboard live elapsed updates only running cells without graph reads or t
     await clock.clockIn('live-child', { now: new Date(nowMs) });
     const dashboard = createDashboard({
         now: () => new Date(nowMs),
-        setIntervalFn: callback => {
+        setIntervalFn: (callback, delay) => {
             tick = callback;
+            timerDelay = delay;
             nextTimer += 1;
             return nextTimer;
         },
@@ -72,16 +125,14 @@ test('Dashboard live elapsed updates only running cells without graph reads or t
     });
 
     dashboard.open();
-    const elapsed = document.querySelector('[data-running-elapsed="true"]');
-    assert.ok(tick, 'opening a Dashboard with a Running Session starts the injected timer');
-    assert.equal(elapsed.dataset.clockUid, clock.getRunning()[0].clockUid);
-    assert.equal(elapsed.dataset.startMs, String(nowMs));
+    assert.ok(tick, 'opening a Dashboard with a running Session starts the injected timer');
+    assert.equal(timerDelay, 60_000);
+    assert.equal(document.querySelector('.rlb-running'), null);
     const today = [...document.querySelectorAll('.rlb-overview__item')].find(
         item => item.querySelector('.rlb-overview__label')?.textContent === 'Today'
     );
     assert.equal(today.querySelector('.rlb-overview__context'), null);
-    assert.equal(document.querySelector('.rlb-running .rlb-section__title')?.textContent, 'Timing');
-    assert.equal(document.querySelector('.rlb-running .rlb-panel__count'), null);
+    const activity = document.querySelector('.rlb-activity');
 
     const beforeQueries = queryCount;
     const toggle = document.querySelector('.rlb-tree__toggle');
@@ -92,14 +143,50 @@ test('Dashboard live elapsed updates only running cells without graph reads or t
 
     nowMs += 61_000;
     tick();
-    assert.equal(elapsed.textContent, '1:01');
+    assert.equal(document.querySelector('[data-live-metric="today"]').textContent, '1m');
     assert.equal(queryCount, beforeQueries, 'a live tick does not query the graph');
     assert.equal(document.querySelector('.rlb-body'), collapsedBody);
+    assert.equal(document.querySelector('.rlb-activity'), activity);
     assert.equal(document.querySelectorAll('.rlb-tree__cell').length, 1);
     assert.equal(document.querySelector('.rlb-tree__toggle').getAttribute('aria-expanded'), 'false');
 
     dashboard.close();
     assert.equal(clearCount, 1, 'closing clears the injected timer');
+    dashboard.destroy();
+});
+
+test('Dashboard rebuilds cached analysis at local day boundaries without a graph read', async () => {
+    let nowMs = new Date('2026-08-15T23:59:00').getTime();
+    let tick;
+    const query = graph.api.data.q;
+    let queryCount = 0;
+    graph.api.data.q = (...args) => {
+        queryCount += 1;
+        return query(...args);
+    };
+
+    await clock.clockIn('live-child', { now: new Date(nowMs) });
+    const dashboard = createDashboard({
+        now: () => new Date(nowMs),
+        setIntervalFn: callback => {
+            tick = callback;
+            return 1;
+        },
+        clearIntervalFn: () => {},
+    });
+    dashboard.open();
+
+    const activityBefore = document.querySelector('.rlb-activity');
+    const byTaskBefore = document.querySelector('.rlb-by-task');
+    const readsBeforeTick = queryCount;
+    nowMs += 2 * 60_000;
+    tick();
+
+    assert.equal(queryCount, readsBeforeTick);
+    assert.notEqual(document.querySelector('.rlb-activity'), activityBefore);
+    assert.notEqual(document.querySelector('.rlb-by-task'), byTaskBefore);
+    assert.equal(document.querySelector('[data-live-metric="today"]').textContent, '0m');
+
     dashboard.destroy();
 });
 
@@ -127,7 +214,7 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
     dashboard.open();
     assert.equal(timers.length, 1);
     const readsAfterOpen = graphReads;
-    const firstCell = document.querySelector('[data-running-elapsed="true"]');
+    const firstActivity = document.querySelector('.rlb-activity');
     const refresh = document.querySelector('.rlb-icon-button.bp3-icon-refresh');
     const refreshStatus = document.querySelector('.rlb-dashboard__refresh-status');
     refresh.click();
@@ -144,12 +231,12 @@ test('Dashboard refresh and range changes replace live handles safely', async ()
     assert.equal(refresh.disabled, false);
     assert.equal(refresh.dataset.refreshState, 'success');
     assert.match(refreshStatus.textContent, /Dashboard updated just now/);
-    const refreshedCell = document.querySelector('[data-running-elapsed="true"]');
-    assert.notEqual(refreshedCell, firstCell, 'a full refresh creates a fresh DOM handle');
+    const refreshedActivity = document.querySelector('.rlb-activity');
+    assert.notEqual(refreshedActivity, firstActivity, 'a full refresh creates a fresh DOM handle');
 
-    nowMs += 2_000;
+    nowMs += 61_000;
     timers[1].callback();
-    assert.equal(refreshedCell.textContent, '0:02');
+    assert.equal(document.querySelector('[data-live-metric="today"]').textContent, '1m');
 
     const range = document.querySelector('.rlb-header select');
     const readsBeforeRange = graphReads;
@@ -168,7 +255,7 @@ test('Dashboard Refresh announces a retryable error while retaining the last sna
     await clock.clockIn('live-child', { now: new Date(nowMs) });
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
-    const beforeUid = document.querySelector('[data-running-elapsed="true"]').dataset.clockUid;
+    const beforeByTask = document.querySelector('.rlb-by-task');
     const originalQuery = graph.api.data.q;
     graph.api.data.q = () => {
         throw new Error('temporary Dashboard graph failure');
@@ -188,10 +275,8 @@ test('Dashboard Refresh announces a retryable error while retaining the last sna
         assert.equal(alert.getAttribute('aria-live'), 'assertive');
         assert.match(alert.textContent, /last valid snapshot|Retry/i);
         assert.equal(status.textContent, '');
-        assert.equal(
-            document.querySelector('[data-running-elapsed="true"]').dataset.clockUid,
-            beforeUid
-        );
+        assert.ok(document.querySelector('.rlb-by-task'));
+        assert.equal(document.querySelector('.rlb-by-task').textContent, beforeByTask.textContent);
     } finally {
         graph.api.data.q = originalQuery;
         dashboard.destroy();
@@ -216,61 +301,17 @@ test('repeated Dashboard open preserves the original outside focus target', () =
     dashboard.destroy();
 });
 
-test('Dashboard running actions use neutral stop semantics and confirm CLOCK discard', async () => {
+test('Dashboard leaves live Session controls in the Active Work surface', async () => {
     const nowMs = new Date('2026-08-15T09:00:00').getTime();
     await clock.clockIn('live-child', { now: new Date(nowMs) });
-    const clockUid = clock.getRunning()[0].clockUid;
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
 
-    const running = document.querySelector('[data-running-elapsed="true"]').closest('tr');
-    const checkout = running.querySelector('[data-action="clock-out"]');
-    assert.equal(checkout.textContent, '');
-    assert.ok(checkout.classList.contains('bp3-icon-log-out'));
-    assert.equal(checkout.title, 'Check Out');
-    assert.equal(checkout.getAttribute('aria-label'), null);
-    assert.equal(checkout.classList.contains('bp3-intent-success'), false);
-
-    const discard = running.querySelector('[data-action="discard"]');
-    discard.click();
-    assert.ok(graph.store.has(clockUid));
-    const confirm = document.querySelector('[data-action="discard"]');
-    assert.match(confirm.title, /confirm discard/i);
-    confirm.click();
-    await new Promise(resolve => setImmediate(resolve));
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(graph.store.has(clockUid), false);
+    assert.equal(document.querySelector('.rlb-running'), null);
+    assert.equal(document.querySelector('[data-action="clock-out"]'), null);
+    assert.equal(document.querySelector('[data-action="discard"]'), null);
+    assert.ok(document.querySelector('.rlb-task-action--timing'));
     dashboard.destroy();
-});
-
-test('Dashboard discard confirmation reuses the cached snapshot before the write', async () => {
-    const nowMs = new Date('2026-08-15T09:00:00').getTime();
-    await clock.clockIn('live-child', { now: new Date(nowMs) });
-    const clockUid = clock.getRunning()[0].clockUid;
-    const originalQuery = graph.api.data.q;
-    let entryReads = 0;
-    graph.api.data.q = (...args) => {
-        if (String(args[0]).includes(':in $ [?drawer-string ...]')) entryReads += 1;
-        return originalQuery(...args);
-    };
-    const dashboard = createDashboard({ now: () => new Date(nowMs) });
-
-    try {
-        dashboard.open();
-        const readsAfterOpen = entryReads;
-        const discard = document.querySelector('[data-action="discard"]');
-        discard.click();
-
-        assert.equal(entryReads, readsAfterOpen, 'first confirmation does not reread the graph');
-        document.querySelector('[data-action="discard"]').click();
-        await settle();
-
-        assert.equal(graph.store.has(clockUid), false);
-        assert.ok(entryReads > readsAfterOpen, 'the confirmed write still refreshes from the graph');
-    } finally {
-        graph.api.data.q = originalQuery;
-        dashboard.destroy();
-    }
 });
 
 test('Dashboard By Task exposes status-aware focus actions and switches the single CLOCK in place', async () => {
@@ -456,7 +497,7 @@ test('Dashboard rapid focus clicks publish the newest Timing Line intent before 
     }
 });
 
-test('Dashboard Running and By Task links preserve Roam page refs and tags without an icon cue', async () => {
+test('Dashboard By Task links preserve Roam page refs and tags without an icon cue', async () => {
     const nowMs = new Date('2026-08-15T09:00:00').getTime();
     graph.store.get('live-parent').string =
         '{{[[TODO]]}} Parent [[Project Page]] #[[project]]';
@@ -467,7 +508,7 @@ test('Dashboard Running and By Task links preserve Roam page refs and tags witho
     dashboard.open();
 
     const links = [...document.querySelectorAll('.rlb-task-link')];
-    assert.ok(links.length >= 2, 'the running and By Task sections both expose the Task');
+    assert.ok(links.length >= 2, 'the By Task tree exposes parent and child Tasks');
     for (const link of links) {
         // The task link carries visible text, so its aria-label deliberately
         // adds the "Open this block" affordance the text alone does not convey.
@@ -496,7 +537,9 @@ test('Dashboard task links keep ordinary click navigation for formatted titles',
         await clock.clockIn('live-child', { now: new Date('2026-08-15T09:00:00') });
         const dashboard = createDashboard({ now: () => new Date('2026-08-15T09:00:00') });
         dashboard.open();
-        const link = document.querySelector('.rlb-running .rlb-task-link');
+        const link = [...document.querySelectorAll('.rlb-by-task .rlb-task-link')].find(
+            node => node.textContent === 'Child [[Running Page]] #[[urgent]]'
+        );
         link.click();
         await new Promise(resolve => setImmediate(resolve));
 
@@ -519,8 +562,10 @@ test('Shift+Click Dashboard task entries opens the matching block in Roam right 
     const dashboard = createDashboard({ now: () => new Date(nowMs) });
     dashboard.open();
 
-    const runningLink = document.querySelector('.rlb-running .rlb-task-link');
-    runningLink.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, shiftKey: true }));
+    const taskLink = [...document.querySelectorAll('.rlb-by-task .rlb-task-link')].find(
+        node => node.textContent === 'Child running task'
+    );
+    taskLink.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, shiftKey: true }));
     await new Promise(resolve => setImmediate(resolve));
 
     assert.deepEqual(nativeCalls, [
@@ -983,7 +1028,7 @@ const taskTitles = () =>
         node => node.textContent
     );
 
-test('Dashboard task filters keep unique counts and context ancestors without changing overview or running', async () => {
+test('Dashboard task filters keep unique counts and context ancestors without changing overview', async () => {
     installTaskViewFixture();
     const nowMs = new Date('2026-08-15T12:00:00').getTime();
     await clock.clockIn('todo-root', { now: new Date(nowMs) });
@@ -995,7 +1040,6 @@ test('Dashboard task filters keep unique counts and context ancestors without ch
     const filterButton = value => byTask.querySelector(`[data-filter="${value}"]`);
     const count = () => byTask.querySelector('.rlb-task-count').textContent;
     const overviewBefore = document.querySelector('.rlb-overview').textContent;
-    const runningBefore = document.querySelector('.rlb-running').textContent;
 
     assert.equal(filterGroup.getAttribute('aria-label'), 'Filter tasks by status');
     assert.equal(filterButton('ALL').getAttribute('aria-pressed'), 'true');
@@ -1021,7 +1065,6 @@ test('Dashboard task filters keep unique counts and context ancestors without ch
     );
     assert.doesNotMatch(byTask.textContent, /Done root|Unclassified root/);
     assert.equal(document.querySelector('.rlb-overview').textContent, overviewBefore);
-    assert.equal(document.querySelector('.rlb-running').textContent, runningBefore);
 
     filterButton('DONE').click();
     assert.equal(count(), '2 of 5 Tasks');
@@ -1060,14 +1103,12 @@ test('Dashboard task headers sort recursively with native buttons and expose ARI
     const header = key => document.querySelector(`.rlb-task-table th[data-sort-key="${key}"]`);
     const buttonFor = key => header(key).querySelector('button');
     const taskHeader = document.querySelector('.rlb-task-table th:first-child');
-    const runningHeaderButtons = document.querySelectorAll('.rlb-running thead button');
 
     assert.equal(header('total').getAttribute('aria-sort'), 'descending');
     assert.equal(buttonFor('total').getAttribute('aria-pressed'), 'true');
     assert.equal(header('sessions').hasAttribute('aria-sort'), false);
     assert.equal(header('own').hasAttribute('aria-sort'), false);
     assert.equal(taskHeader.querySelector('button'), null);
-    assert.equal(runningHeaderButtons.length, 0);
     assert.equal(buttonFor('own').title, 'Time recorded directly on this Task');
     assert.equal(buttonFor('total').title, 'Own time plus all sub-tasks');
     assert.equal(
@@ -1123,7 +1164,7 @@ test('Dashboard keeps All and filtered collapse state in separate controller-loc
     dashboard.destroy();
 });
 
-test('Dashboard places the accessible Activity chart between Timing and By task', () => {
+test('Dashboard places the accessible Activity chart before By task', () => {
     graph = installGraph([
         { uid: 'activity-task', string: '{{[[TODO]]}} Activity task', parent: null },
         { uid: 'activity-drawer', string: 'LOGBOOK::', parent: 'activity-task' },
@@ -1151,16 +1192,11 @@ test('Dashboard places the accessible Activity chart between Timing and By task'
     const dashboard = createDashboard({ now: () => new Date('2026-08-15T12:00:00') });
     dashboard.open();
 
-    const timing = document.querySelector('.rlb-running');
     const activity = document.querySelector('.rlb-activity');
     const byTask = document.querySelector('.rlb-by-task');
-    assert.ok(timing, 'a running Session creates the Timing panel');
+    assert.equal(document.querySelector('.rlb-running'), null);
     assert.ok(activity);
     assert.ok(byTask);
-    assert.ok(
-        timing.compareDocumentPosition(activity) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
-        'Activity appears after Timing'
-    );
     assert.ok(
         activity.compareDocumentPosition(byTask) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
         'Activity appears before By task'

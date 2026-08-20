@@ -1,5 +1,5 @@
 /**
- * The dashboard dialog: a compact overview, running sessions, and a per-task
+ * The dashboard dialog: a compact overview, Activity analysis, and a per-task
  * breakdown.
  *
  * Reads the graph on open and on refresh only — there is no live subscription,
@@ -11,11 +11,9 @@ import { buildActivity } from './activity.js';
 import { renderActivity, syncActivityView } from './activity-view.js';
 import { button, el } from './dom.js';
 import { readDashboardSnapshot } from './entries.js';
-import { createConfirmationController } from './confirmation.js';
 import { createFocusTrap } from './focus-trap.js';
 import { dataIssuesSection, issueRow } from './dashboard-issues.js';
-import { headerRow, statusMark, taskLink as renderTaskLinkBase } from './dashboard-table.js';
-import { runningSection as renderRunningSection } from './dashboard-running.js';
+import { statusMark, taskLink as renderTaskLinkBase } from './dashboard-table.js';
 import { tasksSection as renderTasksSection } from './dashboard-task-tree.js';
 import {
     buildDashboard,
@@ -26,12 +24,13 @@ import {
 } from './stats.js';
 import { formatDisplayTitle } from './task-display.js';
 import { acquireThemeRuntime, applyRoamThemePalette } from './theme.js';
-import { formatElapsed, formatMinutesHuman } from './time.js';
+import { formatMinutesHuman } from './time.js';
 import { acquireDocumentScrollLock } from './scroll-lock.js';
 import { createRefreshState, REFRESH_MESSAGES } from './refresh-state.js';
 
 const ROOT_ID = 'roam-logbook-dashboard';
 const DASHBOARD_TITLE = 'Task Tracker';
+const LIVE_UPDATE_INTERVAL_MS = 60 * 1000;
 
 const localDayKey = date =>
     `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
@@ -148,7 +147,6 @@ export function createDashboard({
     now: nowFn = () => new Date(),
     setIntervalFn = (callback, delay) => setInterval(callback, delay),
     clearIntervalFn = ticker => clearInterval(ticker),
-    confirmation = createConfirmationController(),
     scheduleMutationStartFn = null,
 } = {}) {
     let root = null;
@@ -166,6 +164,7 @@ export function createDashboard({
     let liveMetricCache = null;
     let lastTransientIssues = [];
     let lastRefreshNotice = '';
+    let liveRenderBoundary = null;
     let themeRuntime = null;
     let releaseScrollLock = null;
     const focusTrap = createFocusTrap(() => root?.querySelector('.rlb-dialog'));
@@ -211,8 +210,6 @@ export function createDashboard({
         messages: REFRESH_MESSAGES.dashboard,
     });
 
-    const resetDiscardConfirmation = () => confirmation?.reset();
-
     const updateLiveMetricNodes = now => {
         if (!lastModel) return;
         const metrics =
@@ -238,12 +235,13 @@ export function createDashboard({
         }
     };
 
-    const updateRunningElapsed = () => {
+    const updateLiveAnalytics = () => {
         if (!root?.classList.contains('rlb-root--open')) return;
         const nowDateValue = nowFn();
-        const now = nowDateValue.getTime();
-        for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
-            cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
+        const nextBoundary = liveMetricBoundaryKey(rangeId, nowDateValue);
+        if (nextBoundary !== liveRenderBoundary) {
+            render({ readGraph: false });
+            return;
         }
         updateLiveMetricNodes(nowDateValue);
         syncActivityView(activityNode, lastModel?.activity, nowDateValue);
@@ -252,10 +250,8 @@ export function createDashboard({
     const startLiveTicker = () => {
         clearLiveTicker();
         if (!root?.classList.contains('rlb-root--open')) return;
-        if (!bodyNode?.querySelector('[data-running-elapsed="true"]') && !lastModel?.running?.length) {
-            return;
-        }
-        liveTicker = setIntervalFn(updateRunningElapsed, 1000);
+        if (!lastModel?.running?.length) return;
+        liveTicker = setIntervalFn(updateLiveAnalytics, LIVE_UPDATE_INTERVAL_MS);
     };
 
     const paintDashboard = now => {
@@ -284,20 +280,6 @@ export function createDashboard({
             ...transientIssues.map(issueRow),
         ];
 
-        if (model.running.length > 0) {
-            bodyNode.appendChild(
-                renderRunningSection({
-                    running: model.running,
-                    now,
-                    isDiscarding: uid => confirmation?.isArmed(`discard:${uid}`, 'dashboard'),
-                    onDiscard: handleDiscard,
-                    onClockOut: entry => act(() => clock.clockOut(entry.clockUid)),
-                    headerRow,
-                    statusMark,
-                    taskLink: renderTaskLink,
-                })
-            );
-        }
         if (model.entries.length === 0) {
             bodyNode.appendChild(el('div', 'rlb-empty', 'No clock entries in this range yet.'));
             if (issues.length > 0) bodyNode.appendChild(dataIssuesSection(issues));
@@ -382,6 +364,7 @@ export function createDashboard({
         });
         lastTransientIssues = transientIssues;
         lastRefreshNotice = refreshNotice;
+        liveRenderBoundary = liveMetricBoundaryKey(rangeId, now);
         paintDashboard(now);
         return { ok: true, refreshFailed };
     };
@@ -429,15 +412,6 @@ export function createDashboard({
             console.error('[roam-logbook]', error);
         }
         render();
-    };
-
-    const handleDiscard = entry => {
-        const key = `discard:${entry.clockUid}`;
-        if (!confirmation?.arm(key, 'dashboard')) {
-            render({ readGraph: false });
-            return;
-        }
-        void act(() => clock.discardClock(entry.clockUid));
     };
 
     const startTaskTiming = taskUid => {
@@ -510,7 +484,7 @@ export function createDashboard({
         const subtitle = el(
             'p',
             'rlb-header__subtitle rlb-visually-hidden',
-            'Focus sessions, timing, and task rollups'
+            'Time totals, activity, and task rollups'
         );
         subtitle.id = 'roam-logbook-dashboard-description';
         heading.append(title, subtitle);
@@ -582,7 +556,6 @@ export function createDashboard({
             return;
         }
         clearLiveTicker();
-        resetDiscardConfirmation();
         focusTrap.deactivate();
         root.classList.remove('rlb-root--open');
         root.setAttribute('aria-hidden', 'true');
@@ -643,6 +616,7 @@ export function createDashboard({
             activityNode = null;
             lastModel = null;
             liveMetricCache = null;
+            liveRenderBoundary = null;
             refreshRuntime.dispose();
             focusTrap.deactivate();
             refreshButton = null;

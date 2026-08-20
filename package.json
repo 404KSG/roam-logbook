@@ -1,6 +1,6 @@
 {
   "name": "roam-logbook",
-  "version": "0.9.0-beta.57",
+  "version": "0.9.0-beta.58",
   "description": "Single-focus task and time tracking for Roam Research",
   "type": "module",
   "main": "extension.js",

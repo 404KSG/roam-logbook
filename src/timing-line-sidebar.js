@@ -54,7 +54,6 @@ export function createTimingLineSidebarFronting({
         try {
             result = await frontBlock(action.taskUid, {
                 isCurrent: () => isCurrent(intent),
-                preferExisting: action.source === 'active-work-switch',
             });
         } catch (error) {
             result = {

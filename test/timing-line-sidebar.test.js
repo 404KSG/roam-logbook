@@ -735,6 +735,55 @@ test('the first Timing Line intent reaches the sidebar adapter in one microtask'
     await fronting.whenIdle();
 });
 
+test('an unknown Active Work switch validates the native window before previewing it', async () => {
+    const calls = [];
+    let releaseValidation;
+    const validation = new Promise(resolve => {
+        releaseValidation = resolve;
+    });
+
+    installSidebar({
+        open: async () => calls.push('open'),
+        getWindows: () => {
+            calls.push('getWindows');
+            return validation;
+        },
+        setWindowOrder: async spec => calls.push({ action: 'setWindowOrder', spec }),
+        expandWindow: async spec => calls.push({ action: 'expandWindow', spec }),
+        addWindow: async spec => calls.push({ action: 'addWindow', spec }),
+    });
+
+    const fronting = createTimingLineSidebarFronting({ isEnabled: () => true });
+    assert.equal(
+        fronting.handleAction({
+            type: 'clock-in-intent',
+            source: 'active-work-switch',
+            taskUid: 'unknown-active-work',
+        }),
+        true
+    );
+
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(
+        calls,
+        ['open', 'getWindows'],
+        'an unknown target must not call native reorder before authoritative validation'
+    );
+
+    releaseValidation([]);
+    await fronting.whenIdle();
+    assert.deepEqual(calls, [
+        'open',
+        'getWindows',
+        {
+            action: 'addWindow',
+            spec: {
+                window: { type: 'block', 'block-uid': 'unknown-active-work', order: 0 },
+            },
+        },
+    ]);
+});
+
 test('disabled fronting performs no sidebar work', async () => {
     let calls = 0;
     const fronting = createTimingLineSidebarFronting({

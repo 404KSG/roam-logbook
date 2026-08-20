@@ -10,7 +10,11 @@ import * as clock from './clock.js';
 import { createConfirmationController } from './confirmation.js';
 import { createDashboard } from './dashboard.js';
 import { injectStyles, removeStyles } from './dom.js';
-import { getBlockString, getFocusedBlockUid } from './roam.js';
+import {
+    getBlockString,
+    getFocusedBlockUid,
+    warmRightSidebarWindowCache,
+} from './roam.js';
 import { isTaskBlock, taskStatus } from './org.js';
 import * as pomodoro from './pomodoro.js';
 import { mutationResultNotice, presentMutationResult } from './action-result.js';
@@ -59,6 +63,7 @@ function createController({ extensionAPI }) {
     let detachCompletion = null;
     let detachTimingLineSidebar = null;
     let timingLineSidebar = null;
+    let sidebarWarmupTimer = null;
 
     /** Task text of the block a menu entry was opened on, following references. */
     const targetString = context => {
@@ -229,10 +234,19 @@ function createController({ extensionAPI }) {
             if (snapshot.filter(entry => entry.running).length > 1) {
                 void clock.reconcileOpenClocks({ entries: snapshot });
             }
+            // Cache warmup is an optional performance hint, not startup work.
+            // A task boundary keeps even a synchronous host getWindows() call
+            // out of mount and its microtask checkpoint.
+            sidebarWarmupTimer = setTimeout(() => {
+                sidebarWarmupTimer = null;
+                if (!destroyed) void warmRightSidebarWindowCache();
+            }, 0);
         },
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            if (sidebarWarmupTimer !== null) clearTimeout(sidebarWarmupTimer);
+            sidebarWarmupTimer = null;
             confirmation.reset();
             detachTimingLineSidebar?.();
             detachTimingLineSidebar = null;

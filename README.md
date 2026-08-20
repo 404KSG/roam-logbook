@@ -1,6 +1,6 @@
 # Task Tracker – 404KSG
 
-Current package version: **0.9.0-beta.57**. This is a beta fork; the graph remains
+Current package version: **0.9.0-beta.58**. This is a beta fork; the graph remains
 the source of truth and no local CLOCK database is created.
 
 Single-focus task and time tracking for Roam Research, with Org-compatible LOGBOOK / CLOCK records.
@@ -24,7 +24,11 @@ graph history is not migrated or merged.
 
 The extension is an ESM Roam Depot extension whose default export exposes `onload` and `onunload`.
 
-- The Roam Depot entry for this fork remains a **Draft preview**. Beta.56 starts Roam's native sidebar open and task reveal/add operations concurrently, while retaining a guarded retry for hosts that reject those operations until the sidebar is visible; until acceptance, use its shorthand only for non-critical smoke tests.
+- The Roam Depot entry for this fork remains a **Draft preview**. Beta.58 keeps
+  confirmed sidebar windows on the immediate native reveal path, while new
+  Tasks go straight to Roam's authoritative read/add path instead of attempting
+  a speculative reorder first; until acceptance, use its shorthand only for
+  non-critical smoke tests.
 - For local development, clone this repository, run `npm ci` and `npm run build`, then load the repository through Roam's extension developer workflow. `extension.js` is the built Depot entry point.
 
 The extension reads and writes the local graph only; there is no external telemetry,
@@ -87,7 +91,7 @@ Out keeps its exact one-Session meaning.
 
 **Shared Pomodoro cycle** — when the first Focused Task starts, the extension freezes the configured threshold (45 minutes by default) and starts one cycle from that action instant. Seamless task switches keep the same cycle; Clock Out All and a confirmed empty state reset it. At the exact threshold the time turns a restrained red and **keeps counting**; it never closes the CLOCK. A reload restores a valid persisted cycle or conservatively uses the focused open CLOCK.
 
-**Dashboard** — `Task Tracker: Open dashboard`, or the Dashboard icon in the Active Threads header. It is one list-first page: exactly four compact metrics (Today with elapsed time only, the current-range total, Sessions, and Tasks tracked), followed by Timing when present, Activity, and the By Task tree. Activity is derived from that same Dashboard snapshot: Today always uses 24 local-hour buckets and apportions each Session across the hours it overlaps; Last 7 days shows one visibly wide bar per start day; Last 30 days shows one narrow bar per start day with decimal hours and an understated `HOURS` context; All time preserves the full overview/Timing/By Task range and groups the Activity timeline by calendar month through the current month when the span is at most 24 months, or by calendar year when it is longer. Empty periods retain their date/hour context and quiet baseline without a visible zero-duration label. Each bar exposes its complete period, full human-readable duration, and Session count through tooltip and ARIA. Running Sessions update Activity from cached derived data without another graph read. Unfinished tasks that are not on the current Timing Line expose an icon-only Play action; the current Timing Line shows a non-interactive timing icon, and DONE tasks have no Play action. Starting a task switches the single open `CLOCK` and rerenders the still-open Dashboard in place. There is no Insights/Analytics view, category view, or secondary Dashboard mode. The Sessions and Tasks tracked metrics show the active date-range name directly (`Last 7 days`, `Last 30 days`, or `All time`). The range total needs no repeated helper text because its label already names the range. The header contains only the date-range selector, Refresh, and Close controls. Only task-title Shift+Click uses Roam's native right-sidebar block-window API; topbar Shift+Click is inert, while ordinary task clicks retain main-window navigation. The overlay is fixed to the viewport, locks background document scroll, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
+**Dashboard** — `Task Tracker: Open dashboard`, or the Dashboard icon in the Active Threads header. It is one analysis page: exactly four compact metrics (Today with elapsed time only, the current-range total, Sessions, and Tasks tracked), followed by Activity and the By Task tree. Live Timing controls stay in Active Work instead of being duplicated here. Activity is derived from the same Dashboard snapshot: Today always uses 24 local-hour buckets and apportions each Session across the hours it overlaps; Last 7 days shows one visibly wide bar per start day; Last 30 days shows one narrow bar per start day with decimal hours and an understated `HOURS` context; All time groups the Activity timeline by calendar month through the current month when the span is at most 24 months, or by calendar year when it is longer. Empty periods retain their date/hour context and quiet baseline without a visible zero-duration label. Each bar exposes its complete period, full human-readable duration, and Session count through tooltip and ARIA. While a CLOCK is running, headline totals and Activity update from cached derived data once per minute without another graph read or task-tree rebuild. Unfinished tasks that are not on the current Timing Line expose an icon-only Play action; the current Timing Line shows a non-interactive timing icon, and DONE tasks have no Play action. Starting a task switches the single open `CLOCK` and rerenders the still-open Dashboard in place. There is no category view or secondary Dashboard mode. The Sessions and Tasks tracked metrics show the active date-range name directly (`Last 7 days`, `Last 30 days`, or `All time`). The range total needs no repeated helper text because its label already names the range. The header contains only the date-range selector, Refresh, and Close controls. Only task-title Shift+Click uses Roam's native right-sidebar block-window API; topbar Shift+Click is inert, while ordinary task clicks retain main-window navigation. The overlay is fixed to the viewport, locks background document scroll, and keeps only the dialog body scrollable; closing, Escape, overlay click, and extension unload restore the original document styles and scroll position. The surface samples Roam's current page-reference and synced/save colors, keeping plugin variables isolated from the host theme.
 
 ### Custom hotkeys
 
@@ -125,7 +129,7 @@ Clocking in on a block whose entire content is `((uid))` or `{{embed: ((uid))}}`
 
 A clock with no end stamp is a running clock — that is the whole persistence model, so a session survives a reload, a crash, or a clock started on another device. On load the extension reads them straight back out of the graph.
 
-Clocks that have been open longer than the threshold (8 hours by default) are marked as likely forgotten: the topbar's elapsed time turns restrained amber, the popover shows a warning, and the dashboard's Running section adds a `stale` tag. Each can be closed at the current time or discarded.
+Clocks that have been open longer than the threshold (8 hours by default) are marked as likely forgotten: the topbar's elapsed time turns restrained amber and Active Work shows a warning. The Timing Line can be closed at the current time or discarded from that live control surface.
 
 ### One Focused clock
 

@@ -565,7 +565,7 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.equal(dialog().querySelector('.rlb-header__title').textContent, 'Task Tracker');
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').textContent,
-        'Focus sessions, timing, and task rollups'
+        'Time totals, activity, and task rollups'
     );
     assert.equal(
         dialog().querySelector('.rlb-header__subtitle').getBoundingClientRect().width,
@@ -590,24 +590,11 @@ test('the dashboard renders totals and the task breakdown', () => {
     assert.match(dialog().textContent, /Today/);
     assert.match(dialog().textContent, /Graph Engineering:/);
     assert.ok(dialog().querySelector('.rlb-task-link'));
+    assert.equal(dialog().querySelector('.rlb-running'), null);
+    assert.ok(dialog().querySelector('.rlb-activity'));
+    assert.ok(dialog().querySelector('.rlb-by-task'));
     assert.equal(dialog().querySelector('.rlb-task-link.bp3-icon-document-open'), null);
-    // The running session is listed separately from the by-task rollup.
-    assert.equal(dialog().querySelectorAll('.rlb-table').length, 2);
-    const runningTable = dialog().querySelector('.rlb-table');
-    const runningHeaders = [...runningTable.querySelectorAll('thead th')];
-    assert.deepEqual(
-        runningHeaders.map(header => header.textContent),
-        ['Task', 'Started', 'Elapsed', 'Actions']
-    );
-    assert.ok(runningHeaders.every(header => header.getAttribute('scope') === 'col'));
-    assert.ok(runningHeaders.at(-1).classList.contains('rlb-visually-hidden'));
-    const started = runningTable.querySelector('.rlb-started');
-    assert.ok(started, 'Running exposes a semantic Started time');
-    assert.equal(started.tagName, 'TIME');
-    assert.equal(started.title, formatStamp(clock.getRunning()[0].start));
-    assert.equal(started.querySelector('.rlb-started__date')?.textContent, 'Today');
-    assert.match(started.querySelector('.rlb-started__time')?.textContent ?? '', /^\d{2}:\d{2}$/);
-    assert.equal(started.dateTime, started.getAttribute('datetime'));
+    assert.equal(dialog().querySelectorAll('.rlb-table').length, 1);
     const taskTable = dialog().querySelector('.rlb-task-table');
     assert.ok(taskTable, 'By Task uses its own stable column contract');
     assert.deepEqual(

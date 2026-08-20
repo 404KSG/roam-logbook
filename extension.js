@@ -1048,7 +1048,14 @@ async function openBlock(uid) {
 var requestedSidebarBlocks = /* @__PURE__ */ new WeakMap();
 var sidebarOperationQueues = /* @__PURE__ */ new WeakMap();
 var knownSidebarBlockWindows = /* @__PURE__ */ new WeakMap();
+var sidebarWindowCacheRevisions = /* @__PURE__ */ new WeakMap();
 var SIDEBAR_WINDOW_CACHE_TTL_MS = ACTIVE_WORK_WINDOW_MS;
+var sidebarWindowCacheRevision = (sidebar) => sidebarWindowCacheRevisions.get(sidebar) || 0;
+var bumpSidebarWindowCacheRevision = (sidebar) => {
+  const revision = sidebarWindowCacheRevision(sidebar) + 1;
+  sidebarWindowCacheRevisions.set(sidebar, revision);
+  return revision;
+};
 var sidebarWindowCache = (sidebar) => {
   let cache = knownSidebarBlockWindows.get(sidebar);
   if (!cache) {
@@ -1068,12 +1075,16 @@ var rememberSidebarWindows = (sidebar, windows) => {
       cache.set(uid, Date.now());
     }
   }
+  bumpSidebarWindowCacheRevision(sidebar);
 };
 var rememberSidebarWindow = (sidebar, uid) => {
   sidebarWindowCache(sidebar).set(uid, Date.now());
+  bumpSidebarWindowCacheRevision(sidebar);
 };
 var forgetSidebarWindow = (sidebar, uid) => {
-  sidebarWindowCache(sidebar).delete(uid);
+  if (sidebarWindowCache(sidebar).delete(uid)) {
+    bumpSidebarWindowCacheRevision(sidebar);
+  }
 };
 var hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
   const knownAt = sidebarWindowCache(sidebar).get(uid);
@@ -1083,6 +1094,36 @@ var hasRecentlyKnownSidebarWindow = (sidebar, uid) => {
   }
   return true;
 };
+function warmRightSidebarWindowCache() {
+  const sidebar = getApi()?.ui?.rightSidebar;
+  if (typeof sidebar?.getWindows !== "function") {
+    return Promise.resolve({ ok: false, reason: "unavailable" });
+  }
+  const startingRevision = sidebarWindowCacheRevision(sidebar);
+  let windows;
+  try {
+    windows = sidebar.getWindows();
+  } catch (error) {
+    console.debug("[roam-logbook] sidebar cache warmup failed", error);
+    return Promise.resolve({ ok: false, reason: "read-failed" });
+  }
+  return Promise.resolve(windows).then(
+    (resolvedWindows) => {
+      if (!Array.isArray(resolvedWindows)) {
+        return { ok: false, reason: "malformed-read" };
+      }
+      if (sidebarWindowCacheRevision(sidebar) !== startingRevision) {
+        return { ok: false, reason: "stale-read" };
+      }
+      rememberSidebarWindows(sidebar, resolvedWindows);
+      return { ok: true, count: sidebarWindowCache(sidebar).size };
+    },
+    (error) => {
+      console.debug("[roam-logbook] sidebar cache warmup failed", error);
+      return { ok: false, reason: "read-failed" };
+    }
+  );
+}
 var blockSidebarWindow = (uid, order) => {
   const sidebarWindow = { type: "block", "block-uid": uid };
   if (Number.isFinite(order))
@@ -1161,7 +1202,7 @@ async function frontBlockInRightSidebar(uid, { isCurrent = () => true, preferExi
     return { ok: false, skipped: true, reason: "superseded" };
   const hadPendingOperation = sidebarOperationQueues.has(sidebar);
   const recentlyKnown = hasRecentlyKnownSidebarWindow(sidebar, uid);
-  const shouldPreview = typeof sidebar.setWindowOrder === "function" && (hadPendingOperation || recentlyKnown || preferExisting);
+  const shouldPreview = typeof sidebar.setWindowOrder === "function" && (recentlyKnown || preferExisting);
   const sidebarOpen = openSidebarForIntent(sidebar);
   let previewPromise = null;
   if (shouldPreview) {
@@ -3771,244 +3812,6 @@ var taskLink = (row, { onClose = () => {
   return link;
 };
 
-// src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.56";
-var STATE_FORMATS = Object.freeze({
-  pomodoroTargets: 1,
-  pomodoroCycle: 1,
-  stateBackups: 1
-});
-
-// src/settings.js
-var SETTING_TOPBAR = "showTopbarWidget";
-var SETTING_MULTIPLE = "allowMultipleClocks";
-var SETTING_TODO_ONLY = "todoBlocksOnly";
-var SETTING_STALE_HOURS = "staleHours";
-var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
-var SETTING_TIMING_LINE_SIDEBAR = "keepTimingLineAtTopOfRightSidebar";
-var SETTING_POMODORO_STATE = "pomodoroTargets";
-var SETTING_POMODORO_CYCLE = "pomodoroCycle";
-var SETTING_STATE_BACKUPS = "stateBackups";
-var DEFAULTS = {
-  [SETTING_TOPBAR]: true,
-  [SETTING_MULTIPLE]: false,
-  [SETTING_TODO_ONLY]: true,
-  [SETTING_STALE_HOURS]: "1.5",
-  [SETTING_POMODORO_MINUTES]: "45",
-  [SETTING_TIMING_LINE_SIDEBAR]: true
-};
-var DEFAULT_ON_SWITCHES = [
-  SETTING_TIMING_LINE_SIDEBAR
-];
-var extensionAPI = null;
-function setExtensionAPI(api) {
-  extensionAPI = api;
-}
-function initializeDefaultOnSwitches() {
-  for (const key of DEFAULT_ON_SWITCHES) {
-    const value = extensionAPI?.settings?.get(key);
-    if (value === void 0 || value === null) {
-      extensionAPI?.settings?.set(key, true);
-    }
-  }
-}
-function read(key) {
-  const value = extensionAPI?.settings?.get(key);
-  return value === void 0 || value === null ? DEFAULTS[key] : value;
-}
-function booleanSetting(key) {
-  const value = read(key);
-  if (value === true || value === 1)
-    return true;
-  if (value === false || value === 0)
-    return false;
-  if (typeof value === "string") {
-    const normalized2 = value.trim().toLowerCase();
-    if (normalized2 === "true" || normalized2 === "1")
-      return true;
-    if (normalized2 === "false" || normalized2 === "0")
-      return false;
-  }
-  return Boolean(DEFAULTS[key]);
-}
-function keepTimingLineAtTopOfRightSidebar() {
-  return booleanSetting(SETTING_TIMING_LINE_SIDEBAR);
-}
-function staleHours() {
-  const parsed = Number(read(SETTING_STALE_HOURS));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
-}
-function pomodoroMinutes() {
-  const parsed = Number(read(SETTING_POMODORO_MINUTES));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 45;
-}
-function readSetting(key) {
-  return extensionAPI?.settings?.get(key) ?? null;
-}
-function writeSetting(key, value) {
-  const setter = extensionAPI?.settings?.set;
-  if (typeof setter !== "function")
-    return false;
-  try {
-    setter.call(extensionAPI.settings, key, value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function hasStateBackup(key, raw) {
-  try {
-    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
-    const stored = readSetting(SETTING_STATE_BACKUPS);
-    const parsed = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
-    return parsed?.version === STATE_FORMATS.stateBackups && parsed.data?.[key]?.rawSignature === rawSignature;
-  } catch {
-    return false;
-  }
-}
-function preserveStateBackup(key, raw) {
-  try {
-    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
-    let stored = readSetting(SETTING_STATE_BACKUPS);
-    try {
-      stored = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
-    } catch {
-      stored = null;
-    }
-    const data = stored?.version === 1 && stored.data && typeof stored.data === "object" ? stored.data : {};
-    if (data[key]?.rawSignature === rawSignature)
-      return false;
-    data[key] = { rawSignature, raw };
-    const saved = writeSetting(
-      SETTING_STATE_BACKUPS,
-      JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
-    );
-    return saved;
-  } catch (error) {
-    console.warn("[roam-logbook] could not preserve invalid state backup", error);
-    return false;
-  }
-}
-function normalizeChecked(event) {
-  return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
-}
-function normalizeSelected(event) {
-  return typeof event === "string" ? event : String(event?.target?.value ?? "");
-}
-function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
-  const parsed = Number(normalizeSelected(event).trim());
-  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-  const rounded = Number(candidate.toFixed(6));
-  return String(rounded > 0 ? rounded : 45);
-}
-function normalizePositiveHours(event, fallback = staleHours()) {
-  const parsed = Number(normalizeSelected(event).trim());
-  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-  const rounded = Number(candidate.toFixed(6));
-  return String(rounded > 0 ? rounded : 1.5);
-}
-
-// src/dashboard-running.js
-function runningSection({
-  running: running2,
-  now,
-  isDiscarding = () => false,
-  onDiscard,
-  onClockOut,
-  headerRow: headerRow2,
-  statusMark: statusMark2,
-  taskLink: taskLink2
-}) {
-  const stale = new Set(findStaleClocks(running2, now, staleHours()).map((e) => e.clockUid));
-  const section = el("section", "rlb-dashboard-section rlb-running rlb-dashboard-panel");
-  section.setAttribute("aria-labelledby", "roam-logbook-running-title");
-  const heading = el("div", "rlb-panel__header");
-  heading.appendChild(el("h3", "rlb-section__title", "Timing"));
-  heading.lastElementChild.id = "roam-logbook-running-title";
-  if (stale.size > 0) {
-    heading.appendChild(
-      el("span", "bp3-tag bp3-minimal bp3-intent-warning rlb-panel__notice", `${stale.size} stale`)
-    );
-  }
-  section.appendChild(heading);
-  const table = el("table", "rlb-table");
-  table.appendChild(
-    headerRow2([
-      "Task",
-      "Started",
-      { label: "Elapsed", numeric: true },
-      { label: "Actions", visuallyHidden: true }
-    ])
-  );
-  const tbody = el("tbody");
-  for (const entry of running2) {
-    const row = el("tr");
-    const task = el("td", "rlb-cell");
-    const mark = statusMark2(entry.status);
-    if (mark)
-      task.appendChild(mark);
-    task.appendChild(taskLink2(entry));
-    if (stale.has(entry.clockUid)) {
-      task.appendChild(el("span", "bp3-tag bp3-minimal bp3-intent-warning", "stale"));
-    }
-    const actions = el("td", "rlb-table__num");
-    const discarding = isDiscarding(entry.clockUid);
-    const discardTitle = discarding ? "Confirm discard of this CLOCK entry" : "Discard this CLOCK entry (cannot be undone)";
-    const discard = button(
-      `bp3-button bp3-minimal bp3-small bp3-icon-trash${discarding ? " bp3-intent-danger" : ""}`,
-      "",
-      (event) => {
-        event.stopPropagation();
-        onDiscard(entry);
-      },
-      { title: discardTitle }
-    );
-    discard.dataset.action = "discard";
-    actions.append(
-      button(
-        "bp3-button bp3-minimal bp3-small bp3-icon-log-out rlb-running__checkout",
-        "",
-        (event) => {
-          event.stopPropagation();
-          void onClockOut(entry);
-        },
-        { title: "Check Out" }
-      ),
-      discard
-    );
-    actions.firstElementChild.dataset.action = "clock-out";
-    const started = formatStarted(entry.start, now);
-    const startedTime = el("time", "rlb-started", "");
-    startedTime.title = started.raw;
-    startedTime.setAttribute("aria-label", started.raw);
-    if (started.datetime)
-      startedTime.dateTime = started.datetime;
-    if (started.valid) {
-      startedTime.append(
-        el("span", "rlb-started__date", started.dateLabel),
-        el("span", "rlb-started__time", started.timeLabel)
-      );
-    } else {
-      startedTime.textContent = started.raw;
-    }
-    const startedCell = el("td", "rlb-muted rlb-started-cell");
-    startedCell.appendChild(startedTime);
-    const elapsed = el(
-      "td",
-      "rlb-table__num rlb-running-elapsed",
-      formatElapsed(now.getTime() - entry.start.getTime())
-    );
-    elapsed.dataset.runningElapsed = "true";
-    elapsed.dataset.clockUid = entry.clockUid;
-    elapsed.dataset.startMs = String(entry.start.getTime());
-    row.append(task, startedCell, elapsed, actions);
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  section.appendChild(table);
-  return section;
-}
-
 // src/dashboard-task-tree.js
 var countDescendants = (node) => node.children.reduce((sum, child) => sum + 1 + countDescendants(child), 0);
 function tasksSection(tree, { taskView, collapsedByFilter, taskLink: taskLink2, statusMark: statusMark2, taskTimingAction }) {
@@ -4885,6 +4688,7 @@ function createRefreshState({
 // src/dashboard.js
 var ROOT_ID = "roam-logbook-dashboard";
 var DASHBOARD_TITLE = "Task Tracker";
+var LIVE_UPDATE_INTERVAL_MS = 60 * 1e3;
 var localDayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 var liveMetricBoundaryKey = (rangeId, date) => `${rangeId}:${localDayKey(date)}`;
 var runningEntries = (entries) => entries.filter((entry) => entry?.start && entry.running);
@@ -4960,7 +4764,6 @@ function createDashboard({
   now: nowFn = () => /* @__PURE__ */ new Date(),
   setIntervalFn = (callback, delay) => setInterval(callback, delay),
   clearIntervalFn = (ticker) => clearInterval(ticker),
-  confirmation = createConfirmationController(),
   scheduleMutationStartFn = null
 } = {}) {
   let root = null;
@@ -4978,6 +4781,7 @@ function createDashboard({
   let liveMetricCache = null;
   let lastTransientIssues = [];
   let lastRefreshNotice = "";
+  let liveRenderBoundary = null;
   let themeRuntime = null;
   let releaseScrollLock = null;
   const focusTrap = createFocusTrap(() => root?.querySelector(".rlb-dialog"));
@@ -5017,7 +4821,6 @@ function createDashboard({
     onRender: syncRefreshUi,
     messages: REFRESH_MESSAGES.dashboard
   });
-  const resetDiscardConfirmation = () => confirmation?.reset();
   const updateLiveMetricNodes = (now) => {
     if (!lastModel)
       return;
@@ -5044,13 +4847,14 @@ function createDashboard({
         node.textContent = value;
     }
   };
-  const updateRunningElapsed = () => {
+  const updateLiveAnalytics = () => {
     if (!root?.classList.contains("rlb-root--open"))
       return;
     const nowDateValue = nowFn();
-    const now = nowDateValue.getTime();
-    for (const cell of bodyNode?.querySelectorAll('[data-running-elapsed="true"]') || []) {
-      cell.textContent = formatElapsed(now - Number(cell.dataset.startMs));
+    const nextBoundary = liveMetricBoundaryKey(rangeId, nowDateValue);
+    if (nextBoundary !== liveRenderBoundary) {
+      render({ readGraph: false });
+      return;
     }
     updateLiveMetricNodes(nowDateValue);
     syncActivityView(activityNode, lastModel?.activity, nowDateValue);
@@ -5059,10 +4863,9 @@ function createDashboard({
     clearLiveTicker();
     if (!root?.classList.contains("rlb-root--open"))
       return;
-    if (!bodyNode?.querySelector('[data-running-elapsed="true"]') && !lastModel?.running?.length) {
+    if (!lastModel?.running?.length)
       return;
-    }
-    liveTicker = setIntervalFn(updateRunningElapsed, 1e3);
+    liveTicker = setIntervalFn(updateLiveAnalytics, LIVE_UPDATE_INTERVAL_MS);
   };
   const paintDashboard = (now) => {
     if (!bodyNode || !lastModel)
@@ -5088,20 +4891,6 @@ function createDashboard({
       ...(hierarchy.issues || []).map(issueRow),
       ...transientIssues.map(issueRow)
     ];
-    if (model.running.length > 0) {
-      bodyNode.appendChild(
-        runningSection({
-          running: model.running,
-          now,
-          isDiscarding: (uid) => confirmation?.isArmed(`discard:${uid}`, "dashboard"),
-          onDiscard: handleDiscard,
-          onClockOut: (entry) => act(() => clockOut(entry.clockUid)),
-          headerRow,
-          statusMark,
-          taskLink: renderTaskLink
-        })
-      );
-    }
     if (model.entries.length === 0) {
       bodyNode.appendChild(el("div", "rlb-empty", "No clock entries in this range yet."));
       if (issues.length > 0)
@@ -5186,6 +4975,7 @@ function createDashboard({
     });
     lastTransientIssues = transientIssues;
     lastRefreshNotice = refreshNotice;
+    liveRenderBoundary = liveMetricBoundaryKey(rangeId, now);
     paintDashboard(now);
     return { ok: true, refreshFailed };
   };
@@ -5228,14 +5018,6 @@ function createDashboard({
       console.error("[roam-logbook]", error);
     }
     render();
-  };
-  const handleDiscard = (entry) => {
-    const key = `discard:${entry.clockUid}`;
-    if (!confirmation?.arm(key, "dashboard")) {
-      render({ readGraph: false });
-      return;
-    }
-    void act(() => discardClock(entry.clockUid));
   };
   const startTaskTiming = (taskUid) => {
     if (!taskUid)
@@ -5304,7 +5086,7 @@ function createDashboard({
     const subtitle = el(
       "p",
       "rlb-header__subtitle rlb-visually-hidden",
-      "Focus sessions, timing, and task rollups"
+      "Time totals, activity, and task rollups"
     );
     subtitle.id = "roam-logbook-dashboard-description";
     heading.append(title, subtitle);
@@ -5372,7 +5154,6 @@ function createDashboard({
       return;
     }
     clearLiveTicker();
-    resetDiscardConfirmation();
     focusTrap.deactivate();
     root.classList.remove("rlb-root--open");
     root.setAttribute("aria-hidden", "true");
@@ -5431,6 +5212,7 @@ function createDashboard({
       activityNode = null;
       lastModel = null;
       liveMetricCache = null;
+      liveRenderBoundary = null;
       refreshRuntime.dispose();
       focusTrap.deactivate();
       refreshButton = null;
@@ -5438,6 +5220,143 @@ function createDashboard({
       refreshAlertNode = null;
     }
   };
+}
+
+// src/version.js
+var PLUGIN_VERSION = "0.9.0-beta.56";
+var STATE_FORMATS = Object.freeze({
+  pomodoroTargets: 1,
+  pomodoroCycle: 1,
+  stateBackups: 1
+});
+
+// src/settings.js
+var SETTING_TOPBAR = "showTopbarWidget";
+var SETTING_MULTIPLE = "allowMultipleClocks";
+var SETTING_TODO_ONLY = "todoBlocksOnly";
+var SETTING_STALE_HOURS = "staleHours";
+var SETTING_POMODORO_MINUTES = "pomodoroMinutes";
+var SETTING_TIMING_LINE_SIDEBAR = "keepTimingLineAtTopOfRightSidebar";
+var SETTING_POMODORO_STATE = "pomodoroTargets";
+var SETTING_POMODORO_CYCLE = "pomodoroCycle";
+var SETTING_STATE_BACKUPS = "stateBackups";
+var DEFAULTS = {
+  [SETTING_TOPBAR]: true,
+  [SETTING_MULTIPLE]: false,
+  [SETTING_TODO_ONLY]: true,
+  [SETTING_STALE_HOURS]: "1.5",
+  [SETTING_POMODORO_MINUTES]: "45",
+  [SETTING_TIMING_LINE_SIDEBAR]: true
+};
+var DEFAULT_ON_SWITCHES = [
+  SETTING_TIMING_LINE_SIDEBAR
+];
+var extensionAPI = null;
+function setExtensionAPI(api) {
+  extensionAPI = api;
+}
+function initializeDefaultOnSwitches() {
+  for (const key of DEFAULT_ON_SWITCHES) {
+    const value = extensionAPI?.settings?.get(key);
+    if (value === void 0 || value === null) {
+      extensionAPI?.settings?.set(key, true);
+    }
+  }
+}
+function read(key) {
+  const value = extensionAPI?.settings?.get(key);
+  return value === void 0 || value === null ? DEFAULTS[key] : value;
+}
+function booleanSetting(key) {
+  const value = read(key);
+  if (value === true || value === 1)
+    return true;
+  if (value === false || value === 0)
+    return false;
+  if (typeof value === "string") {
+    const normalized2 = value.trim().toLowerCase();
+    if (normalized2 === "true" || normalized2 === "1")
+      return true;
+    if (normalized2 === "false" || normalized2 === "0")
+      return false;
+  }
+  return Boolean(DEFAULTS[key]);
+}
+function keepTimingLineAtTopOfRightSidebar() {
+  return booleanSetting(SETTING_TIMING_LINE_SIDEBAR);
+}
+function staleHours() {
+  const parsed = Number(read(SETTING_STALE_HOURS));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
+}
+function pomodoroMinutes() {
+  const parsed = Number(read(SETTING_POMODORO_MINUTES));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 45;
+}
+function readSetting(key) {
+  return extensionAPI?.settings?.get(key) ?? null;
+}
+function writeSetting(key, value) {
+  const setter = extensionAPI?.settings?.set;
+  if (typeof setter !== "function")
+    return false;
+  try {
+    setter.call(extensionAPI.settings, key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function hasStateBackup(key, raw) {
+  try {
+    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const stored = readSetting(SETTING_STATE_BACKUPS);
+    const parsed = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
+    return parsed?.version === STATE_FORMATS.stateBackups && parsed.data?.[key]?.rawSignature === rawSignature;
+  } catch {
+    return false;
+  }
+}
+function preserveStateBackup(key, raw) {
+  try {
+    const rawSignature = typeof raw === "string" ? raw : JSON.stringify(raw);
+    let stored = readSetting(SETTING_STATE_BACKUPS);
+    try {
+      stored = stored ? typeof stored === "string" ? JSON.parse(stored) : stored : null;
+    } catch {
+      stored = null;
+    }
+    const data = stored?.version === 1 && stored.data && typeof stored.data === "object" ? stored.data : {};
+    if (data[key]?.rawSignature === rawSignature)
+      return false;
+    data[key] = { rawSignature, raw };
+    const saved = writeSetting(
+      SETTING_STATE_BACKUPS,
+      JSON.stringify({ version: STATE_FORMATS.stateBackups, data })
+    );
+    return saved;
+  } catch (error) {
+    console.warn("[roam-logbook] could not preserve invalid state backup", error);
+    return false;
+  }
+}
+function normalizeChecked(event) {
+  return typeof event === "boolean" ? event : Boolean(event?.target?.checked);
+}
+function normalizeSelected(event) {
+  return typeof event === "string" ? event : String(event?.target?.value ?? "");
+}
+function normalizePositiveMinutes(event, fallback = pomodoroMinutes()) {
+  const parsed = Number(normalizeSelected(event).trim());
+  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const rounded = Number(candidate.toFixed(6));
+  return String(rounded > 0 ? rounded : 45);
+}
+function normalizePositiveHours(event, fallback = staleHours()) {
+  const parsed = Number(normalizeSelected(event).trim());
+  const candidate = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const rounded = Number(candidate.toFixed(6));
+  return String(rounded > 0 ? rounded : 1.5);
 }
 
 // src/pomodoro.js
@@ -7493,26 +7412,6 @@ var DASHBOARD = String.raw`/* ---- dashboard ---- */
     background: var(--rlb-surface);
 }
 
-/* Single-focus mode exposes at most one live CLOCK. Keep this control surface
-   compact while preserving the table labels and 32px action targets. */
-.rlb-running.rlb-dashboard-panel {
-    padding: 8px 12px 7px;
-}
-
-.rlb-running .rlb-panel__header {
-    margin-bottom: 2px;
-}
-
-.rlb-dashboard .rlb-running .rlb-table th {
-    padding-top: 2px;
-    padding-bottom: 2px;
-}
-
-.rlb-dashboard .rlb-running .rlb-table td {
-    padding-top: 2px;
-    padding-bottom: 2px;
-    vertical-align: middle;
-}
 `;
 
 // src/styles/activity.js
@@ -10082,8 +9981,7 @@ function createTimingLineSidebarFronting({
     let result;
     try {
       result = await frontBlock(action.taskUid, {
-        isCurrent: () => isCurrent(intent),
-        preferExisting: action.source === "active-work-switch"
+        isCurrent: () => isCurrent(intent)
       });
     } catch (error) {
       result = {
@@ -10155,6 +10053,7 @@ function createController({ extensionAPI: extensionAPI2 }) {
   let detachCompletion = null;
   let detachTimingLineSidebar = null;
   let timingLineSidebar = null;
+  let sidebarWarmupTimer = null;
   const targetString = (context) => {
     try {
       const uid = resolveTaskUid(context?.["block-uid"]);
@@ -10302,11 +10201,19 @@ function createController({ extensionAPI: extensionAPI2 }) {
       if (snapshot.filter((entry) => entry.running).length > 1) {
         void reconcileOpenClocks({ entries: snapshot });
       }
+      sidebarWarmupTimer = setTimeout(() => {
+        sidebarWarmupTimer = null;
+        if (!destroyed)
+          void warmRightSidebarWindowCache();
+      }, 0);
     },
     destroy() {
       if (destroyed)
         return;
       destroyed = true;
+      if (sidebarWarmupTimer !== null)
+        clearTimeout(sidebarWarmupTimer);
+      sidebarWarmupTimer = null;
       confirmation.reset();
       detachTimingLineSidebar?.();
       detachTimingLineSidebar = null;

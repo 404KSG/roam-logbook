@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0-beta.58 — 2026-08-20
+
+### Faster native switching and an analysis-only Dashboard
+
+- Removes the beta.57 forced sidebar preview for unconfirmed Active Work
+  targets. New Tasks now proceed directly through Roam's authoritative
+  `getWindows` / `addWindow` path instead of waiting on a reorder that may refer
+  to a window which does not exist.
+- Preserves immediate native reveal for confirmed cached windows and rapid
+  latest-intent reconciliation, while warming the existing-window hint after
+  startup outside the extension's critical mount path. Unknown rapid-switch
+  targets never treat queue pressure as proof that a native window exists, and
+  stale warmup results cannot overwrite a newer user-action cache entry.
+- Removes the Dashboard Timing card and its duplicate Clock Out / discard
+  controls. Live control remains in Active Work; Dashboard now contains only
+  the four summary metrics, Activity analysis, and the filterable/sortable By
+  Task rollup.
+- Reduces Dashboard live analytics refreshes from every second to once per
+  minute without additional graph reads or tree rebuilds, rebuilding from the
+  cached snapshot when the local date boundary changes.
+- Adds regression coverage for unknown and prewarmed sidebar targets, the
+  analysis-only Dashboard structure, minute-level live updates, lifecycle, and
+  browser layout.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.57 — 2026-08-20
 
 ### Preemptive Timing Line switching
