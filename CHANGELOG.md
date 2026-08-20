@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0-beta.52 — 2026-08-20
+
+### Active Threads and Today hierarchy
+
+- Fixed the Active Threads context breadcrumb, task title, and timing metadata
+  onto three non-overlapping rows, including narrow popovers and Roam host
+  button styles.
+- Kept full context breadcrumbs for Active Threads and root Today tasks, while
+  removing the redundant path from Today child rows whose hierarchy is already
+  visible through indentation and expand/collapse controls.
+- Added a restrained gap between the compact view toolbar and the Timing card.
+
+No graph format, CLOCK semantics, settings, or stored data changed.
+
 ## 0.9.0-beta.51 — 2026-08-20
 
 A full-codebase review pass. No graph format change and no migration; existing

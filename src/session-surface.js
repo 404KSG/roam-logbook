@@ -139,7 +139,13 @@ const renderTodayRow = (row, options) => {
     }
 
     const content = el('div', 'rlb-today__content');
-    const breadcrumb = renderContextPath(node.contextPath, options.onOpenTask, 'rlb-today__breadcrumb');
+    // Visible child rows already communicate their parent through the tree
+    // rail/indentation. Keep contextPath on the model, but avoid repeating the
+    // same hierarchy in every descendant row; roots still need page-context
+    // breadcrumbs when their physical path is outside the visible task tree.
+    const breadcrumb = row.depth === 0
+        ? renderContextPath(node.contextPath, options.onOpenTask, 'rlb-today__breadcrumb')
+        : null;
     if (breadcrumb) content.appendChild(breadcrumb);
     const titleButton = button(
         'bp3-button bp3-minimal rlb-today__title',

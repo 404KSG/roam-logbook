@@ -224,6 +224,7 @@ export const SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-surface__section--focused {
+    margin-top: 6px;
     margin-bottom: 6px;
     padding: 3px;
     border: 1px solid var(--rlb-surface-border);
@@ -498,6 +499,16 @@ export const SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 2px;
     background: transparent !important;
     box-shadow: none !important;
+}
+
+/*
+ * Context rows use three explicit content tracks. This selector deliberately
+ * carries the row state plus the Blueprint button classes so a late Roam
+ * button rule cannot place the title back on the breadcrumb's first track.
+ */
+.rlb-run.rlb-run--with-context .bp3-button.bp3-minimal.rlb-run__title {
+    grid-row: 2;
+    min-width: 0;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {

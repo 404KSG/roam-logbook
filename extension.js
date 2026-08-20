@@ -3701,7 +3701,7 @@ var taskLink = (row, { onClose = () => {
 };
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.51";
+var PLUGIN_VERSION = "0.9.0-beta.52";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
@@ -6103,6 +6103,7 @@ var SURFACE = String.raw`/* ---- popover ---- */
 }
 
 .rlb-surface__section--focused {
+    margin-top: 6px;
     margin-bottom: 6px;
     padding: 3px;
     border: 1px solid var(--rlb-surface-border);
@@ -6377,6 +6378,16 @@ var SURFACE = String.raw`/* ---- popover ---- */
     border-radius: 2px;
     background: transparent !important;
     box-shadow: none !important;
+}
+
+/*
+ * Context rows use three explicit content tracks. This selector deliberately
+ * carries the row state plus the Blueprint button classes so a late Roam
+ * button rule cannot place the title back on the breadcrumb's first track.
+ */
+.rlb-run.rlb-run--with-context .bp3-button.bp3-minimal.rlb-run__title {
+    grid-row: 2;
+    min-width: 0;
 }
 
 .bp3-button.bp3-minimal.rlb-run__title::before {
@@ -8070,7 +8081,7 @@ var renderTodayRow = (row, options) => {
     rail.appendChild(el("span", "rlb-today__spacer"));
   }
   const content = el("div", "rlb-today__content");
-  const breadcrumb = renderContextPath(node.contextPath, options.onOpenTask, "rlb-today__breadcrumb");
+  const breadcrumb = row.depth === 0 ? renderContextPath(node.contextPath, options.onOpenTask, "rlb-today__breadcrumb") : null;
   if (breadcrumb)
     content.appendChild(breadcrumb);
   const titleButton = button(

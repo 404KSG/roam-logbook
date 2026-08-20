@@ -861,8 +861,8 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             <div class="rlb-surface__list" role="group" aria-label="Active Threads">
                 <section class="rlb-surface__section rlb-surface__section--focused" aria-label="TIMING">
                     <div class="rlb-surface__section-label">TIMING</div>
-                    <div class="rlb-run rlb-run--inline-meta rlb-run--overrun" data-session-state="running">
-                        <div class="rlb-run__body"><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div>
+                    <div class="rlb-run rlb-run--inline-meta rlb-run--with-context rlb-run--overrun" data-session-state="running">
+                        <div class="rlb-run__body"><nav class="rlb-run__context" aria-label="Context path"><button class="bp3-button bp3-minimal rlb-context-breadcrumb__segment">Project</button><span class="rlb-context-breadcrumb__separator" aria-hidden="true">›</span><button class="bp3-button bp3-minimal rlb-context-breadcrumb__segment">Work</button></nav><button class="bp3-button bp3-minimal rlb-run__title" title="Open this block: ${longTitle}" aria-label="Open this block: ${longTitle}">${longTitle}</button><div class="rlb-run__meta"><div class="rlb-run__meta-line rlb-run__meta-primary"><span class="rlb-run__elapsed">12:34</span><span class="rlb-run__meta-separator" aria-hidden="true"> · </span><span class="rlb-run__total">2h 05m total</span></div><time class="rlb-run__meta-line rlb-run__started">Today 09:12</time></div></div>
                         <div class="rlb-run__actions"><button class="bp3-button bp3-small bp3-minimal bp3-icon-log-out rlb-run__checkout" title="Check Out" aria-label="Check Out"></button><button class="bp3-button bp3-small bp3-minimal bp3-icon-trash" title="Discard this CLOCK entry" aria-label="Discard this CLOCK entry"></button></div>
                     </div>
                 </section>
@@ -895,6 +895,10 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             const focusedStartedStyle = getComputedStyle(focused.querySelector('.rlb-run__started'));
             const focusedTitle = focused.querySelector('.rlb-run__title');
             const focusedTitleRect = rect(focusedTitle);
+            const focusedContext = focused.querySelector('.rlb-run__context');
+            const focusedContextRect = rect(focusedContext);
+            const focusedMeta = focused.querySelector('.rlb-run__meta');
+            const focusedMetaRect = rect(focusedMeta);
             const focusedActions = focused.querySelector('.rlb-run__actions');
             const focusedActionsRect = rect(focusedActions);
             const focusedActionRects = [...focusedActions.children].map(rect);
@@ -937,8 +941,15 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
                 focusedCount: focusedSection.querySelectorAll('.rlb-run').length,
                 recentCount: recentSection.querySelectorAll('.rlb-run').length,
                 statusCount: list.querySelectorAll('.rlb-run__status').length,
+                contextGridRow: getComputedStyle(focusedContext).gridRow,
+                titleGridRow: getComputedStyle(focusedTitle).gridRow,
+                metaGridRow: getComputedStyle(focusedMeta).gridRow,
+                actionsGridRow: getComputedStyle(focusedActions).gridRow,
+                contextAboveTitle: focusedContextRect.bottom <= focusedTitleRect.top + 0.5,
+                titleAboveMeta: focusedTitleRect.bottom <= focusedMetaRect.top + 0.5,
                 titleStartsAtRowContent: focusedTitleRect.left >= focusedRect.left,
                 titleBeforeActions: focusedTitleRect.right <= focusedActionsRect.left + .5,
+                actionsRemainUsable: focusedActionsRect.width >= 64 && focusedActionRects.every(item => item.width >= 28),
                 focusedElapsedWeight: getComputedStyle(focused.querySelector('.rlb-run__elapsed')).fontWeight,
                 recentTitleWeight: getComputedStyle(recent.querySelector('.rlb-run__title')).fontWeight,
                 recentMeta: recentMeta.textContent,
@@ -1003,8 +1014,15 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.focusedCount, 1, context);
             assert.equal(geometry.recentCount, 1, context);
             assert.equal(geometry.statusCount, 0, context);
+            assert.equal(geometry.contextGridRow, '1', context);
+            assert.equal(geometry.titleGridRow, '2', context);
+            assert.equal(geometry.metaGridRow, '3', context);
+            assert.equal(geometry.actionsGridRow, '1 / span 3', context);
+            assert.equal(geometry.contextAboveTitle, true, context);
+            assert.equal(geometry.titleAboveMeta, true, context);
             assert.equal(geometry.titleStartsAtRowContent, true, context);
             assert.equal(geometry.titleBeforeActions, true, context);
+            assert.equal(geometry.actionsRemainUsable, true, context);
             assert.ok(Number(geometry.focusedElapsedWeight) >= 600, context);
             assert.ok(Number(geometry.recentTitleWeight) < Number(geometry.focusedElapsedWeight), context);
             assert.equal(geometry.overrunElapsedColor, theme === 'bp3-dark' ? 'rgb(255, 115, 115)' : 'rgb(205, 66, 70)', context);
@@ -1018,7 +1036,7 @@ test('Active Work keeps Timing and Parallel Threads readable at narrow widths', 
             assert.equal(geometry.headerTitleBeforeActions, true, context);
             assert.equal(geometry.headerActionsInside, true, context);
             assert.ok(geometry.actionWidths.every(width => Math.abs(width - 32) <= 0.5), context);
-            assert.ok(geometry.headerTimingGap >= 3, context);
+            assert.ok(geometry.headerTimingGap >= 9, context);
             assert.ok(geometry.footerHeightDelta <= 1, context);
             assert.deepEqual(geometry.footerLabels, ['Clock Out All'], context);
             assert.equal(geometry.overflow, false, context);

@@ -181,14 +181,22 @@ test('Today view switches in place, collapses hierarchy, and exposes icon-only P
     unmount(dom);
 });
 
-test('Today breadcrumbs render on every row with formatted physical reference parents', () => {
+test('Today breadcrumbs render only for root context and not visible child rows', () => {
     const { dom, root } = mount();
     const tree = buildTodayTodoTree(
         [
             {
+                uid: 'plain-context',
+                string: 'Project context',
+                order: 0,
+                children: [
+                    { uid: 'contextual-root', string: '{{[[TODO]]}} Root task', order: 0, children: [] },
+                ],
+            },
+            {
                 uid: 'root-breadcrumb',
                 string: '{{[[TODO]]}} [[Project Page]] #[[Area]]',
-                order: 0,
+                order: 1,
                 children: [
                     {
                         uid: 'mirror-breadcrumb',
@@ -208,6 +216,9 @@ test('Today breadcrumbs render on every row with formatted physical reference pa
         }
     );
     const model = { ...tree, status: 'success' };
+    const expandedRows = flattenTodayRows(model, {
+        expanded: new Set(['root-breadcrumb', 'target-breadcrumb']),
+    });
 
     renderSessionSurface(
         root,
@@ -215,28 +226,23 @@ test('Today breadcrumbs render on every row with formatted physical reference pa
         {
             view: 'today',
             todayModel: model,
-            todayRows: flattenTodayRows(model, {
-                expanded: new Set(['root-breadcrumb', 'target-breadcrumb']),
-            }),
+            todayRows: expandedRows,
             onOpenTask: () => {},
             onStartToday: () => {},
         }
     );
 
+    const contextualRootRow = root.querySelector('[data-task-uid="contextual-root"]');
     const rootRow = root.querySelector('[data-task-uid="root-breadcrumb"]');
     const targetRow = root.querySelector('[data-task-uid="target-breadcrumb"]');
     const childRow = root.querySelector('[data-task-uid="child-breadcrumb"]');
-    assert.equal(rootRow.querySelector('.rlb-today__breadcrumb'), null);
     assert.equal(
-        targetRow.querySelector('.rlb-today__breadcrumb')?.textContent,
-        '[[Project Page]] #[[Area]]'
+        contextualRootRow.querySelector('.rlb-today__breadcrumb')?.textContent,
+        'Project context'
     );
-    const childBreadcrumb = childRow.querySelector('.rlb-today__breadcrumb');
-    assert.deepEqual(
-        [...childBreadcrumb.querySelectorAll('.rlb-context-breadcrumb__segment')].map(node => node.textContent),
-        ['[[Project Page]] #[[Area]]', '[[Referenced Page]] #[[Subtask]]']
-    );
-    assert.equal(childBreadcrumb.querySelector('.rlb-context-breadcrumb__separator')?.textContent, '›');
+    assert.equal(rootRow.querySelector('.rlb-today__breadcrumb'), null);
+    assert.equal(targetRow.querySelector('.rlb-today__breadcrumb'), null);
+    assert.equal(childRow.querySelector('.rlb-today__breadcrumb'), null);
     const title = childRow.querySelector('.rlb-today__title');
     assert.equal(title?.textContent, 'Child');
     assert.equal(title?.getAttribute('aria-label'), 'Open this block: Child');
@@ -254,10 +260,8 @@ test('Today breadcrumbs render on every row with formatted physical reference pa
         }
     );
     const collapsedTargetRow = root.querySelector('[data-task-uid="target-breadcrumb"]');
-    const collapsedBreadcrumb = collapsedTargetRow.querySelector('.rlb-today__breadcrumb');
     assert.equal(collapsedTargetRow.getAttribute('aria-expanded'), 'false');
-    assert.equal(collapsedBreadcrumb?.textContent, '[[Project Page]] #[[Area]]');
-    assert.equal(collapsedBreadcrumb?.getAttribute('aria-hidden'), null);
+    assert.equal(collapsedTargetRow.querySelector('.rlb-today__breadcrumb'), null);
 
     unmount(dom);
 });
