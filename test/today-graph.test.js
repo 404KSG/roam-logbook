@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { readTodayTodoSnapshot } from '../src/roam.js';
+import { buildTodayTodoTree } from '../src/today-todos.js';
 import { installGraph, uninstallGraph } from './helpers/graph-stub.js';
 
 test.afterEach(() => uninstallGraph());
@@ -48,7 +49,200 @@ test('Today read follows only a bounded page-anchored tree and resolves bare ref
     assert.equal(result.referenceStrings['target-1'], '{{[[TODO]]}} Referenced');
     assert.equal(result.roots[0].children[0].string, '((target-1))');
     assert.equal(graph.pullCount(), 0, 'Today reads the Daily Notes page in one query, not one Pull per node');
-    assert.ok(graph.fastQueryCount() <= 2, 'Today uses one page-tree query plus at most one finite reference query');
+    assert.ok(
+        graph.fastQueryCount() <= 3,
+        'Today uses one page-tree query, one reverse-reference query, plus at most one finite reference query'
+    );
+});
+
+test('Today includes unfinished TODO blocks that directly reference the Daily Note page', () => {
+    const graph = installGraph([
+        {
+            uid: 'daily-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Daily task',
+        },
+        {
+            uid: 'external-todo',
+            page: 'Project Page',
+            parent: null,
+            order: 0,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} External task [[August 19th, 2026]]',
+        },
+        {
+            uid: 'external-done',
+            page: 'Project Page',
+            parent: null,
+            order: 1,
+            refs: ['August 19th, 2026'],
+            string: '{{[[DONE]]}} Already finished [[August 19th, 2026]]',
+        },
+        {
+            uid: 'external-plain',
+            page: 'Project Page',
+            parent: null,
+            order: 2,
+            refs: ['August 19th, 2026'],
+            string: 'A note about [[August 19th, 2026]]',
+        },
+    ]);
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.roots.map(root => root.uid), ['daily-root', 'external-todo']);
+    assert.equal(graph.fastQueryCount(), 2, 'one Daily Note query plus one indexed reverse-reference query');
+});
+
+test('Today de-duplicates an external TODO already represented by a Daily Note bare reference', () => {
+    installGraph([
+        {
+            uid: 'daily-context',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: 'Daily context',
+        },
+        {
+            uid: 'daily-mirror',
+            page: 'August 19th, 2026',
+            parent: 'daily-context',
+            order: 0,
+            string: '((external-duplicate))',
+        },
+        {
+            uid: 'external-duplicate',
+            page: 'Project Page',
+            parent: null,
+            order: 0,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} Referenced from both paths [[August 19th, 2026]]',
+        },
+    ]);
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+    const model = buildTodayTodoTree(result.roots, {
+        referenceStrings: result.referenceStrings,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.roots.some(root => root.uid === 'external-duplicate'), false);
+    assert.equal(model.nodes.filter(node => node.uid === 'external-duplicate').length, 1);
+});
+
+test('Today shows reverse-referenced TODOs when the Daily Note has no blocks', () => {
+    installGraph(
+        [
+            {
+                uid: 'external-empty-page',
+                page: 'Project Page',
+                parent: null,
+                order: 0,
+                refs: ['August 19th, 2026'],
+                string: '{{[[TODO]]}} External task on an empty Daily Note [[August 19th, 2026]]',
+            },
+        ],
+        ['August 19th, 2026']
+    );
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'success');
+    assert.deepEqual(result.roots.map(root => root.uid), ['external-empty-page']);
+});
+
+test('Today keeps an existing page without tasks or external references empty', () => {
+    installGraph([], ['August 19th, 2026']);
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'empty');
+    assert.deepEqual(result.roots, []);
+});
+
+test('Today appends external TODO roots in deterministic page/order/UID order', () => {
+    installGraph([
+        {
+            uid: 'daily-order-root',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Daily root',
+        },
+        {
+            uid: 'external-zeta',
+            page: 'Zeta Project',
+            parent: null,
+            order: 0,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} Zeta task [[August 19th, 2026]]',
+        },
+        {
+            uid: 'external-alpha-late',
+            page: 'Alpha Project',
+            parent: null,
+            order: 2,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} Alpha late [[August 19th, 2026]]',
+        },
+        {
+            uid: 'external-alpha-early',
+            page: 'Alpha Project',
+            parent: null,
+            order: 1,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} Alpha early [[August 19th, 2026]]',
+        },
+    ]);
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.roots.map(root => root.uid), [
+        'daily-order-root',
+        'external-alpha-early',
+        'external-alpha-late',
+        'external-zeta',
+    ]);
+});
+
+test('Today preserves error state when the reverse-reference query fails', () => {
+    const graph = installGraph([
+        {
+            uid: 'daily-before-reference-failure',
+            page: 'August 19th, 2026',
+            parent: null,
+            order: 0,
+            string: '{{[[TODO]]}} Daily task',
+        },
+        {
+            uid: 'external-reference-failure',
+            page: 'Project Page',
+            parent: null,
+            order: 0,
+            refs: ['August 19th, 2026'],
+            string: '{{[[TODO]]}} External task [[August 19th, 2026]]',
+        },
+    ]);
+    const originalQuery = graph.api.data.q;
+    graph.api.data.q = (datalog, ...args) => {
+        if (datalog.includes('[?block :block/refs ?page]')) {
+            throw new Error('reverse reference query unavailable');
+        }
+        return originalQuery(datalog, ...args);
+    };
+
+    const result = readTodayTodoSnapshot(new Date('2026-08-19T10:00:00'));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'error');
+    assert.equal(result.roots, null);
+    assert.equal(result.error.issue.source, 'today-page-reference');
 });
 
 test('Today projection keeps task/reference seeds and required ancestors only', () => {
@@ -214,7 +408,10 @@ test('Today projection keeps task/reference seeds and required ancestors only', 
     ]);
     assert.equal(result.referenceStrings['projection-target'], '{{[[TODO]]}} Referenced task');
     assert.equal(graph.pullCount(), 0);
-    assert.ok(graph.fastQueryCount() <= 2, 'projection keeps one page query plus at most one reference query');
+    assert.ok(
+        graph.fastQueryCount() <= 3,
+        'projection keeps one page query, one reverse-reference query, plus at most one reference query'
+    );
 });
 
 test('Today read accepts a legal 509-block page with maximum depth 9', () => {

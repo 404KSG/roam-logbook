@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.63 — 2026-08-21
+
+### Today date back-references
+
+- Adds unfinished TODO blocks from anywhere in the graph when the task block
+  directly references today's Roam Daily Notes page.
+- Uses one exact, indexed reverse-reference query after the existing Daily Note
+  tree read; it performs no full-graph string scan and no per-task reads.
+- Appends external tasks after the physical Daily Note tree in deterministic
+  page/order/UID order, while de-duplicating tasks already present directly or
+  through a bare block reference.
+- Preserves the existing cached last-good Today snapshot on uncertain reads and
+  keeps an existing empty Daily Note correctly empty when it has no matching
+  external TODOs.
+- Adds graph, ordering, de-duplication, empty-state, failure, and lifecycle
+  regression coverage, including the fixed query-count boundary.
+
+No graph format, CLOCK semantics, settings, listeners, or stored data changed.
+
 ## 0.9.0-beta.62 — 2026-08-20
 
 ### Adaptive Activity density

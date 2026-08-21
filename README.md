@@ -154,8 +154,11 @@ The Top Bar and TODO-only Clock In rule are now core behavior rather than option
 The Active Threads popover has two views: **Threads N** keeps the current
 Timing Line and 45-minute return set, while **Today N** is a separate task
 pool containing unfinished TODOs from today's Roam Daily Notes page. Today
-does not add Sessions, timing, dashboard totals, or Pomodoro state. It loads
-after the Threads view paints and remains cached while the popover is open.
+also appends unfinished TODO blocks elsewhere in the graph when the task block
+directly references today's Daily Notes page. It de-duplicates tasks already
+present directly or through a bare block reference. Today does not add Sessions,
+timing, dashboard totals, or Pomodoro state. It loads after the Threads view paints
+and remains cached while the popover is open.
 Entering Today revalidates only when its successful snapshot is older than 30
 seconds. A compact inline Retry reloads both views after an error; there is no
 permanent header Refresh.

@@ -9,7 +9,7 @@
 
 let nextUid = 0;
 
-export function installGraph(blocks = []) {
+export function installGraph(blocks = [], pages = []) {
     nextUid = 0;
     const store = new Map();
     const pageUids = new Map();
@@ -29,9 +29,16 @@ export function installGraph(blocks = []) {
             order: blockOrder,
             open: block.open === undefined ? true : block.open,
             page: block.page === undefined ? 'Test Page' : block.page,
+            refs: Array.isArray(block.refs) ? [...block.refs] : [],
         });
         nextOrderByParent.set(parent, Math.max(nextOrder, blockOrder + 1));
         if (!pageUids.has(block.page)) pageUids.set(block.page, `page-${pageUids.size + 1}`);
+    }
+
+    for (const page of pages) {
+        if (typeof page === 'string' && !pageUids.has(page)) {
+            pageUids.set(page, `page-${pageUids.size + 1}`);
+        }
     }
 
     const childrenOf = uid => {
@@ -110,6 +117,17 @@ export function installGraph(blocks = []) {
             const title = args[0];
             const pageUid = pageUids.get(title);
             return pageUid ? [[pageUid]] : [];
+        }
+        if (
+            datalog.includes(':find ?uid ?string ?source-page-title ?order') &&
+            datalog.includes('[?block :block/refs ?page]')
+        ) {
+            const pageTitle = args[0];
+            const pageUid = pageUids.get(pageTitle);
+            if (!pageUid) return [];
+            return [...store.values()]
+                .filter(block => block.refs.includes(pageTitle) || block.refs.includes(pageUid))
+                .map(block => [block.uid, block.string, block.page, block.order]);
         }
         if (
             datalog.includes(':find ?clock-uid ?clock-string') &&
@@ -208,6 +226,7 @@ export function installGraph(blocks = []) {
                         order: requestedOrder,
                         open: block.open === undefined ? true : block.open,
                         page: store.get(location['parent-uid'])?.page ?? 'Test Page',
+                        refs: [],
                     });
                 },
                 update: async ({ block }) => {

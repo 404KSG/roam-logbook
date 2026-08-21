@@ -867,6 +867,16 @@ var REFERENCED_BLOCK_STRINGS_QUERY = `[:find ?uid ?string
   :where
   [?b :block/uid ?uid]
   [?b :block/string ?string]]`;
+var TODAY_PAGE_REFERENCED_BLOCKS_QUERY = `[:find ?uid ?string ?source-page-title ?order
+  :in $ ?page-title
+  :where
+  [?page :node/title ?page-title]
+  [?block :block/refs ?page]
+  [?block :block/uid ?uid]
+  [?block :block/string ?string]
+  [?block :block/order ?order]
+  [?block :block/page ?source-page]
+  [?source-page :node/title ?source-page-title]]`;
 var DAILY_NOTE_READ_LIMITS = Object.freeze({
   maxDepth: 24,
   // A post-query node cap does not reduce the query's work. Callers may
@@ -892,6 +902,69 @@ var readReferencedBlockStrings = (uids) => {
     (row) => row.length >= 2 && typeof row[0] === "string" && typeof row[1] === "string"
   );
   return Object.fromEntries(rows.map(([uid, string]) => [uid, string]));
+};
+var readTodayPageReferencedBlocks = (pageTitle) => {
+  const rows = validateQueryRows(
+    queryOrThrow(TODAY_PAGE_REFERENCED_BLOCKS_QUERY, pageTitle),
+    "today Daily Note references",
+    (row) => row.length >= 4 && typeof row[0] === "string" && row[0].length > 0 && typeof row[1] === "string" && typeof row[2] === "string" && row[2].length > 0 && Number.isFinite(row[3])
+  );
+  return rows.map(([uid, string, sourcePageTitle, order]) => ({
+    uid,
+    string,
+    sourcePageTitle,
+    order
+  }));
+};
+var collectRepresentedTaskUids = (roots) => {
+  const represented = /* @__PURE__ */ new Set();
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (taskStatus(node?.string) === "TODO" && typeof node.uid === "string") {
+        represented.add(node.uid);
+      }
+      const referenceUid = referencedBlockUid(node?.string);
+      if (referenceUid)
+        represented.add(referenceUid);
+      walk(node?.children);
+    }
+  };
+  walk(roots);
+  return represented;
+};
+var compareExternalTodayBlocks = (left, right) => {
+  if (left.sourcePageTitle < right.sourcePageTitle)
+    return -1;
+  if (left.sourcePageTitle > right.sourcePageTitle)
+    return 1;
+  if (left.order !== right.order)
+    return left.order - right.order;
+  if (left.uid < right.uid)
+    return -1;
+  if (left.uid > right.uid)
+    return 1;
+  return 0;
+};
+var appendTodayPageReferencedBlocks = (roots, pageBlocks) => {
+  const represented = collectRepresentedTaskUids(roots);
+  const externalRoots = [];
+  const orderedBlocks = pageBlocks.filter((block) => taskStatus(block.string) === "TODO").slice().sort(compareExternalTodayBlocks);
+  const lastRootOrder = roots.reduce(
+    (maximum, root) => Number.isFinite(root?.order) ? Math.max(maximum, root.order) : maximum,
+    -1
+  );
+  for (const block of orderedBlocks) {
+    if (represented.has(block.uid))
+      continue;
+    represented.add(block.uid);
+    externalRoots.push({
+      uid: block.uid,
+      string: block.string,
+      order: lastRootOrder + externalRoots.length + 1,
+      children: []
+    });
+  }
+  return [...roots, ...externalRoots];
 };
 function readDailyNoteTree(pageTitle, {
   maxDepth = DAILY_NOTE_READ_LIMITS.maxDepth,
@@ -1026,12 +1099,32 @@ function readTodayTodoSnapshot(date = /* @__PURE__ */ new Date(), limits = {}) {
       error: result.error
     };
   }
+  let roots;
+  try {
+    roots = appendTodayPageReferencedBlocks(
+      result.roots,
+      readTodayPageReferencedBlocks(pageTitle)
+    );
+  } catch (error) {
+    const wrapped = withGraphReadIssue(error, {
+      source: "today-page-reference"
+    });
+    return {
+      ok: false,
+      status: "error",
+      pageTitle,
+      pageUid: result.pageUid || null,
+      roots: null,
+      referenceStrings: null,
+      error: wrapped
+    };
+  }
   return {
     ok: true,
-    status: result.pageUid && result.roots.length > 0 ? "success" : "empty",
+    status: roots.length > 0 ? "success" : "empty",
     pageTitle,
     pageUid: result.pageUid,
-    roots: result.roots,
+    roots,
     referenceStrings: result.referenceStrings || {},
     error: null
   };
@@ -5301,7 +5394,7 @@ function createDashboard({
 }
 
 // src/version.js
-var PLUGIN_VERSION = "0.9.0-beta.62";
+var PLUGIN_VERSION = "0.9.0-beta.63";
 var STATE_FORMATS = Object.freeze({
   pomodoroTargets: 1,
   pomodoroCycle: 1,
